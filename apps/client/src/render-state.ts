@@ -76,22 +76,97 @@ const PROJECTILE_WEAPON_TYPES: readonly WeaponTypeId[] = ["autocannon", "torpedo
 // size of an individual craft so distant squads collapse before their full
 // formation becomes more expensive than the pixels it occupies.
 const LOD_RADIUS_SCALE: Readonly<Partial<Record<ShipClass, number>>> = { fighter: 0.38 };
+const CAPITAL_SHIP_CLASSES: ReadonlySet<ShipClass> = new Set(["cruiser", "carrier", "battleship"]);
+const DOGFIGHT_GRID_SIZE = 40;
 
-const TURRET_LOCAL_HEIGHT: Readonly<Record<ShipClass, number>> = {
-  fighter: 2.8,
-  fabricator: 7.6,
-  frigate: 9.3,
-  bomber: 6.4,
-  flakFrigate: 10.1,
-  torpedoFrigate: 9.8,
-  destroyer: 9.4,
-  cruiser: 7.8,
-  carrier: 9.1,
-  battleship: 12.4,
-};
+function dogfightGridKey(cellX: number, cellZ: number): string {
+  return `${cellX}:${cellZ}`;
+}
 
-export function turretVisualHeight(shipClass: ShipClass): number {
-  return TURRET_LOCAL_HEIGHT[shipClass];
+function smallCraftCapitalPassOffset(
+  ship: ShipState,
+  x: number,
+  z: number,
+  capitalShips: readonly ShipState[],
+): number {
+  if (ship.class !== "fighter" && ship.class !== "bomber") return 0;
+  let strongestOffset = 0;
+  for (const capital of capitalShips) {
+    if (capital.id === ship.id) continue;
+    const passRadius = SHIPS[capital.class].radius + SHIPS[ship.class].radius * 0.72;
+    const distance = Math.hypot(x - capital.x, z - capital.z);
+    if (distance >= passRadius) continue;
+    const overlap = 1 - distance / passRadius;
+    const eased = overlap * overlap * (3 - 2 * overlap);
+    const direction = (ship.id + capital.id) % 2 === 0 ? 1 : -1;
+    const clearance = SHIPS[capital.class].radius * 0.72 + (ship.class === "bomber" ? 10 : 7);
+    const offset = direction * eased * clearance;
+    if (Math.abs(offset) > Math.abs(strongestOffset)) strongestOffset = offset;
+  }
+  return strongestOffset;
+}
+
+function smallCraftDogfightPose(
+  ship: ShipState,
+  x: number,
+  z: number,
+  smallCraftGrid: ReadonlyMap<string, readonly ShipState[]>,
+): { altitude: number; bank: number } {
+  if (ship.class !== "fighter" && ship.class !== "bomber") return { altitude: 0, bank: 0 };
+  let strongest = 0;
+  const cellX = Math.floor(x / DOGFIGHT_GRID_SIZE);
+  const cellZ = Math.floor(z / DOGFIGHT_GRID_SIZE);
+  for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+    for (let offsetZ = -1; offsetZ <= 1; offsetZ += 1) {
+      const nearby = smallCraftGrid.get(dogfightGridKey(cellX + offsetX, cellZ + offsetZ)) ?? [];
+      for (const opponent of nearby) {
+        if (opponent.id === ship.id || opponent.teamId === ship.teamId) continue;
+        const passRadius = (SHIPS[ship.class].radius + SHIPS[opponent.class].radius) * 1.35;
+        const distance = Math.hypot(x - opponent.x, z - opponent.z);
+        if (distance >= passRadius) continue;
+        const overlap = 1 - distance / passRadius;
+        const eased = overlap * overlap * (3 - 2 * overlap);
+        const direction = ship.id < opponent.id ? 1 : -1;
+        const clearance = ship.class === "bomber" ? 16 : 12;
+        const offset = direction * eased * clearance;
+        if (Math.abs(offset) > Math.abs(strongest)) strongest = offset;
+      }
+    }
+  }
+  return {
+    altitude: strongest,
+    bank: Math.sign(strongest) * Math.min(0.24, Math.abs(strongest) * 0.02),
+  };
+}
+
+/**
+ * Returns the top of the deck beneath a hardpoint. Capital hulls have several
+ * stepped surfaces, so a single class-wide height leaves their outer weapons
+ * visibly suspended above the armor.
+ */
+export function turretVisualHeight(
+  shipClass: ShipClass,
+  localX = 0,
+  localZ = 0,
+  weaponTypeId?: WeaponTypeId,
+): number {
+  switch (shipClass) {
+    case "fighter": return 1.55;
+    case "fabricator": return 4.05;
+    case "bomber": return 2.8;
+    case "frigate": return localZ > 4 ? 6.45 : 3.5;
+    case "flakFrigate": return localZ >= 3 ? 6.7 : 3.6;
+    case "torpedoFrigate": return localZ >= 0 ? 6.75 : 5.55;
+    case "destroyer": return 7.5;
+    case "cruiser":
+      if (localZ >= 8) return 7.55;
+      if (Math.abs(localX) <= 9 && localZ < 0) return 8.15;
+      return 4.98;
+    case "carrier": return 7.05;
+    case "battleship":
+      if (weaponTypeId === "beam") return 14.35;
+      return localZ > 28 ? 5.48 : 10.95;
+  }
 }
 
 export class InterpolatedRenderState {
@@ -181,14 +256,29 @@ export class RenderStateBuilder {
     this.lastUpdateAt = now;
     camera.updateMatrixWorld();
     const focalPixels = viewportHeight / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
+    const capitalShips = source.ships.filter((ship) => CAPITAL_SHIP_CLASSES.has(ship.class));
+    const smallCraftShips = source.ships.filter((ship) => ship.class === "fighter" || ship.class === "bomber");
+    const smallCraftGrid = new Map<string, ShipState[]>();
+    for (const ship of smallCraftShips) {
+      const key = dogfightGridKey(
+        Math.floor(ship.x / DOGFIGHT_GRID_SIZE),
+        Math.floor(ship.z / DOGFIGHT_GRID_SIZE),
+      );
+      const cell = smallCraftGrid.get(key);
+      if (cell) cell.push(ship);
+      else smallCraftGrid.set(key, [ship]);
+    }
 
     for (const ship of source.ships) {
       if (this.state.shipCount >= MAX_RENDER_SHIPS) break;
       this.state.metrics.simulatedTurrets += ship.turrets.length;
       const previous = previousTransforms.get(ship.id);
       const x = THREE.MathUtils.lerp(previous?.x ?? ship.x, ship.x, alpha);
-      const y = THREE.MathUtils.lerp(previous?.y ?? ship.y, ship.y, alpha);
       const z = THREE.MathUtils.lerp(previous?.z ?? ship.z, ship.z, alpha);
+      const dogfight = smallCraftDogfightPose(ship, x, z, smallCraftGrid);
+      const y = THREE.MathUtils.lerp(previous?.y ?? ship.y, ship.y, alpha)
+        + smallCraftCapitalPassOffset(ship, x, z, capitalShips)
+        + dogfight.altitude;
       this.projected.set(x, y, z).project(camera);
       if (this.projected.z < -1.15 || this.projected.z > 1.15 || Math.abs(this.projected.x) > 1.25 || Math.abs(this.projected.y) > 1.25) {
         this.lodByEntity.set(ship.id, VisualLod.Culled);
@@ -213,9 +303,9 @@ export class RenderStateBuilder {
       this.state.shipPosition[positionIndex + 2] = z;
       this.state.shipYaw[index] = interpolatedYaw;
       this.state.shipBank[index] = ship.class === "fighter"
-        ? THREE.MathUtils.clamp(-turnVelocity * 0.1, -0.62, 0.62)
+        ? THREE.MathUtils.clamp(-turnVelocity * 0.1 + dogfight.bank, -0.72, 0.72)
         : ship.class === "bomber"
-          ? THREE.MathUtils.clamp(-turnVelocity * 0.055, -0.32, 0.32)
+          ? THREE.MathUtils.clamp(-turnVelocity * 0.055 + dogfight.bank * 0.72, -0.42, 0.42)
           : THREE.MathUtils.clamp(-turnVelocity * 0.025, -0.14, 0.14);
       this.state.shipHealth[index] = Math.max(0, ship.health / SHIPS[ship.class].maxHealth);
       this.state.shipShield[index] = SHIPS[ship.class].maxShield > 0 ? Math.max(0, ship.shields / SHIPS[ship.class].maxShield) : 0;
@@ -272,7 +362,6 @@ export class RenderStateBuilder {
     delta: number,
   ): void {
     const updateInterval = lod === VisualLod.Close ? 0 : lod === VisualLod.Medium ? 42 : 70;
-    const localY = turretVisualHeight(ship.class);
     for (const turret of ship.turrets) {
       if (this.state.turretCount >= MAX_RENDER_TURRETS) return;
       const interpolated = previous
@@ -293,7 +382,12 @@ export class RenderStateBuilder {
       this.state.turretOwner[index] = ownerIndex;
       this.state.turretType[index] = WEAPON_TO_ID[turret.weaponTypeId];
       this.state.turretLocalX[index] = turret.localX;
-      this.state.turretLocalY[index] = localY;
+      this.state.turretLocalY[index] = turretVisualHeight(
+        ship.class,
+        turret.localX,
+        turret.localZ,
+        turret.weaponTypeId,
+      );
       this.state.turretLocalZ[index] = turret.localZ;
       this.state.turretYaw[index] = visualYaw;
       this.state.turretColor[index] = this.state.shipColor[ownerIndex]!;

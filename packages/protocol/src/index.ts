@@ -5,6 +5,8 @@ import type {
   ShipClass,
   StructureType,
   TeamViewState,
+  AiDifficulty,
+  AiPersonality,
 } from "@space-rts/game-core";
 
 // Wire allowlists intentionally live at the protocol boundary. The exhaustive
@@ -40,12 +42,14 @@ export type MapPreset = "orbital-ring" | "crossfire" | "open-expanse";
 export type MapSize = "small" | "medium" | "large";
 export type StartingResources = "low" | "standard" | "high";
 export type ResourceDensity = "scarce" | "standard" | "rich";
+export type TeamSpawnMode = "together" | "interleaved" | "random";
 
 export interface LobbySettings {
   mapPreset: MapPreset;
   mapSize: MapSize;
   startingResources: StartingResources;
   resourceDensity: ResourceDensity;
+  teamSpawnMode: TeamSpawnMode;
 }
 
 export const DEFAULT_LOBBY_SETTINGS: Readonly<LobbySettings> = {
@@ -53,6 +57,7 @@ export const DEFAULT_LOBBY_SETTINGS: Readonly<LobbySettings> = {
   mapSize: "medium",
   startingResources: "standard",
   resourceDensity: "standard",
+  teamSpawnMode: "together",
 };
 
 export interface LobbyPlayerSlot {
@@ -65,6 +70,8 @@ export interface LobbyPlayerSlot {
   connected: boolean;
   isHost: boolean;
   isAi: boolean;
+  aiDifficulty?: AiDifficulty;
+  aiPersonality?: AiPersonality;
 }
 
 export interface LobbyState {
@@ -86,7 +93,8 @@ export type ClientMessage =
   | { type: "set_team"; teamId: number; playerId?: string }
   | { type: "set_mode"; mode: MatchMode }
   | { type: "set_settings"; settings: LobbySettings }
-  | { type: "add_ai"; name?: string; teamId?: number }
+  | { type: "add_ai"; name?: string; teamId?: number; difficulty?: AiDifficulty; personality?: AiPersonality }
+  | { type: "set_ai_settings"; playerId: string; difficulty: AiDifficulty; personality: AiPersonality }
   | { type: "remove_slot"; playerId: string }
   | { type: "authorize_spectator"; teamId: number }
   | { type: "start_match" }
@@ -153,7 +161,9 @@ function isLobbyPlayerSlot(value: unknown): value is LobbyPlayerSlot {
     && typeof value.ready === "boolean"
     && typeof value.connected === "boolean"
     && typeof value.isHost === "boolean"
-    && typeof value.isAi === "boolean";
+    && typeof value.isAi === "boolean"
+    && (!value.isAi || (["easy", "normal", "hard"].includes(String(value.aiDifficulty))
+      && ["balanced", "aggressive", "turtle", "economic"].includes(String(value.aiPersonality))));
 }
 
 function isLobbySettings(value: unknown): value is LobbySettings {
@@ -161,7 +171,8 @@ function isLobbySettings(value: unknown): value is LobbySettings {
     && ["orbital-ring", "crossfire", "open-expanse"].includes(String(value.mapPreset))
     && ["small", "medium", "large"].includes(String(value.mapSize))
     && ["low", "standard", "high"].includes(String(value.startingResources))
-    && ["scarce", "standard", "rich"].includes(String(value.resourceDensity));
+    && ["scarce", "standard", "rich"].includes(String(value.resourceDensity))
+    && ["together", "interleaved", "random"].includes(String(value.teamSpawnMode));
 }
 
 function isLobbyState(value: unknown): value is LobbyState {
@@ -206,6 +217,7 @@ function isProjectedViewState(value: unknown): value is ProjectedViewState {
     && !("nextQueueItemId" in value)
     && !("commandQueue" in value)
     && !("aiPlayerIds" in value)
+    && !("aiCommanders" in value)
     && !("visibility" in value);
 }
 
@@ -240,10 +252,10 @@ function isGameCommand(value: unknown): value is GameCommand {
     || !isInteger(value.sequence) || value.sequence < 1
     || !isInteger(value.requestedTick) || value.requestedTick < 1) return false;
 
-  if (["move", "attackMove", "stop", "hold", "focusFire"].includes(value.type)) {
+  if (["move", "attackMove", "patrol", "stop", "hold", "focusFire"].includes(value.type)) {
     if (!Array.isArray(value.unitIds) || value.unitIds.length > 512 || !value.unitIds.every((id) => isInteger(id) && id > 0)
       || typeof value.queued !== "boolean") return false;
-    if (value.type === "move" || value.type === "attackMove") {
+    if (value.type === "move" || value.type === "attackMove" || value.type === "patrol") {
       return isVec2(value.destination) && (value.formationEnd === undefined || isVec2(value.formationEnd));
     }
     if (value.type === "focusFire") return isInteger(value.targetEntityId) && value.targetEntityId > 0;
@@ -317,6 +329,13 @@ export function parseClientMessage(raw: string): ClientMessage | null {
     case "add_ai":
       return (value.name === undefined || isString(value.name, 32))
         && (value.teamId === undefined || (isInteger(value.teamId) && value.teamId >= 1 && value.teamId <= MAX_PLAYERS))
+        && (value.difficulty === undefined || ["easy", "normal", "hard"].includes(String(value.difficulty)))
+        && (value.personality === undefined || ["balanced", "aggressive", "turtle", "economic"].includes(String(value.personality)))
+        ? value as ClientMessage : null;
+    case "set_ai_settings":
+      return isString(value.playerId, 80)
+        && ["easy", "normal", "hard"].includes(String(value.difficulty))
+        && ["balanced", "aggressive", "turtle", "economic"].includes(String(value.personality))
         ? value as ClientMessage : null;
     case "remove_slot":
       return isString(value.playerId, 80) ? value as ClientMessage : null;

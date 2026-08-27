@@ -61,10 +61,15 @@ export function calculateChecksum(state: SimulationState): number {
     hash = hashUint(hash, quantize(ship.shields));
     hash = hashUint(hash, ship.focusTargetEntityId ?? 0);
     for (const order of ship.orders) {
-      hash = hashUint(hash, order.type === "move" ? 1 : order.type === "attackMove" ? 2 : 3);
+      hash = hashUint(hash, order.type === "move" ? 1 : order.type === "attackMove" ? 2 : order.type === "hold" ? 3 : 4);
       hash = hashUint(hash, quantize(order.destination.x));
       hash = hashUint(hash, quantize(order.destination.z));
       hash = hashUint(hash, quantize(order.facing));
+      if (order.type === "patrol" && order.patrolOrigin) {
+        hash = hashUint(hash, 1);
+        hash = hashUint(hash, quantize(order.patrolOrigin.x));
+        hash = hashUint(hash, quantize(order.patrolOrigin.z));
+      }
     }
     for (const turret of ship.turrets) {
       hash = hashUint(hash, turret.id);
@@ -143,7 +148,7 @@ export function calculateChecksum(state: SimulationState): number {
     if ("queued" in command) hash = hashUint(hash, command.queued ? 1 : 0);
     if ("unitIds" in command) {
       for (const unitId of command.unitIds) hash = hashUint(hash, unitId);
-      if (command.type === "move" || command.type === "attackMove") {
+      if (command.type === "move" || command.type === "attackMove" || command.type === "patrol") {
         hash = hashUint(hash, quantize(command.destination.x));
         hash = hashUint(hash, quantize(command.destination.z));
         if (command.formationEnd) {
@@ -177,6 +182,11 @@ export function calculateChecksum(state: SimulationState): number {
       }
     }
   }
-  for (const playerId of state.aiPlayerIds) hash = hashString(hash, playerId);
+  for (const playerId of state.aiPlayerIds) {
+    hash = hashString(hash, playerId);
+    const commander = state.aiCommanders?.[playerId];
+    hash = hashString(hash, commander?.difficulty ?? "normal");
+    hash = hashString(hash, commander?.personality ?? "balanced");
+  }
   return hash >>> 0;
 }

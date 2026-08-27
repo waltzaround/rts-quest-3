@@ -18,6 +18,7 @@ import {
   ReplayPlayer,
   computeFormationAssignments,
   createCombatScenario,
+  createMenuBattleScenario,
   createShowcaseScenario,
   getTurretMuzzleWorldPosition,
   getTurretWorldPosition,
@@ -378,12 +379,12 @@ const formationSlotMeshes: THREE.Mesh[] = [];
 const rallyPointMeshes: THREE.Mesh[] = [];
 const commandMarkers: Array<{ mesh: THREE.Mesh; bornAt: number }> = [];
 let commandSequence = 0;
-let pendingCommandMode: "move" | "attackMove" | "focusFire" | null = null;
+let pendingCommandMode: "move" | "attackMove" | "patrol" | "focusFire" | null = null;
 let pendingStructureType: BuildableStructureType | null = null;
 let pendingRallyPoint = false;
 let selectionDrag: { startX: number; startY: number; currentX: number; currentY: number; shift: boolean } | null = null;
 let commandDrag: {
-  type: "move" | "attackMove";
+  type: "move" | "attackMove" | "patrol";
   button: number;
   startX: number;
   startY: number;
@@ -401,7 +402,9 @@ const authorityUrl = import.meta.env.VITE_AUTHORITY_URL as string | undefined
 let networkSocket: WebSocket | null = null;
 let networkMode = false;
 let landingLobbyActive = true;
+let networkPanelOpenedFromGame = false;
 let demoMode = false;
+let menuBattleMode = false;
 let networkView: ProjectedViewState | null = null;
 let networkViewReceivedAt = 0;
 let networkLobby: LobbyState | null = null;
@@ -1233,15 +1236,19 @@ function connectToMatch(matchId: string, pilotName: string, role: RequestedNetwo
   }
   window.clearTimeout(reconnectTimer);
   demoMode = false;
+  menuBattleMode = false;
   networkMatchId = normalizedMatchId;
   networkPilotName = normalizedName;
   requestedNetworkRole = role;
   localStorage.setItem("voidfront:pilot-name", normalizedName);
   networkMode = true;
   landingLobbyActive = false;
+  element("network-overlay").classList.remove("start-screen-active");
+  element("app").classList.remove("start-screen-active");
   manuallyClosed = false;
   showNetworkError("");
   setConnectionState("CONNECTING", `${normalizedMatchId} // LINKING`, "connecting");
+  element("start-view").classList.add("hidden");
   element("network-join-view").classList.add("hidden");
   element("network-lobby-view").classList.remove("hidden");
   element("lobby-match-code").textContent = normalizedMatchId.toUpperCase();
@@ -1505,17 +1512,24 @@ function renderLobby(): void {
     const teamControl = networkLobby!.mode === "ffa"
       ? `<em>SIDE ${slot.slotIndex + 1}</em>`
       : `<select class="slot-team-select" data-team-player="${escapeHtml(slot.playerId)}" aria-label="Team for ${escapeHtml(slot.name)}" ${canAssignTeam ? "" : "disabled"}>${Array.from({ length: 8 }, (_, index) => `<option value="${index + 1}" ${slot.teamId === index + 1 ? "selected" : ""}>TEAM ${index + 1}</option>`).join("")}</select>`;
+    const aiDescription = slot.isAi
+      ? `${(slot.aiDifficulty ?? "normal").toUpperCase()} · ${(slot.aiPersonality ?? "balanced").toUpperCase()}`
+      : slot.connected ? "HUMAN · CONNECTED" : "HUMAN · RECONNECTING";
+    const commanderDetail = slot.isAi && localSlot?.isHost && networkLobby!.phase === "lobby"
+      ? `<small class="ai-slot-settings"><select data-ai-difficulty="${escapeHtml(slot.playerId)}" aria-label="Difficulty for ${escapeHtml(slot.name)}"><option value="easy" ${slot.aiDifficulty === "easy" ? "selected" : ""}>EASY</option><option value="normal" ${!slot.aiDifficulty || slot.aiDifficulty === "normal" ? "selected" : ""}>NORMAL</option><option value="hard" ${slot.aiDifficulty === "hard" ? "selected" : ""}>HARD</option></select><select data-ai-personality="${escapeHtml(slot.playerId)}" aria-label="Doctrine for ${escapeHtml(slot.name)}"><option value="balanced" ${!slot.aiPersonality || slot.aiPersonality === "balanced" ? "selected" : ""}>BALANCED</option><option value="aggressive" ${slot.aiPersonality === "aggressive" ? "selected" : ""}>AGGRESSIVE</option><option value="turtle" ${slot.aiPersonality === "turtle" ? "selected" : ""}>TURTLE</option><option value="economic" ${slot.aiPersonality === "economic" ? "selected" : ""}>ECONOMIC</option></select></small>`
+      : `<small>${aiDescription}</small>`;
     return `
       <div class="lobby-slot ${slot.playerId === localPlayerId ? "local" : ""}">
         <i style="--slot-color:#${slot.color.toString(16).padStart(6, "0")}"></i>
-        <span><b>${escapeHtml(slot.name)}</b><small>${slot.isAi ? "COMPUTER · STANDARD" : slot.connected ? "HUMAN · CONNECTED" : "HUMAN · RECONNECTING"}</small></span>
+        <span><b>${escapeHtml(slot.name)}</b>${commanderDetail}</span>
+        <span class="slot-type">${slot.isAi ? "COMPUTER" : "HUMAN"}</span>
         ${teamControl}
         ${slot.isHost ? "<strong>HOST</strong>" : slot.ready ? "<strong>READY</strong>" : "<strong>NOT READY</strong>"}
         ${localSlot?.isHost && slot.isAi ? `<button data-remove-slot="${escapeHtml(slot.playerId)}" title="Remove AI">×</button>` : "<span class=\"slot-pad\"></span>"}
       </div>`;
   });
   const emptySlots = Array.from({ length: Math.max(0, mapCapacity - networkLobby.slots.length) }, (_, index) => `
-    <div class="lobby-slot empty"><i></i><span><b>OPEN SLOT</b><small>AWAITING COMMANDER</small></span><em>—</em><strong>OPEN</strong><span class="slot-pad"></span></div>
+    <div class="lobby-slot empty"><i></i><span><b>OPEN SLOT</b><small>AWAITING COMMANDER</small></span><span class="slot-type">OPEN</span><em>—</em><strong>OPEN</strong><span class="slot-pad"></span></div>
   `);
   element("lobby-slots").innerHTML = [...occupiedSlots, ...emptySlots].join("");
   element("mode-teams").classList.toggle("active", networkLobby.mode === "teams");
@@ -1532,13 +1546,19 @@ function renderLobby(): void {
     ["map-size", networkLobby.settings.mapSize],
     ["starting-resources", networkLobby.settings.startingResources],
     ["resource-density", networkLobby.settings.resourceDensity],
+    ["team-spawn-mode", networkLobby.settings.teamSpawnMode],
   ];
   for (const [id, value] of settingsControls) {
     const control = element<HTMLSelectElement>(id);
     control.value = value;
     control.disabled = !localSlot?.isHost || networkLobby.phase !== "lobby";
   }
-  element("map-description").textContent = `${MAP_DESCRIPTIONS[networkLobby.settings.mapPreset]} ${networkLobby.settings.mapSize.toUpperCase()} sectors support up to ${mapCapacity} commanders; ${networkLobby.settings.startingResources.toUpperCase()} starting reserves and ${networkLobby.settings.resourceDensity.toUpperCase()} deposits.`;
+  element("team-spawn-setting").classList.toggle("hidden", networkLobby.mode !== "teams");
+  const deploymentDescription = networkLobby.mode === "teams"
+    ? ` Team deployment: ${networkLobby.settings.teamSpawnMode === "together" ? "allies share adjacent sectors" : networkLobby.settings.teamSpawnMode === "interleaved" ? "teams alternate around the perimeter" : "commanders receive seeded random sectors"}.`
+    : "";
+  element("map-description").textContent = `${MAP_DESCRIPTIONS[networkLobby.settings.mapPreset]} ${networkLobby.settings.mapSize.toUpperCase()} sectors support up to ${mapCapacity} commanders; ${networkLobby.settings.startingResources.toUpperCase()} starting reserves and ${networkLobby.settings.resourceDensity.toUpperCase()} deposits.${deploymentDescription}`;
+  element("map-preview").className = `map-preview map-${networkLobby.settings.mapPreset}`;
   element<HTMLButtonElement>("add-ai").disabled = !localSlot?.isHost || networkLobby.slots.length >= Math.min(networkLobby.maxPlayers, mapCapacity);
   element<HTMLButtonElement>("authorize-spectator").disabled = !localSlot?.isHost || networkLobby.phase === "finished";
   element<HTMLSelectElement>("spectator-team-select").disabled = !localSlot?.isHost || networkLobby.phase === "finished";
@@ -1560,6 +1580,7 @@ function selectedLobbySettings(): LobbySettings {
     mapSize: element<HTMLSelectElement>("map-size").value as LobbySettings["mapSize"],
     startingResources: element<HTMLSelectElement>("starting-resources").value as LobbySettings["startingResources"],
     resourceDensity: element<HTMLSelectElement>("resource-density").value as LobbySettings["resourceDensity"],
+    teamSpawnMode: element<HTMLSelectElement>("team-spawn-mode").value as LobbySettings["teamSpawnMode"],
   };
 }
 
@@ -1617,25 +1638,66 @@ function leaveNetworkMatch(): void {
   networkSocket?.close(1000, "Left match");
   networkSocket = null;
   localPlayerId = "pilot-blue";
-  landingLobbyActive = true;
-  element("network-overlay").classList.add("visible");
-  element("network-join-view").classList.remove("hidden");
-  element("network-lobby-view").classList.add("hidden");
   const pageUrl = new URL(location.href);
   pageUrl.searchParams.delete("match");
   history.replaceState(null, "", pageUrl);
   setConnectionState("MULTIPLAYER", "LAN LOBBY", "online");
   element("spectator-grant").classList.add("hidden");
   setClientViewMode("player");
-  resetSimulation();
+  showStartScreen(true);
+}
+
+function showStartScreen(resetBattle = false): void {
+  networkPanelOpenedFromGame = false;
+  networkMode = false;
+  networkView = null;
+  networkLobby = null;
+  landingLobbyActive = true;
+  element("network-overlay").classList.add("visible", "start-screen-active");
+  element("app").classList.add("start-screen-active");
+  element("start-view").classList.remove("hidden");
+  element("network-join-view").classList.add("hidden");
+  element("network-lobby-view").classList.add("hidden");
+  showNetworkError("");
+  if (resetBattle || !demoMode) {
+    resetReplaySession();
+    requestedNetworkRole = "player";
+    demoMode = true;
+    menuBattleMode = true;
+    localPlayerId = "menu-aster";
+    setClientViewMode("player");
+    if (paused) {
+      paused = false;
+      element("pause").classList.remove("active");
+    }
+    resetSimulation();
+    lastTime = performance.now();
+    accumulator = 0;
+  }
+  setConnectionState("LOCAL SIMULATION", "MENU SHOWCASE", "online");
+}
+
+function showMultiplayerJoinScreen(openedFromGame = false): void {
+  networkPanelOpenedFromGame = openedFromGame;
+  element("network-overlay").classList.remove("start-screen-active");
+  element("app").classList.remove("start-screen-active");
+  element("network-overlay").classList.add("visible");
+  element("start-view").classList.add("hidden");
+  element("network-join-view").classList.remove("hidden");
+  element("network-lobby-view").classList.add("hidden");
+  showNetworkError("");
 }
 
 function startLocalSkirmish(): void {
   resetReplaySession();
   requestedNetworkRole = "player";
   demoMode = false;
+  menuBattleMode = false;
   setClientViewMode("player");
   landingLobbyActive = false;
+  networkPanelOpenedFromGame = false;
+  element("network-overlay").classList.remove("start-screen-active");
+  element("app").classList.remove("start-screen-active");
   element("network-overlay").classList.remove("visible");
   if (paused) {
     paused = false;
@@ -1655,8 +1717,12 @@ function startDemoShowcase(): void {
   networkView = null;
   networkLobby = null;
   demoMode = true;
+  menuBattleMode = true;
   landingLobbyActive = false;
-  localPlayerId = "showcase-aster";
+  networkPanelOpenedFromGame = false;
+  element("network-overlay").classList.remove("start-screen-active");
+  element("app").classList.remove("start-screen-active");
+  localPlayerId = "menu-aster";
   setClientViewMode("player");
   element("network-overlay").classList.remove("visible");
   if (paused) {
@@ -1666,8 +1732,8 @@ function startDemoShowcase(): void {
   resetSimulation();
   lastTime = performance.now();
   accumulator = 0;
-  setConnectionState("BATTLE SHOWCASE", "4 AI COMMANDERS", "online");
-  showToast("SHOWCASE ONLINE // AUTONOMOUS WAR");
+  setConnectionState("BATTLE SIMULATION", "LOCAL 1V1", "online");
+  showToast("LOCAL 1V1 SIMULATION // OBSERVER MODE");
 }
 
 function createEnvironment(): void {
@@ -2659,6 +2725,19 @@ function appendDebugCircle(
 }
 
 function updateCamera(delta: number): void {
+  if (element("app").classList.contains("start-screen-active")) {
+    cameraRig.target.set(0, 0, 0);
+    cameraRig.distance = 720;
+    cameraRig.azimuth = 0.18;
+    const horizontal = cameraRig.distance * 0.68;
+    camera.position.set(
+      Math.sin(cameraRig.azimuth) * horizontal,
+      cameraRig.distance * 0.72,
+      Math.cos(cameraRig.azimuth) * horizontal,
+    );
+    camera.lookAt(cameraRig.target);
+    return;
+  }
   const edge = 14;
   cameraForward.set(Math.sin(cameraRig.azimuth), 0, Math.cos(cameraRig.azimuth));
   cameraRight.set(cameraForward.z, 0, -cameraForward.x);
@@ -2685,7 +2764,9 @@ function tickSimulation(): void {
     resetSimulation();
     return;
   }
-  if (demoMode) {
+  if (menuBattleMode) {
+    simulation.maintainMenuBattleReinforcements(28, 90);
+  } else if (demoMode) {
     const productionEnabled = simulation.state.ships.length < 420;
     for (const player of simulation.state.players) {
       player.economy.alloy = productionEnabled ? player.economy.alloyStorage : 0;
@@ -2782,7 +2863,9 @@ function processEvents(events: SimulationEvent[]): void {
             clientView.state.tick,
           ) : { x: defense!.x, z: defense!.z };
         const weaponTypeId = turret?.weaponTypeId ?? defenseWeaponType!;
-        const y = ship && turret ? ship.y + turretVisualHeight(ship.class) + 1.2 : 14;
+        const y = ship && turret
+          ? ship.y + turretVisualHeight(ship.class, turret.localX, turret.localZ, turret.weaponTypeId) + 1.2
+          : 14;
         const muzzleSize = weaponTypeId === "heavyRail"
           ? 4.2
           : weaponTypeId === "torpedo"
@@ -2811,7 +2894,7 @@ function processEvents(events: SimulationEvent[]): void {
     } else if (event.type === "hit") {
       const origin = effectOrigins.get(event.targetId);
       if (origin) {
-        const shielded = origin.shields > 0;
+        const shielded = origin.shields >= event.damage;
         origin.shields = Math.max(0, origin.shields - event.damage);
         const now = performance.now();
         if (stressScenario.activeCount === 0
@@ -3347,6 +3430,7 @@ function updateSelectionHud(): void {
         ? `FABRICATOR ${primary.id} · ${assistedConstructions.length} ASSISTED`
         : `COMMAND CORE ${primary.id}`;
     } else if (SHIPYARD_TYPES.includes(primary.type as (typeof SHIPYARD_TYPES)[number])) {
+      updateProductionRosterVisibility();
       productionControls.classList.remove("hidden");
       element("command-context-title").textContent = "PRODUCTION";
       element("command-context-subtitle").textContent = structures.length > 1
@@ -3467,7 +3551,7 @@ function setRallyPointMode(enabled: boolean): void {
   if (enabled) banner.textContent = "RALLY POINT // SELECT DESTINATION";
 }
 
-function setCommandMode(mode: "move" | "attackMove" | "focusFire" | null): void {
+function setCommandMode(mode: "move" | "attackMove" | "patrol" | "focusFire" | null): void {
   if (mode !== null && !canIssuePlayerCommands()) {
     showToast(clientViewMode === "team-spectator" ? "TEAM SPECTATOR // VIEW ONLY" : "REPLAY // VIEW ONLY");
     return;
@@ -3483,6 +3567,7 @@ function setCommandMode(mode: "move" | "attackMove" | "focusFire" | null): void 
   pendingCommandMode = mode;
   element("cmd-move").classList.toggle("active", mode === "move");
   element("cmd-attack").classList.toggle("active", mode === "attackMove");
+  element("cmd-patrol").classList.toggle("active", mode === "patrol");
   element("focus").classList.toggle("active", mode === "focusFire");
   const banner = element("command-mode");
   banner.classList.toggle("visible", mode !== null);
@@ -3490,6 +3575,8 @@ function setCommandMode(mode: "move" | "attackMove" | "focusFire" | null): void 
     ? "FOCUS FIRE // SELECT HOSTILE CONTACT"
     : mode === "attackMove"
     ? "ATTACK-MOVE // CLICK OR DRAG FORMATION"
+    : mode === "patrol"
+      ? "PATROL // SELECT ENDPOINT OR DRAG FORMATION"
     : mode === "move"
       ? "MOVE // CLICK OR DRAG FORMATION"
       : "";
@@ -3516,6 +3603,16 @@ function setProgressionButtonState(button: HTMLButtonElement, unlocked: boolean,
   button.title = available ? "" : unavailableReason;
 }
 
+function updateProductionRosterVisibility(): void {
+  const selectedYardTypes = new Set(getSelectedShipyards().map((yard) => yard.type));
+  for (const shipClass of SHIP_CLASSES) {
+    element<HTMLButtonElement>(SHIP_BUTTON_IDS[shipClass]).classList.toggle(
+      "hidden",
+      !selectedYardTypes.has(SHIP_ECONOMY[shipClass].yardType),
+    );
+  }
+}
+
 function updateProgressionControls(): void {
   const availableStructureTypes = new Set(BUILDABLE_STRUCTURE_TYPES.filter((type) => canBuildStructureInView(localPlayerId, type)));
   const hasSelectedMobileBuilder = getSelectedMobileBuilderIds().length > 0;
@@ -3536,6 +3633,7 @@ function updateProgressionControls(): void {
   }
 
   const selectedYards = getSelectedShipyards();
+  updateProductionRosterVisibility();
   for (const shipClass of SHIP_CLASSES) {
     const definition = SHIP_ECONOMY[shipClass];
     const button = element<HTMLButtonElement>(SHIP_BUTTON_IDS[shipClass]);
@@ -3786,7 +3884,7 @@ function cancelProductionItem(structureId: number, queueItemId: number): void {
 }
 
 function issueNavigationCommand(
-  type: "move" | "attackMove",
+  type: "move" | "attackMove" | "patrol",
   destination: THREE.Vector3,
   formationEnd: THREE.Vector3 | undefined,
   queued: boolean,
@@ -3813,10 +3911,11 @@ function issueNavigationCommand(
   const result = submitPlayerCommand(command);
   if (result.accepted) {
     showCommandMarker(destination);
+    const orderLabel = type === "attackMove" ? "ATTACK" : type === "patrol" ? "PATROL" : "MOVE";
     element("directive").textContent = queued
-      ? `${type === "attackMove" ? "ATTACK" : "MOVE"} WAYPOINT QUEUED`
-      : `${type === "attackMove" ? "ATTACK-MOVE" : "FORMATION MOVE"} EXECUTING`;
-    showToast(queued ? "ORDER QUEUED" : type === "attackMove" ? "ATTACK-MOVE" : "MOVE ORDER");
+      ? `${orderLabel} WAYPOINT QUEUED`
+      : `${type === "attackMove" ? "ATTACK-MOVE" : type === "patrol" ? "PATROL ROUTE" : "FORMATION MOVE"} EXECUTING`;
+    showToast(queued ? "ORDER QUEUED" : type === "attackMove" ? "ATTACK-MOVE" : type === "patrol" ? "PATROL ACTIVE" : "MOVE ORDER");
   } else {
     showToast(`COMMAND REJECTED // ${result.reason.toUpperCase()}`);
   }
@@ -3975,7 +4074,7 @@ function animate(now: number): void {
       stepReplay();
       accumulator -= FIXED_DT;
     }
-  } else if (!paused && !networkMode && !landingLobbyActive && physicsWorld) {
+  } else if (!paused && !networkMode && (!landingLobbyActive || demoMode) && physicsWorld) {
     accumulator += delta;
     while (accumulator >= FIXED_DT) {
       tickSimulation();
@@ -4029,8 +4128,10 @@ function resetSimulation(): void {
     showToast("LEAVE THE MATCH TO RESET");
     return;
   }
-  simulation = demoMode ? createShowcaseScenario() : createPlayableScenario();
-  localPlayerId = demoMode ? "showcase-aster" : "pilot-blue";
+  simulation = menuBattleMode
+    ? createMenuBattleScenario()
+    : demoMode ? createShowcaseScenario() : createPlayableScenario();
+  localPlayerId = menuBattleMode ? "menu-aster" : demoMode ? "showcase-aster" : "pilot-blue";
   if (physicsWorld) simulation.attachPhysicsWorld(physicsWorld);
   stressScenario.configure(0);
   element<HTMLSelectElement>("stress-count").value = "0";
@@ -4048,19 +4149,21 @@ function resetSimulation(): void {
   hideFormationPreview();
   element("victory-overlay").classList.remove("visible", "defeat");
   element("directive").textContent = demoMode
-    ? "AUTONOMOUS WAR ECONOMY // FACTORIES ONLINE"
+    ? menuBattleMode ? "LOCAL 1V1 // AUTONOMOUS FLEETS ENGAGED" : "AUTONOMOUS WAR ECONOMY // FACTORIES ONLINE"
     : "SELECT FLEET // BREAK CRIMSON LINE";
   previousTransforms.clear();
   for (const ship of simulation.state.ships) previousTransforms.set(ship.id, captureTransform(ship));
   clearWorldVisuals();
   cameraRig.target.set(0, 0, 0);
-  cameraRig.distance = demoMode ? 980 : 610;
+  cameraRig.distance = menuBattleMode ? 720 : demoMode ? 980 : 610;
   cameraRig.azimuth = demoMode ? 0.18 : 0;
   eventLines = [demoMode
-    ? "<b>SHOWCASE</b> 284 combat vessels // 16 autonomous shipyards"
+    ? menuBattleMode
+      ? "<b>SIM</b> fighter-heavy local 1v1 // autonomous engagement"
+      : "<b>SHOWCASE</b> 284 combat vessels // 16 autonomous shipyards"
     : "<b>SYS</b> scenario reset with seed C0FFEE"];
   updateSelectionHud();
-  showToast(demoMode ? "SHOWCASE RESTARTED" : "DETERMINISTIC SCENARIO RESET");
+  showToast(demoMode ? menuBattleMode ? "LOCAL 1V1 RESTARTED" : "SHOWCASE RESTARTED" : "DETERMINISTIC SCENARIO RESET");
 }
 
 function focusBattle(): void {
@@ -4142,6 +4245,7 @@ addEventListener("keydown", (event) => {
   if (event.code === "KeyF") setCommandMode("focusFire");
   if (event.code === "KeyM") setCommandMode("move");
   if (event.code === "KeyA") setCommandMode("attackMove");
+  if (event.code === "KeyP") setCommandMode("patrol");
   if (event.code === "KeyS") issueSimpleCommand("stop");
   if (event.code === "KeyH") issueSimpleCommand("hold");
   if (event.code === "KeyY") setRallyPointMode(true);
@@ -4150,7 +4254,7 @@ addEventListener("keyup", (event) => keys.delete(event.code));
 addEventListener("pointermove", (event) => {
   pointerX = event.clientX; pointerY = event.clientY;
   if (pendingStructureType) updatePlacementGhost(event.clientX, event.clientY);
-  if (middleDrag) {
+  if (middleDrag && !element("app").classList.contains("start-screen-active")) {
     cameraRig.azimuth -= (event.clientX - lastPointerX) * 0.006;
     lastPointerX = event.clientX;
   }
@@ -4211,6 +4315,7 @@ addEventListener("pointerup", (event) => {
   }
 });
 addEventListener("wheel", (event) => {
+  if (element("app").classList.contains("start-screen-active")) return;
   cameraRig.distance = THREE.MathUtils.clamp(cameraRig.distance + event.deltaY * 0.9, 220, 9_000);
 }, { passive: true });
 
@@ -4252,7 +4357,7 @@ canvas.addEventListener("pointerdown", (event) => {
   }
   const commandType = event.button === 2
     ? "move"
-    : pendingCommandMode === "move" || pendingCommandMode === "attackMove"
+    : pendingCommandMode === "move" || pendingCommandMode === "attackMove" || pendingCommandMode === "patrol"
       ? pendingCommandMode
       : null;
   if (commandType) {
@@ -4356,6 +4461,7 @@ element<HTMLInputElement>("replay-scrub").addEventListener("change", (event) => 
 element("focus").addEventListener("click", () => setCommandMode("focusFire"));
 element("cmd-move").addEventListener("click", () => setCommandMode("move"));
 element("cmd-attack").addEventListener("click", () => setCommandMode("attackMove"));
+element("cmd-patrol").addEventListener("click", () => setCommandMode("patrol"));
 element("cmd-stop").addEventListener("click", () => issueSimpleCommand("stop"));
 element("cmd-hold").addEventListener("click", () => issueSimpleCommand("hold"));
 element("build-extractor").addEventListener("click", () => setStructureMode("extractor"));
@@ -4451,15 +4557,28 @@ void fetch("/__voidfront/lan-info", { cache: "no-store" })
   })
   .catch(() => undefined);
 element("network-open").addEventListener("click", () => {
-  element("network-overlay").classList.add("visible");
-  element("network-join-view").classList.toggle("hidden", networkMode);
-  element("network-lobby-view").classList.toggle("hidden", !networkMode);
-  if (networkLobby) renderLobby();
+  if (networkMode) {
+    element("network-overlay").classList.add("visible");
+    element("start-view").classList.add("hidden");
+    element("network-join-view").classList.add("hidden");
+    element("network-lobby-view").classList.remove("hidden");
+    if (networkLobby) renderLobby();
+    return;
+  }
+  showMultiplayerJoinScreen(!landingLobbyActive);
 });
 element("network-close").addEventListener("click", () => {
-  if (landingLobbyActive) startLocalSkirmish();
-  else element("network-overlay").classList.remove("visible");
+  if (networkMode) {
+    if (networkLobby?.phase === "playing") element("network-overlay").classList.remove("visible");
+    else leaveNetworkMatch();
+    return;
+  }
+  if (networkPanelOpenedFromGame) {
+    networkPanelOpenedFromGame = false;
+    element("network-overlay").classList.remove("visible");
+  } else showStartScreen();
 });
+element("open-multiplayer").addEventListener("click", () => showMultiplayerJoinScreen());
 element("play-local").addEventListener("click", startLocalSkirmish);
 element("play-demo").addEventListener("click", startDemoShowcase);
 element("create-match").addEventListener("click", () => {
@@ -4510,7 +4629,7 @@ element<HTMLSelectElement>("team-select").addEventListener("change", (event) => 
 });
 element("mode-teams").addEventListener("click", () => sendNetworkMessage({ type: "set_mode", mode: "teams" }));
 element("mode-ffa").addEventListener("click", () => sendNetworkMessage({ type: "set_mode", mode: "ffa" }));
-for (const settingId of ["map-preset", "map-size", "starting-resources", "resource-density"]) {
+for (const settingId of ["map-preset", "map-size", "starting-resources", "resource-density", "team-spawn-mode"]) {
   element<HTMLSelectElement>(settingId).addEventListener("change", () => {
     sendNetworkMessage({ type: "set_settings", settings: selectedLobbySettings() });
   });
@@ -4518,6 +4637,8 @@ for (const settingId of ["map-preset", "map-size", "starting-resources", "resour
 element("add-ai").addEventListener("click", () => sendNetworkMessage({
   type: "add_ai",
   teamId: Number(element<HTMLSelectElement>("team-select").value) === 1 ? 2 : 1,
+  difficulty: element<HTMLSelectElement>("ai-difficulty").value as "easy" | "normal" | "hard",
+  personality: element<HTMLSelectElement>("ai-personality").value as "balanced" | "aggressive" | "turtle" | "economic",
 }));
 element("authorize-spectator").addEventListener("click", () => sendNetworkMessage({
   type: "authorize_spectator",
@@ -4535,9 +4656,22 @@ element("lobby-slots").addEventListener("click", (event) => {
   if (playerId) sendNetworkMessage({ type: "remove_slot", playerId });
 });
 element("lobby-slots").addEventListener("change", (event) => {
-  const select = (event.target as HTMLElement).closest<HTMLSelectElement>("[data-team-player]");
-  const playerId = select?.dataset.teamPlayer;
-  if (select && playerId) sendNetworkMessage({ type: "set_team", teamId: Number(select.value), playerId });
+  const target = event.target as HTMLSelectElement;
+  const teamSelect = target.closest<HTMLSelectElement>("[data-team-player]");
+  const teamPlayerId = teamSelect?.dataset.teamPlayer;
+  if (teamSelect && teamPlayerId) {
+    sendNetworkMessage({ type: "set_team", teamId: Number(teamSelect.value), playerId: teamPlayerId });
+    return;
+  }
+  const aiPlayerId = target.dataset.aiDifficulty ?? target.dataset.aiPersonality;
+  if (!aiPlayerId) return;
+  const difficulty = document.querySelector<HTMLSelectElement>(`[data-ai-difficulty="${CSS.escape(aiPlayerId)}"]`)?.value;
+  const personality = document.querySelector<HTMLSelectElement>(`[data-ai-personality="${CSS.escape(aiPlayerId)}"]`)?.value;
+  if (difficulty && personality) sendNetworkMessage({
+    type: "set_ai_settings", playerId: aiPlayerId,
+    difficulty: difficulty as "easy" | "normal" | "hard",
+    personality: personality as "balanced" | "aggressive" | "turtle" | "economic",
+  });
 });
 
 function updateAudioToggle(): void {
@@ -4555,6 +4689,7 @@ function updateAudioToggle(): void {
 document.addEventListener("visibilitychange", () => battleAudio.setHidden(document.hidden));
 
 updateAudioToggle();
+showStartScreen(true);
+if (invitedMatchId) showMultiplayerJoinScreen();
 updateHud();
-focusBattle();
 requestAnimationFrame(animate);

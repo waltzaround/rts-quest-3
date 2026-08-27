@@ -98,6 +98,73 @@ describe("authoritative asteroid physics", () => {
     expect(target.health).toBe(startingHealth);
   });
 
+  it.each(["fighter", "bomber"] as const)("lets a %s fly through a capital ship", async (shipClass) => {
+    const runtime = await loadPhysicsRuntime();
+    const world = createPlanarCirclePhysicsWorld(runtime);
+    worlds.push(world);
+    const simulation = createCombatScenario({ seed: 0x51a7, enemyCommander: false });
+    const smallCraft = simulation.state.ships.find((ship) => ship.teamId === 1 && ship.class === shipClass)!;
+    const capital = simulation.state.ships.find((ship) => ship.teamId === 1 && ship.class === "destroyer")!;
+    simulation.state.obstacles = [];
+    simulation.state.ships = [smallCraft, capital];
+    simulation.state.projectiles = [];
+    smallCraft.turrets = [];
+    capital.turrets = [];
+    capital.class = "battleship";
+    capital.x = 0;
+    capital.z = 0;
+    capital.vx = 0;
+    capital.vz = 0;
+    capital.orders = [{ type: "hold", destination: { x: 0, z: 0 }, facing: 0 }];
+    smallCraft.x = -90;
+    smallCraft.z = 0;
+    smallCraft.yaw = Math.PI / 2;
+    smallCraft.vx = 0;
+    smallCraft.vz = 0;
+    smallCraft.orders = [{ type: "move", destination: { x: 120, z: 0 }, facing: Math.PI / 2 }];
+    simulation.attachPhysicsWorld(world);
+
+    simulation.stepMany(55);
+
+    expect(smallCraft.x).toBeGreaterThan(25);
+    expect(Math.abs(capital.x)).toBeLessThan(0.01);
+  });
+
+  it.each([
+    ["fighter", "fighter"],
+    ["fighter", "bomber"],
+    ["bomber", "bomber"],
+  ] as const)("lets hostile %s and %s craft cross during a dogfight", async (movingClass, defendingClass) => {
+    const runtime = await loadPhysicsRuntime();
+    const world = createPlanarCirclePhysicsWorld(runtime);
+    worlds.push(world);
+    const simulation = createCombatScenario({ seed: 0x51a7, enemyCommander: false });
+    const moving = simulation.state.ships.find((ship) => ship.teamId === 1 && ship.class === movingClass)!;
+    const defending = simulation.state.ships.find((ship) => ship.teamId === 2 && ship.class === defendingClass)!;
+    simulation.state.obstacles = [];
+    simulation.state.ships = [moving, defending];
+    simulation.state.projectiles = [];
+    moving.turrets = [];
+    defending.turrets = [];
+    moving.x = -45;
+    moving.z = 0;
+    moving.yaw = Math.PI / 2;
+    moving.vx = 0;
+    moving.vz = 0;
+    moving.orders = [{ type: "move", destination: { x: 90, z: 0 }, facing: Math.PI / 2 }];
+    defending.x = 0;
+    defending.z = 0;
+    defending.vx = 0;
+    defending.vz = 0;
+    defending.orders = [{ type: "hold", destination: { x: 0, z: 0 }, facing: 0 }];
+    simulation.attachPhysicsWorld(world);
+
+    simulation.stepMany(38);
+
+    expect(moving.x).toBeGreaterThan(40);
+    expect(Math.abs(defending.x)).toBeLessThan(0.01);
+  });
+
   it("routes a capital ship around a collider and reproduces exactly after restore", async () => {
     const runtime = await loadPhysicsRuntime();
     const wasmBytes = await readFile(new URL("../../box3d-wasm/src/box3d.wasm", import.meta.url));

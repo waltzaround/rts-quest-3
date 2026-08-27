@@ -63,6 +63,33 @@ test("resolves a dynamic circle against a static obstacle", async () => {
   }
 });
 
+test("allows filtered dynamic circles to pass through one another", async () => {
+  const runtime = await loadPhysicsRuntime();
+  const world = createPlanarCirclePhysicsWorld(runtime);
+  try {
+    world.syncBodies({
+      staticCircles: [],
+      dynamicCircles: [
+        {
+          id: "small-craft", x: -2, z: 0, radius: 0.5, vx: 4, vz: 0,
+          collisionCategory: 0x4, collisionMask: 0x1 | 0x2 | 0x4,
+        },
+        {
+          id: "capital", x: 0, z: 0, radius: 0.75, vx: 0, vz: 0,
+          collisionCategory: 0x8, collisionMask: 0x1 | 0x2 | 0x8,
+        },
+      ],
+    });
+    const states = world.step(0.75, 12);
+    const smallCraft = states.find((body) => body.id === "small-craft");
+    const capital = states.find((body) => body.id === "capital");
+    assert.ok(smallCraft.x > 0.9, `expected small craft to pass through, received x=${smallCraft.x}`);
+    assert.ok(Math.abs(capital.x) < 0.01, `expected capital ship to remain still, received x=${capital.x}`);
+  } finally {
+    world.dispose();
+  }
+});
+
 test("uses stable ID order for creation and output", async () => {
   const runtime = await loadPhysicsRuntime();
   const first = createPlanarCirclePhysicsWorld(runtime);

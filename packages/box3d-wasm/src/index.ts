@@ -75,6 +75,10 @@ export interface PlanarStaticCircle {
   readonly x: number;
   readonly z: number;
   readonly radius: number;
+  /** Optional Box3D collision category. Defaults to the static-body category. */
+  readonly collisionCategory?: number;
+  /** Optional Box3D collision mask. Defaults to all categories. */
+  readonly collisionMask?: number;
 }
 
 export interface PlanarDynamicCircle extends PlanarStaticCircle {
@@ -116,12 +120,17 @@ interface BodyRecord {
   readonly kind: BodyKind;
   readonly radius: number;
   readonly density: number;
+  readonly collisionCategory: number;
+  readonly collisionMask: number;
   readonly bodyId: b3BodyId;
 }
 
 const IDENTITY_ROTATION: [number, number, number, number] = [0, 0, 0, 1];
 const DEFAULT_DENSITY = 1;
 const DEFAULT_SUB_STEP_COUNT = 4;
+const DEFAULT_STATIC_CATEGORY = 0x1;
+const DEFAULT_DYNAMIC_CATEGORY = 0x2;
+const DEFAULT_COLLISION_MASK = 0xffff_ffff;
 
 /**
  * Creates a thin deterministic X/Z-plane facade over the shared Box3D WASM
@@ -218,19 +227,30 @@ class WasmPlanarCirclePhysicsWorld implements PlanarCirclePhysicsWorld {
   }
 
   #syncStaticCircle(circle: PlanarStaticCircle): void {
-    const record = this.#getCompatibleBody(circle.id, "static", circle.radius, 0);
-    const body = record ?? this.#createBody(circle.id, "static", circle.radius, 0, circle.x, circle.z, 0, 0);
+    const collisionCategory = circle.collisionCategory ?? DEFAULT_STATIC_CATEGORY;
+    const collisionMask = circle.collisionMask ?? DEFAULT_COLLISION_MASK;
+    const record = this.#getCompatibleBody(circle.id, "static", circle.radius, 0, collisionCategory, collisionMask);
+    const body = record ?? this.#createBody(
+      circle.id, "static", circle.radius, 0, collisionCategory, collisionMask,
+      circle.x, circle.z, 0, 0,
+    );
     this.#module.b3Body_SetTransform(body.bodyId, [circle.x, 0, circle.z], IDENTITY_ROTATION);
   }
 
   #syncDynamicCircle(circle: PlanarDynamicCircle): void {
     const density = circle.density ?? DEFAULT_DENSITY;
-    const record = this.#getCompatibleBody(circle.id, "dynamic", circle.radius, density);
+    const collisionCategory = circle.collisionCategory ?? DEFAULT_DYNAMIC_CATEGORY;
+    const collisionMask = circle.collisionMask ?? DEFAULT_COLLISION_MASK;
+    const record = this.#getCompatibleBody(
+      circle.id, "dynamic", circle.radius, density, collisionCategory, collisionMask,
+    );
     const body = record ?? this.#createBody(
       circle.id,
       "dynamic",
       circle.radius,
       density,
+      collisionCategory,
+      collisionMask,
       circle.x,
       circle.z,
       circle.vx,
@@ -241,12 +261,20 @@ class WasmPlanarCirclePhysicsWorld implements PlanarCirclePhysicsWorld {
     this.#module.b3Body_SetAngularVelocity(body.bodyId, [0, 0, 0]);
   }
 
-  #getCompatibleBody(id: string, kind: BodyKind, radius: number, density: number): BodyRecord | undefined {
+  #getCompatibleBody(
+    id: string,
+    kind: BodyKind,
+    radius: number,
+    density: number,
+    collisionCategory: number,
+    collisionMask: number,
+  ): BodyRecord | undefined {
     const record = this.#bodies.get(id);
     if (record === undefined) {
       return undefined;
     }
-    if (record.kind === kind && record.radius === radius && record.density === density) {
+    if (record.kind === kind && record.radius === radius && record.density === density
+      && record.collisionCategory === collisionCategory && record.collisionMask === collisionMask) {
       return record;
     }
     this.#destroyBody(id);
@@ -258,6 +286,8 @@ class WasmPlanarCirclePhysicsWorld implements PlanarCirclePhysicsWorld {
     kind: BodyKind,
     radius: number,
     density: number,
+    collisionCategory: number,
+    collisionMask: number,
     x: number,
     z: number,
     vx: number,
@@ -282,13 +312,15 @@ class WasmPlanarCirclePhysicsWorld implements PlanarCirclePhysicsWorld {
     const bodyId = this.#module.b3CreateBody(this.#worldId, bodyDefinition);
     const shapeDefinition = this.#module.b3DefaultShapeDef();
     shapeDefinition.density = density;
+    shapeDefinition.filter.categoryBits = BigInt(collisionCategory);
+    shapeDefinition.filter.maskBits = BigInt(collisionMask);
     shapeDefinition.baseMaterial.friction = 0;
     shapeDefinition.baseMaterial.restitution = 0;
     this.#module.b3CreateSphereShape(bodyId, shapeDefinition, {
       center: [0, 0, 0],
       radius,
     });
-    const record: BodyRecord = { id, kind, radius, density, bodyId };
+    const record: BodyRecord = { id, kind, radius, density, collisionCategory, collisionMask, bodyId };
     this.#bodies.set(id, record);
     return record;
   }
@@ -336,6 +368,13 @@ function validateCircle(circle: PlanarStaticCircle, ids: Set<string>): void {
   assertFinite(circle.x, `x for ${circle.id}`);
   assertFinite(circle.z, `z for ${circle.id}`);
   assertPositiveFinite(circle.radius, `radius for ${circle.id}`);
+  validateCollisionBits(circle.collisionCategory, `collision category for ${circle.id}`);
+  validateCollisionBits(circle.collisionMask, `collision mask for ${circle.id}`);
+}
+
+function validateCollisionBits(value: number | undefined, label: string): void {
+  if (value === undefined) return;
+  if (!Number.isSafeInteger(value) || value < 0) throw new RangeError(`${label} must be a non-negative safe integer`);
 }
 
 function assertFinite(value: number, label: string): void {

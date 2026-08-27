@@ -47,6 +47,7 @@ export function projectPlayerView(state: SimulationState, playerId: PlayerId): P
         orders: sharesPrivateState ? ship.orders.map((order) => ({
           ...order,
           destination: { ...order.destination },
+          ...(order.patrolOrigin ? { patrolOrigin: { ...order.patrolOrigin } } : {}),
         })) : [],
         focusTargetEntityId: sharesPrivateState && ship.focusTargetEntityId !== null
           && visibleEntityIds.has(ship.focusTargetEntityId)
@@ -201,7 +202,11 @@ export function projectOmniscientView(state: SimulationState): OmniscientViewSta
     ships: state.ships.map((ship) => ({
       ...ship,
       relationship: "omniscient",
-      orders: ship.orders.map((order) => ({ ...order, destination: { ...order.destination } })),
+      orders: ship.orders.map((order) => ({
+        ...order,
+        destination: { ...order.destination },
+        ...(order.patrolOrigin ? { patrolOrigin: { ...order.patrolOrigin } } : {}),
+      })),
       turrets: ship.turrets.map((turret) => ({ ...turret })),
     })),
     structures: state.structures.map((structure) => ({

@@ -611,11 +611,11 @@ function isGameCommandShape(value: unknown): value is GameCommand {
     || typeof value.playerId !== "string" || value.playerId.length === 0
     || !isPositiveInteger(value.sequence)
     || !isPositiveInteger(value.requestedTick)) return false;
-  if (["move", "attackMove", "stop", "hold", "focusFire"].includes(value.type)) {
+  if (["move", "attackMove", "patrol", "stop", "hold", "focusFire"].includes(value.type)) {
     if (!Array.isArray(value.unitIds) || value.unitIds.length < 1 || value.unitIds.length > 512
       || !value.unitIds.every(isPositiveInteger)
       || typeof value.queued !== "boolean") return false;
-    if (value.type === "move" || value.type === "attackMove") {
+    if (value.type === "move" || value.type === "attackMove" || value.type === "patrol") {
       return isVec2(value.destination) && (value.formationEnd === undefined || isVec2(value.formationEnd));
     }
     return value.type !== "focusFire" || isPositiveInteger(value.targetEntityId);

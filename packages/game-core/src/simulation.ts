@@ -27,7 +27,7 @@ import type {
   CombatTargetState, CommandResult, DebugSnapshot, EntityId, FleetCommand,
   FormationAssignment, GameCommand, NavigationOrder, PlayerId, PlayerState, ProjectileState,
   ObstacleState, ResourceNodeState, ShipClass, ShipState, SimulationEvent, SimulationState,
-  OmniscientViewState, PlayerViewState, ShipyardType, StructureState, StructureType,
+  AiCommanderSettings, AiDifficulty, AiPersonality, OmniscientViewState, PlayerViewState, ShipyardType, StructureState, StructureType,
   TeamId, TeamState, TeamViewState, TurretState,
 } from "./types";
 
@@ -49,8 +49,17 @@ const BASE_CONSTRUCTION_BUILD_POWER = 1;
 const OBSTACLE_CLEARANCE = 8;
 const PHYSICS_SUBSTEPS = 4;
 const CONTESTED_RESOURCE_NODES_PER_PLAYER = 3;
+const STARTING_RESOURCE_NODES_PER_PLAYER = 3;
 const CAPITAL_SHIP_CLASSES: ReadonlySet<ShipClass> = new Set(["cruiser", "carrier", "battleship"]);
 const CAPITAL_VS_SMALL_CRAFT_HIT_RADIUS_SCALE = 0.78;
+const STATIC_COLLISION_CATEGORY = 0x1;
+const REGULAR_SHIP_COLLISION_CATEGORY = 0x2;
+const SMALL_CRAFT_COLLISION_CATEGORY = 0x4;
+const CAPITAL_SHIP_COLLISION_CATEGORY = 0x8;
+const ALL_COLLISION_CATEGORIES = STATIC_COLLISION_CATEGORY
+  | REGULAR_SHIP_COLLISION_CATEGORY
+  | SMALL_CRAFT_COLLISION_CATEGORY
+  | CAPITAL_SHIP_COLLISION_CATEGORY;
 
 export interface ScenarioOptions {
   seed?: number;
@@ -60,11 +69,14 @@ export interface ScenarioOptions {
   startingFleet?: boolean;
   /** Local deterministic showcase with prebuilt industry and a large mixed fleet. */
   showcase?: boolean;
+  /** Lightweight title-screen battle with two fighter-heavy AI fleets. */
+  menuBattle?: boolean;
   enemyCommander?: boolean;
   mapPreset?: "orbital-ring" | "crossfire" | "open-expanse";
   mapSize?: "small" | "medium" | "large";
   startingResources?: "low" | "standard" | "high";
   resourceDensity?: "scarce" | "standard" | "rich";
+  teamSpawnMode?: "together" | "interleaved" | "random";
   players?: readonly ScenarioPlayerConfig[];
 }
 
@@ -74,6 +86,8 @@ export interface ScenarioPlayerConfig {
   teamId: number;
   color?: number;
   ai?: boolean;
+  aiDifficulty?: AiDifficulty;
+  aiPersonality?: AiPersonality;
 }
 
 export class GameSimulation {
@@ -112,6 +126,64 @@ export class GameSimulation {
 
   get physicsBackend(): "box3d-wasm" | "deterministic-fallback" {
     return this.physicsWorld ? "box3d-wasm" : "deterministic-fallback";
+  }
+
+  maintainMenuBattleReinforcements(capPerPlayer = 28, cadenceTicks = 90): void {
+    if (this.state.status !== "playing") return;
+    for (const structure of this.state.structures) structure.productionQueue = [];
+    for (const player of this.state.players) {
+      player.economy.alloy = 0;
+      player.economy.energy = 0;
+    }
+    if (this.state.tick % cadenceTicks !== 0) return;
+    const roster: readonly ShipClass[] = [
+      "fighter", "fighter", "fighter", "bomber", "fighter", "fighter",
+      "cruiser", "fighter", "fighter", "bomber", "fighter", "battleship",
+    ];
+    const fleetCounts = new Map(this.state.players.map((player) => [
+      player.id,
+      this.state.ships.filter((ship) => ship.ownerPlayerId === player.id).length,
+    ]));
+    const leadingFleetCount = Math.max(0, ...fleetCounts.values());
+    const waveIndex = Math.floor(this.state.tick / cadenceTicks);
+    for (const player of this.state.players) {
+      const ownedCount = fleetCounts.get(player.id) ?? 0;
+      if (ownedCount >= capPerPlayer) continue;
+      const core = this.state.structures.find(
+        (structure) => structure.ownerPlayerId === player.id && structure.type === "commandCore",
+      );
+      if (!core) continue;
+      const radialLength = Math.hypot(core.x, core.z) || 1;
+      const outwardX = core.x / radialLength;
+      const outwardZ = core.z / radialLength;
+      const spawnX = outwardX * 600;
+      const spawnZ = outwardZ * 600;
+      const yaw = Math.atan2(-outwardX, -outwardZ);
+      const catchUpCount = Math.min(2, Math.max(0, leadingFleetCount - ownedCount));
+      const reinforcementCount = Math.min(capPerPlayer - ownedCount, 1 + catchUpCount);
+      for (let reinforcement = 0; reinforcement < reinforcementCount; reinforcement += 1) {
+        const shipClass = roster[(waveIndex + reinforcement) % roster.length]!;
+        const yardType: ShipyardType = shipClass === "cruiser"
+          ? "fleetShipyard"
+          : shipClass === "battleship" ? "capitalShipyard" : "shipyard";
+        const ship = this.spawnShip(player, shipClass, spawnX, spawnZ, yaw, yardType);
+        ship.orders = [{
+          type: "patrol",
+          destination: projectNavigableDestination(this.state, ship, { x: 0, z: 0 }),
+          facing: yaw,
+          patrolOrigin: { x: ship.x, z: ship.z },
+        }];
+      }
+    }
+    for (const ship of this.state.ships) {
+      if (ship.orders.length > 0) continue;
+      ship.orders = [{
+        type: "patrol",
+        destination: projectNavigableDestination(this.state, ship, { x: 0, z: 0 }),
+        facing: Math.atan2(-ship.x, -ship.z),
+        patrolOrigin: { x: ship.x, z: ship.z },
+      }];
+    }
   }
 
   step(): DebugSnapshot {
@@ -179,7 +251,7 @@ export class GameSimulation {
     }
 
     let normalizedCommand = command;
-    if (command.type === "move" || command.type === "attackMove" || command.type === "stop" || command.type === "hold" || command.type === "focusFire") {
+    if (command.type === "move" || command.type === "attackMove" || command.type === "patrol" || command.type === "stop" || command.type === "hold" || command.type === "focusFire") {
       const uniqueUnitIds = [...new Set(command.unitIds)].sort((a, b) => a - b);
       if (uniqueUnitIds.length === 0) return { accepted: false, reason: "empty" };
       const byId = new Map(this.state.ships.map((ship) => [ship.id, ship]));
@@ -465,7 +537,7 @@ export class GameSimulation {
           .filter((ship): ship is ShipState => ship?.ownerPlayerId === command.playerId)
           .sort((a, b) => a.id - b.id);
         if (ships.length === 0) continue;
-        if (command.type === "move" || command.type === "attackMove") {
+        if (command.type === "move" || command.type === "attackMove" || command.type === "patrol") {
           const assignments = computeFormationAssignments(ships, command.destination, command.formationEnd);
           for (const assignment of assignments) {
             const ship = byId.get(assignment.shipId)!;
@@ -473,6 +545,7 @@ export class GameSimulation {
               type: command.type,
               destination: projectNavigableDestination(this.state, ship, assignment.destination),
               facing: assignment.facing,
+              ...(command.type === "patrol" ? { patrolOrigin: { x: ship.x, z: ship.z } } : {}),
             };
             if (command.queued) ship.orders.push(order);
             else ship.orders = [order];
@@ -724,6 +797,14 @@ export class GameSimulation {
       const arrivalRadius = Math.max(10, definition.radius * 1.2);
       const distanceToGoal = Math.sqrt(distanceSquared(ship, order.destination));
       if (distanceToGoal <= arrivalRadius) {
+        if (order.type === "patrol" && order.patrolOrigin) {
+          const reached = order.destination;
+          order.destination = projectNavigableDestination(this.state, ship, order.patrolOrigin, navigationStatics);
+          order.patrolOrigin = { x: reached.x, z: reached.z };
+          order.facing = Math.atan2(order.destination.x - ship.x, order.destination.z - ship.z);
+          ship.focusTargetEntityId = null;
+          continue;
+        }
         ship.orders.shift();
         if (ship.orders.length === 0) {
           ship.yaw = moveTowardAngle(ship.yaw, order.facing, definition.turnRate * FIXED_DT);
@@ -744,7 +825,7 @@ export class GameSimulation {
     order: NavigationOrder | undefined,
   ): { x: number; z: number } | null {
     if (ship.class !== "fighter" && ship.class !== "bomber") return null;
-    if (order?.type === "hold" || (order?.type !== "attackMove" && ship.focusTargetEntityId === null)) return null;
+    if (order?.type === "hold" || (order?.type !== "attackMove" && order?.type !== "patrol" && ship.focusTargetEntityId === null)) return null;
     const targetId = ship.focusTargetEntityId
       ?? ship.turrets.find((turret) => turret.weaponTypeId !== "pointDefense" && turret.targetEntityId !== null)?.targetEntityId
       ?? null;
@@ -786,6 +867,7 @@ export class GameSimulation {
       const neighborRange = (definition.radius + MAX_SHIP_RADIUS) * 2.25;
       for (const neighbor of this.navigationHash.query(ship.x, ship.z, neighborRange)) {
         if (neighbor.id === ship.id || neighbor.teamId !== ship.teamId) continue;
+        if (!shipsUseFormationSeparation(ship.class, neighbor.class)) continue;
         const dx = ship.x - neighbor.x;
         const dz = ship.z - neighbor.z;
         const distance = Math.hypot(dx, dz);
@@ -839,9 +921,12 @@ export class GameSimulation {
         dynamicCircles: this.state.ships.map((ship) => {
           const definition = SHIPS[ship.class];
           const sphereVolume = 4 / 3 * Math.PI * definition.radius ** 3;
+          const collision = shipCollisionFilter(ship.class);
           return {
             id: `ship:${ship.id}`, x: ship.x, z: ship.z, radius: definition.radius,
             vx: ship.vx, vz: ship.vz, density: definition.mass / sphereVolume,
+            collisionCategory: collision.category,
+            collisionMask: collision.mask,
           };
         }),
       });
@@ -1226,10 +1311,14 @@ export class GameSimulation {
   }
 
   private runEnemyCommanders(): void {
-    if (this.state.status !== "playing" || this.state.tick % AI_THINK_TICKS !== 0) return;
+    if (this.state.status !== "playing") return;
     for (const playerId of this.state.aiPlayerIds) {
       const player = this.state.players.find((candidate) => candidate.id === playerId);
       if (!player || player.state !== "playing") continue;
+      const settings = this.state.aiCommanders[playerId] ?? { difficulty: "normal", personality: "balanced" };
+      const thinkTicks = settings.difficulty === "easy" ? AI_THINK_TICKS * 2
+        : settings.difficulty === "hard" ? Math.floor(AI_THINK_TICKS / 2) : AI_THINK_TICKS;
+      if (this.state.tick % thinkTicks !== 0) continue;
       const yards = this.state.structures
         .filter((structure) => structure.ownerPlayerId === playerId
           && SHIPYARD_TYPES.includes(structure.type as ShipyardType)
@@ -1237,16 +1326,12 @@ export class GameSimulation {
         .sort((left, right) => left.id - right.id);
       const ownedShips = this.state.ships.filter((ship) => ship.ownerPlayerId === playerId);
       const hasMobileFabricator = ownedShips.some((ship) => SHIPS[ship.class].buildPower > 0);
+      const queueDepth = (settings.difficulty === "easy" ? 1 : settings.difficulty === "hard" ? 4 : 3)
+        + (settings.personality === "aggressive" ? 1 : 0);
       for (const yard of yards) {
-        if (yard.productionQueue.length >= 3) continue;
-        const roster = yard.type === "capitalShipyard"
-          ? (["carrier", "battleship"] as const)
-          : yard.type === "fleetShipyard"
-            ? (["flakFrigate", "torpedoFrigate", "destroyer", "cruiser"] as const)
-            : hasMobileFabricator
-              ? (["fighter", "fighter", "bomber", "frigate"] as const)
-              : (["fabricator"] as const);
-        const shipClass = roster[(ownedShips.length + yard.id + this.state.tick / AI_THINK_TICKS) % roster.length | 0]!;
+        if (yard.productionQueue.length >= queueDepth) continue;
+        const roster = this.aiProductionRoster(yard.type as ShipyardType, hasMobileFabricator, settings.personality);
+        const shipClass = roster[(ownedShips.length + yard.id + this.state.tick / thinkTicks) % roster.length | 0]!;
         if (!this.canStructureProduceShipClass(playerId, yard.id, shipClass)) continue;
         this.submitCommand({
           type: "queueUnit", playerId, sequence: player.lastCommandSequence + 1,
@@ -1256,7 +1341,9 @@ export class GameSimulation {
       const extractors = this.state.structures.filter(
         (structure) => structure.ownerPlayerId === playerId && structure.type === "extractor",
       );
-      if (extractors.length < 3 && this.state.tick % (AI_THINK_TICKS * 10) === 0) {
+      const extractorTarget = (settings.difficulty === "easy" ? 2 : settings.difficulty === "hard" ? 4 : 3)
+        + (settings.personality === "economic" ? 1 : 0);
+      if (extractors.length < extractorTarget && this.state.tick % (thinkTicks * 6) === 0) {
         const core = this.state.structures.find((structure) => structure.ownerPlayerId === playerId && structure.type === "commandCore");
         const node = core && this.state.resourceNodes
           .filter((candidate) => candidate.claimedByStructureId === null)
@@ -1269,37 +1356,66 @@ export class GameSimulation {
           });
         }
       }
-      if (this.state.tick % (AI_THINK_TICKS * 4) === 0) this.advanceAiInfrastructure(playerId);
-      if (this.state.tick % (AI_THINK_TICKS * 5) === 0) {
+      if (this.state.tick % (thinkTicks * 3) === 0) this.advanceAiInfrastructure(playerId, settings.personality);
+      if ((settings.personality === "turtle" || settings.difficulty === "hard")
+        && this.state.tick % (thinkTicks * 8) === 0) this.advanceAiDefenses(playerId, settings);
+      const attackThreshold = settings.personality === "aggressive" ? 3
+        : settings.personality === "turtle" ? 10
+          : settings.personality === "economic" ? 7 : 5;
+      const attackCadence = settings.personality === "aggressive" ? 3 : settings.personality === "turtle" ? 9 : 5;
+      if (this.state.tick % (thinkTicks * attackCadence) === 0) {
         const fleet = this.state.ships.filter(
           (ship) => ship.ownerPlayerId === playerId && SHIPS[ship.class].buildPower <= 0,
         );
-        const enemyCore = this.state.structures.find(
-          (structure) => structure.type === "commandCore"
-            && this.isHostile(player.teamId, structure.teamId)
-            && this.isEntityVisible(player.teamId, structure.id),
-        );
-        if (fleet.length > 0 && enemyCore) {
+        const center = fleet.reduce((point, ship) => ({ x: point.x + ship.x, z: point.z + ship.z }), { x: 0, z: 0 });
+        if (fleet.length > 0) { center.x /= fleet.length; center.z /= fleet.length; }
+        const target = this.state.structures
+          .filter((structure) => this.isHostile(player.teamId, structure.teamId)
+            && this.isEntityVisible(player.teamId, structure.id))
+          .sort((left, right) => {
+            const priority = (structure: StructureState) => structure.type === "commandCore" ? 0
+              : SHIPYARD_TYPES.includes(structure.type as ShipyardType) ? 1 : 2;
+            return priority(left) - priority(right)
+              || distanceSquared(center, left) - distanceSquared(center, right)
+              || left.id - right.id;
+          })[0];
+        if (fleet.length >= attackThreshold && target) {
           this.submitCommand({
             type: "attackMove", playerId, sequence: player.lastCommandSequence + 1,
             requestedTick: this.state.tick + 1, unitIds: fleet.map((ship) => ship.id), queued: false,
-            destination: { x: enemyCore.x, z: enemyCore.z },
+            destination: { x: target.x, z: target.z },
           });
         }
       }
     }
   }
 
-  private advanceAiInfrastructure(playerId: PlayerId): void {
+  private aiProductionRoster(yardType: ShipyardType, hasFabricator: boolean, personality: AiPersonality): readonly ShipClass[] {
+    if (yardType === "capitalShipyard") return personality === "turtle"
+      ? ["battleship", "carrier", "battleship"] : personality === "aggressive"
+        ? ["battleship", "battleship", "carrier"] : ["carrier", "battleship"];
+    if (yardType === "fleetShipyard") return personality === "turtle"
+      ? ["flakFrigate", "destroyer", "flakFrigate", "cruiser"] : personality === "aggressive"
+        ? ["torpedoFrigate", "destroyer", "torpedoFrigate", "cruiser"]
+        : ["flakFrigate", "torpedoFrigate", "destroyer", "cruiser"];
+    if (!hasFabricator) return ["fabricator"];
+    return personality === "aggressive" ? ["fighter", "bomber", "fighter", "frigate", "bomber"]
+      : personality === "turtle" ? ["frigate", "fighter", "frigate", "bomber"]
+        : personality === "economic" ? ["frigate", "fighter", "fabricator", "bomber"]
+          : ["fighter", "fighter", "bomber", "frigate"];
+  }
+
+  private advanceAiInfrastructure(playerId: PlayerId, personality: AiPersonality): void {
     const player = this.state.players.find((candidate) => candidate.id === playerId);
     const core = this.state.structures.find(
       (structure) => structure.ownerPlayerId === playerId && structure.type === "commandCore" && structure.buildProgress >= 1,
     );
     if (!player || !core) return;
-    const progression: readonly Exclude<StructureType, "commandCore">[] = [
-      "fabricator", "storage", "fleetShipyard", "fusionReactor",
-      "capitalShipyard", "antimatterReactor", "quantumStorage",
-    ];
+    const progression: readonly Exclude<StructureType, "commandCore">[] = personality === "economic"
+      ? ["fabricator", "storage", "fleetShipyard", "fusionReactor", "antimatterReactor", "quantumStorage", "capitalShipyard"]
+      : personality === "aggressive"
+        ? ["fabricator", "fleetShipyard", "fusionReactor", "capitalShipyard", "storage", "antimatterReactor", "quantumStorage"]
+        : ["fabricator", "storage", "fleetShipyard", "fusionReactor", "capitalShipyard", "antimatterReactor", "quantumStorage"];
     for (const structureType of progression) {
       if (this.state.structures.some((structure) => structure.ownerPlayerId === playerId && structure.type === structureType)) continue;
       if (!this.canBuildStructure(playerId, structureType)) return;
@@ -1316,6 +1432,26 @@ export class GameSimulation {
       });
       return;
     }
+  }
+
+  private advanceAiDefenses(playerId: PlayerId, settings: AiCommanderSettings): void {
+    const core = this.state.structures.find(
+      (structure) => structure.ownerPlayerId === playerId && structure.type === "commandCore" && structure.buildProgress >= 1,
+    );
+    if (!core) return;
+    const defenses = this.state.structures.filter(
+      (structure) => structure.ownerPlayerId === playerId && DEFENSIVE_STRUCTURE_TYPES.includes(structure.type as typeof DEFENSIVE_STRUCTURE_TYPES[number]),
+    );
+    const limit = settings.personality === "turtle" ? (settings.difficulty === "hard" ? 8 : 6) : 3;
+    if (defenses.length >= limit) return;
+    const choices: readonly Exclude<StructureType, "commandCore">[] = ["pointDefenseBattery", "missileBattery", "railBattery"];
+    const structureType = choices[defenses.length % choices.length]!;
+    if (!this.canBuildStructure(playerId, structureType)) return;
+    const position = this.findAiBuildPosition(playerId, structureType, core);
+    if (!position) return;
+    const player = this.state.players.find((candidate) => candidate.id === playerId)!;
+    this.submitCommand({ type: "buildStructure", playerId, sequence: player.lastCommandSequence + 1,
+      requestedTick: this.state.tick + 1, structureType, position, queued: false });
   }
 
   private findAiBuildPosition(
@@ -1419,10 +1555,12 @@ export function createCombatScenario(options: ScenarioOptions = {}): GameSimulat
   const fightersPerTeam = options.fightersPerTeam ?? 2;
   const bombersPerTeam = options.bombersPerTeam ?? 2;
   const palette = [0x59a7ff, 0xff5576, 0x62e6a7, 0xf3b65b, 0xb886ff, 0x55e1e8, 0xff8b55, 0xd8e65b];
-  const configs: readonly ScenarioPlayerConfig[] = options.players ?? [
+  const suppliedConfigs: readonly ScenarioPlayerConfig[] = options.players ?? [
     { id: "pilot-blue", name: "Aster Vanguard", teamId: 1, color: palette[0]! },
     { id: "pilot-red", name: "Crimson Relay", teamId: 2, color: palette[1]!, ai: options.enemyCommander !== false },
   ];
+  const teamSpawnMode = options.teamSpawnMode ?? "interleaved";
+  const configs = orderPlayersForSpawns(suppliedConfigs, teamSpawnMode, seed);
   if (configs.length < 2 || configs.length > 8) throw new Error("A scenario requires 2–8 players");
   if (new Set(configs.map((player) => player.id)).size !== configs.length) throw new Error("Player IDs must be unique");
   const mapPreset = options.mapPreset ?? "orbital-ring";
@@ -1456,6 +1594,10 @@ export function createCombatScenario(options: ScenarioOptions = {}): GameSimulat
     visibility: [],
     projectiles: [], commandQueue: [],
     aiPlayerIds: configs.filter((player) => player.ai).map((player) => player.id),
+    aiCommanders: Object.fromEntries(configs.filter((player) => player.ai).map((player) => [player.id, {
+      difficulty: player.aiDifficulty ?? "normal",
+      personality: player.aiPersonality ?? "balanced",
+    }])),
     status: "playing", winnerTeamId: null, checksum: 0,
   };
 
@@ -1509,9 +1651,11 @@ export function createCombatScenario(options: ScenarioOptions = {}): GameSimulat
 
   if (options.players === undefined) {
     const blueSafeNode = addNode(-80, -315, 1);
+    addNode(-390, -325, 1); addNode(40, -535, 1);
     addNode(-260, -220, 1.15); addNode(210, -180, 1.25); addNode(-180, 0, 1.4);
     addNode(0, 0, 1.7); addNode(180, 0, 1.4); addNode(-210, 180, 1.25); addNode(260, 220, 1.15);
     const redSafeNode = addNode(80, 315, 1);
+    addNode(390, 325, 1); addNode(-40, 535, 1);
     addStructure(players[0]!, "commandCore", -170, -410, 0, { x: -170, z: -290 });
     addStructure(players[0]!, "extractor", blueSafeNode.x, blueSafeNode.z, 0, { x: -80, z: -205 }, blueSafeNode);
     addStructure(players[0]!, "solarArray", -265, -330, 0, { x: -265, z: -210 });
@@ -1575,6 +1719,14 @@ export function createCombatScenario(options: ScenarioOptions = {}): GameSimulat
         baseZ + inwardZ * 105 * clusterScale + tangentZ * 55 * clusterScale,
         density.richness,
       );
+      for (let localNode = 1; localNode < STARTING_RESOURCE_NODES_PER_PLAYER; localNode += 1) {
+        const tangent = (localNode === 1 ? -1 : 1) * 220 * clusterScale;
+        addNode(
+          baseX + inwardX * 260 * clusterScale + tangentX * tangent,
+          baseZ + inwardZ * 260 * clusterScale + tangentZ * tangent,
+          density.richness,
+        );
+      }
       addStructure(player, "commandCore", baseX, baseZ, yaw, rally);
       addStructure(player, "extractor", safeNode.x, safeNode.z, yaw, rally, safeNode);
       addStructure(player, "solarArray", baseX + inwardX * 70 * clusterScale - tangentX * 92 * clusterScale, baseZ + inwardZ * 70 * clusterScale - tangentZ * 92 * clusterScale, yaw, rally);
@@ -1639,6 +1791,29 @@ export function createCombatScenario(options: ScenarioOptions = {}): GameSimulat
         spawnFormation("carrier", 1, 770, 1, 1, 1);
         spawnFormation("battleship", 1, 870, 1, 1, 1);
       }
+      if (options.menuBattle === true) {
+        const spawnMenuFormation = (
+          shipClass: ShipClass,
+          count: number,
+          radialDistance: number,
+          columns: number,
+          lateralSpacing: number,
+          depthSpacing: number,
+        ): void => {
+          for (let unit = 0; unit < count; unit += 1) {
+            const row = Math.floor(unit / columns);
+            const column = unit % columns;
+            const unitsInRow = Math.min(columns, count - row * columns);
+            const lateral = (column - (unitsInRow - 1) / 2) * lateralSpacing;
+            const radius = radialDistance + row * depthSpacing;
+            spawn(player, shipClass, outwardX * radius + tangentX * lateral, outwardZ * radius + tangentZ * lateral, yaw);
+          }
+        };
+        spawnMenuFormation("fighter", 16, 300, 8, 38, 42);
+        spawnMenuFormation("bomber", 4, 390, 4, 48, 52);
+        spawnMenuFormation("cruiser", 1, 475, 1, 1, 1);
+        spawnMenuFormation("battleship", 1, 560, 1, 1, 1);
+      }
       if (options.startingFleet === true) {
         const fleetX = baseX + inwardX * 120;
         const fleetZ = baseZ + inwardZ * 120;
@@ -1691,6 +1866,23 @@ export function createCombatScenario(options: ScenarioOptions = {}): GameSimulat
         }
       }
     }
+  } else if (options.menuBattle === true) {
+    for (const player of players) {
+      const fleet = state.ships.filter((ship) => ship.ownerPlayerId === player.id);
+      const classes = [...new Set(fleet.map((ship) => ship.class))];
+      for (const shipClass of classes) {
+        const classFleet = fleet.filter((ship) => ship.class === shipClass);
+        for (const assignment of computeFormationAssignments(classFleet, { x: 0, z: 0 })) {
+          const ship = state.ships.find((candidate) => candidate.id === assignment.shipId)!;
+          ship.orders = [{
+            type: "patrol",
+            destination: projectNavigableDestination(state, ship, assignment.destination),
+            facing: assignment.facing,
+            patrolOrigin: { x: ship.x, z: ship.z },
+          }];
+        }
+      }
+    }
   } else if (options.startingFleet === true) {
     for (const player of players) {
       const fleet = state.ships.filter((ship) => ship.ownerPlayerId === player.id);
@@ -1710,6 +1902,29 @@ export function createCombatScenario(options: ScenarioOptions = {}): GameSimulat
   return new GameSimulation(state, undefined, options.showcase === true ? 6 : 1);
 }
 
+function orderPlayersForSpawns(
+  players: readonly ScenarioPlayerConfig[],
+  mode: NonNullable<ScenarioOptions["teamSpawnMode"]>,
+  seed: number,
+): ScenarioPlayerConfig[] {
+  const ordered = [...players];
+  if (mode === "together") {
+    return ordered.sort((a, b) => a.teamId - b.teamId);
+  }
+  if (mode === "random") {
+    let state = (seed ^ 0x51a7_5eed) >>> 0;
+    const random = () => {
+      state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0;
+      return state / 0x1_0000_0000;
+    };
+    for (let index = ordered.length - 1; index > 0; index -= 1) {
+      const swapIndex = Math.floor(random() * (index + 1));
+      [ordered[index], ordered[swapIndex]] = [ordered[swapIndex]!, ordered[index]!];
+    }
+  }
+  return ordered;
+}
+
 export function createShowcaseScenario(): GameSimulation {
   return createCombatScenario({
     seed: 0x5a0ca5e,
@@ -1723,6 +1938,27 @@ export function createShowcaseScenario(): GameSimulation {
       { id: "showcase-crimson", name: "Crimson Relay", teamId: 2, color: 0xff5576, ai: true },
       { id: "showcase-helios", name: "Helios Wing", teamId: 1, color: 0x55e1e8, ai: true },
       { id: "showcase-ember", name: "Ember Legion", teamId: 2, color: 0xff8b55, ai: true },
+    ],
+  });
+}
+
+export function createMenuBattleScenario(): GameSimulation {
+  return createCombatScenario({
+    seed: 0x1f1f7,
+    menuBattle: true,
+    mapPreset: "open-expanse",
+    mapSize: "small",
+    startingResources: "high",
+    resourceDensity: "scarce",
+    players: [
+      {
+        id: "menu-aster", name: "Aster Interceptor Wing", teamId: 1, color: 0x59a7ff,
+        ai: true, aiDifficulty: "hard", aiPersonality: "aggressive",
+      },
+      {
+        id: "menu-crimson", name: "Crimson Strike Group", teamId: 2, color: 0xff5576,
+        ai: true, aiDifficulty: "hard", aiPersonality: "aggressive",
+      },
     ],
   });
 }
@@ -1752,10 +1988,25 @@ export function computeFormationAssignments(
     const lineLength = Math.hypot(lineX, lineZ);
     const directionX = lineX / lineLength;
     const directionZ = lineZ / lineLength;
-    const effectiveLength = Math.max(lineLength, spacing * Math.max(0, ships.length - 1));
+    const forwardX = Math.sin(facing);
+    const forwardZ = Math.cos(facing);
+    // The drag defines the available frontage, not a compulsory single rank.
+    // Ships that do not fit across that frontage fill centered ranks behind it.
+    const compactColumns = Math.max(1, Math.ceil(Math.sqrt(ships.length * 1.6)));
+    const draggedColumns = Math.floor(lineLength / spacing) + 1;
+    const columns = Math.min(ships.length, Math.max(compactColumns, draggedColumns));
+    const columnSpacing = columns <= 1 ? 0 : Math.max(spacing, lineLength / (columns - 1));
     for (let index = 0; index < ships.length; index += 1) {
-      const offset = ships.length === 1 ? 0 : (index / (ships.length - 1) - 0.5) * effectiveLength;
-      slots.push({ x: midpoint.x + directionX * offset, z: midpoint.z + directionZ * offset, index });
+      const row = Math.floor(index / columns);
+      const column = index % columns;
+      const unitsInRow = Math.min(columns, ships.length - row * columns);
+      const lateral = (column - (unitsInRow - 1) / 2) * columnSpacing;
+      const depth = row * spacing;
+      slots.push({
+        x: midpoint.x + directionX * lateral - forwardX * depth,
+        z: midpoint.z + directionZ * lateral - forwardZ * depth,
+        index,
+      });
     }
   } else {
     facing = Math.atan2(destination.x - centroid.x, destination.z - centroid.z);
@@ -1803,9 +2054,13 @@ export function restoreSimulation(snapshot: SimulationState, physicsWorld?: Plan
     obstacles?: ObstacleState[];
     visibility?: SimulationState["visibility"];
     version: number;
+    aiCommanders?: SimulationState["aiCommanders"];
   };
   restored.obstacles ??= [];
   restored.visibility ??= [];
+  restored.aiCommanders ??= Object.fromEntries(restored.aiPlayerIds.map((playerId) => [playerId, {
+    difficulty: "normal", personality: "balanced",
+  }]));
   restored.version = 7;
   return new GameSimulation(restored as SimulationState, physicsWorld);
 }
@@ -1924,6 +2179,33 @@ function getPublicShipAltitude(id: EntityId, shipClass: ShipClass): number {
   const value = Math.imul(id ^ classSalt, 0x9e3779b1) >>> 0;
   const altitudeSpread = shipClass === "fighter" ? 18 : shipClass === "bomber" ? 11 : 5;
   return ((value % 1_000) / 1_000 - 0.5) * altitudeSpread;
+}
+
+function isSmallCraft(shipClass: ShipClass): boolean {
+  return shipClass === "fighter" || shipClass === "bomber";
+}
+
+function shipsUseFormationSeparation(left: ShipClass, right: ShipClass): boolean {
+  return !(isSmallCraft(left) && CAPITAL_SHIP_CLASSES.has(right)
+    || CAPITAL_SHIP_CLASSES.has(left) && isSmallCraft(right));
+}
+
+function shipCollisionFilter(shipClass: ShipClass): { category: number; mask: number } {
+  if (isSmallCraft(shipClass)) {
+    return {
+      category: SMALL_CRAFT_COLLISION_CATEGORY,
+      mask: ALL_COLLISION_CATEGORIES
+        & ~SMALL_CRAFT_COLLISION_CATEGORY
+        & ~CAPITAL_SHIP_COLLISION_CATEGORY,
+    };
+  }
+  if (CAPITAL_SHIP_CLASSES.has(shipClass)) {
+    return {
+      category: CAPITAL_SHIP_COLLISION_CATEGORY,
+      mask: ALL_COLLISION_CATEGORIES & ~SMALL_CRAFT_COLLISION_CATEGORY,
+    };
+  }
+  return { category: REGULAR_SHIP_COLLISION_CATEGORY, mask: ALL_COLLISION_CATEGORIES };
 }
 
 function compareCodeUnits(left: string, right: string): number {

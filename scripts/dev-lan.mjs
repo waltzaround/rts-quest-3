@@ -22,12 +22,21 @@ function start(label, args) {
     cwd: root,
     stdio: "inherit",
     detached: process.platform !== "win32",
+    // Windows cannot execute pnpm.cmd directly without a command shell.
+    // Without this, Node 22 throws spawn EINVAL before either service starts.
+    shell: process.platform === "win32",
     env: {
       ...process.env,
       VOIDFRONT_AUTHORITY_ORIGIN: `http://127.0.0.1:${authorityPort}`,
     },
   });
   children.add(child);
+  child.once("error", (error) => {
+    children.delete(child);
+    if (stopping) return;
+    console.error(`\nCould not start ${label}: ${error.message}`);
+    shutdown(1);
+  });
   child.once("exit", (code, signal) => {
     children.delete(child);
     if (stopping) return;

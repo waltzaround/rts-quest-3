@@ -58,6 +58,7 @@ export {
   GameSimulation,
   computeFormationAssignments,
   createCombatScenario,
+  createMenuBattleScenario,
   createShowcaseScenario,
   getLocalBearing,
   getTurretMuzzleWorldPosition,

@@ -276,7 +276,7 @@ export class BatchedShipRenderer {
     }
 
     const turretMaterial = new THREE.MeshStandardMaterial({
-      color: 0xffffff, emissive: 0x02070a, metalness: 0.82, roughness: 0.3,
+      color: 0xffffff, emissive: 0x061017, emissiveIntensity: 0.5, metalness: 0.72, roughness: 0.34,
       flatShading: true, vertexColors: true,
     });
     for (const weaponType of WEAPON_TYPES) {
@@ -452,14 +452,20 @@ export class BatchedShipRenderer {
     for (let index = 0; index < state.turretCount; index += 1) {
       const ownerIndex = state.turretOwner[index]!;
       const classId = state.shipClass[ownerIndex]!;
-      const turretScale = SHIP_TURRET_SCALES[SHIP_CLASSES[classId]!] ?? 1.24;
+      const shipClass = SHIP_CLASSES[classId]!;
+      const turretScale = SHIP_TURRET_SCALES[shipClass] ?? 1.24;
+      const verticalScale = shipClass === "cruiser" || shipClass === "carrier" || shipClass === "battleship"
+        ? 0.62
+        : shipClass === "destroyer"
+          ? 0.74
+          : 0.86;
       this.localMatrix.makeRotationY(state.turretYaw[index]!);
       this.localMatrix.setPosition(
         state.turretLocalX[index]!,
         state.turretLocalY[index]!,
         state.turretLocalZ[index]!,
       );
-      this.localMatrix.scale(this.scale.setScalar(turretScale));
+      this.localMatrix.scale(this.scale.set(turretScale, turretScale * verticalScale, turretScale));
       this.matrix.fromArray(this.shipMatrices, ownerIndex * 16).multiply(this.localMatrix);
       this.color.setHex(state.turretColor[index]!);
       this.writeInstance(this.turretBatches[state.turretType[index]!]!, this.matrix, this.color);
@@ -796,8 +802,24 @@ export class CombatEffectRenderer {
       this.shield.spawn(hitX, hitY, hitZ, rippleSize, 0xa8e9ff, now, 165);
       return;
     }
-    const sparkSize = Math.min(1.35, Math.max(0.3, radius * 0.035 + Math.sqrt(damage) * 0.045));
-    this.muzzle.spawn(hitX, hitY, hitZ, sparkSize, 0xffb873, now, 82);
+    const damageScale = Math.min(1, Math.sqrt(damage) / 12);
+    const blastSize = Math.min(radius * 0.3, Math.max(0.75, radius * 0.07 + damageScale * 1.5));
+    this.muzzle.spawn(hitX, hitY, hitZ, blastSize * 0.72, 0xffffff, now, 105);
+    this.flash.spawn(hitX, hitY, hitZ, blastSize, 0xffb04f, now, 235);
+    this.shock.spawn(hitX, hitY, hitZ, blastSize * 0.92, 0xff6a2a, now, 310);
+
+    // Hull fragments reuse the fixed debris pool. Counts remain deliberately
+    // small because sustained fleet fire can generate hundreds of hits/second.
+    const debrisCount = this.quality === "low" ? 1 : this.quality === "medium" ? 2 : 3;
+    for (let index = 0; index < debrisCount; index += 1) {
+      const debrisAngle = angle + index * 2.0944;
+      const speed = 5 + damageScale * 9 + index * 2;
+      this.debris.spawn(
+        hitX, hitY, hitZ, Math.max(0.22, blastSize * 0.18), index === 0 ? 0xffd18a : 0x9d4c28,
+        now, 420 + index * 75,
+        Math.sin(debrisAngle) * speed, 2 + damageScale * 5 + index, Math.cos(debrisAngle) * speed,
+      );
+    }
   }
 
   spawnBeam(

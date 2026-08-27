@@ -90,6 +90,7 @@ const lobby = {
     mapSize: "medium",
     startingResources: "standard",
     resourceDensity: "standard",
+    teamSpawnMode: "together",
   },
   maxPlayers: 8,
   slots: [],
@@ -102,6 +103,10 @@ assert.equal(parseClientMessage(JSON.stringify({
   type: "set_settings",
   settings: { ...lobby.settings, mapSize: "planet-sized" },
 })), null, "unknown lobby settings must fail validation");
+assert.equal(parseClientMessage(JSON.stringify({
+  type: "set_settings",
+  settings: { ...lobby.settings, teamSpawnMode: "host-picks" },
+})), null, "unknown team deployment modes must fail validation");
 
 const spectatorToken = "grant-123456789";
 assert.equal(parseClientMessage(JSON.stringify({

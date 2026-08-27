@@ -109,6 +109,7 @@
           <div class="command-grid hidden" id="fleet-controls">
             <button id="cmd-move"><b>↗</b><span>MOVE</span><kbd>M</kbd></button>
             <button id="cmd-attack"><b>⌖</b><span>ATTACK MOVE</span><kbd>A</kbd></button>
+            <button id="cmd-patrol"><b>⇄</b><span>PATROL</span><kbd>P</kbd></button>
             <button id="focus"><b>◎</b><span>FOCUS FIRE</span><kbd>F</kbd></button>
             <button id="cmd-stop"><b>■</b><span>STOP</span><kbd>S</kbd></button>
             <button id="cmd-hold"><b>◉</b><span>HOLD</span><kbd>H</kbd></button>
@@ -156,12 +157,26 @@
       </section>
       <div id="network-overlay" class="visible">
         <section class="network-card panel-edge">
-          <button id="network-close" class="network-close" type="button" aria-label="Close multiplayer panel">×</button>
-          <div class="network-kicker">VOIDFRONT COMMAND NETWORK</div>
-          <h1>MULTIPLAYER</h1>
-          <p class="network-intro">Host or join an authoritative 2–8 player engagement on your local network.</p>
+          <button id="network-close" class="network-close" type="button" aria-label="Back">←</button>
 
-          <div id="network-join-view">
+          <div id="start-view" class="start-screen">
+            <div class="start-menu-panel">
+              <div class="start-emblem" aria-hidden="true"><i></i><span>V</span><i></i></div>
+              <div class="network-kicker">DEEP-SPACE COMMAND SIMULATION</div>
+              <h1>VOIDFRONT</h1>
+              <p class="start-tagline">Build the war machine. Command the formation. Control the battlespace.</p>
+              <div class="start-actions">
+                <button id="play-local" class="start-primary" type="button"><b>LOCAL SKIRMISH</b><small>SOLO COMMAND · AI OPPOSITION · NO NETWORK REQUIRED</small></button>
+                <button id="open-multiplayer" class="start-secondary" type="button"><b>MULTIPLAYER</b><small>HOST OR JOIN A 2–8 COMMANDER LAN ENGAGEMENT</small></button>
+                <button id="play-demo" class="start-secondary" type="button"><b>OBSERVE SIMULATION</b><small>ENTER THE LIVE AUTONOMOUS BATTLE RUNNING BEHIND THIS MENU</small></button>
+              </div>
+              <div class="start-footer"><span>BUILD 0.1 // BOX3D WASM</span><span>LOCAL SIMULATION</span></div>
+            </div>
+            <div class="start-battle-status"><i></i><span><small>LIVE BACKGROUND SIMULATION</small><b>1V1 · 32 FIGHTER SQUADS · LOCAL ONLY</b></span></div>
+          </div>
+
+          <div id="network-join-view" class="hidden">
+            <header class="network-join-heading"><div class="network-kicker">VOIDFRONT COMMAND NETWORK</div><h1>MULTIPLAYER</h1><p class="network-intro">Host or join an authoritative 2–8 player engagement on your local network.</p></header>
             <label>PILOT CALLSIGN<input id="pilot-name" maxlength="32" autocomplete="nickname" value="Commander" /></label>
             <label>LOBBY CODE<input id="match-code" maxlength="4" inputmode="numeric" pattern="[0-9]{4}" autocomplete="one-time-code" spellcheck="false" placeholder="4 DIGITS" /></label>
             <button id="create-match" class="network-primary" type="button">CREATE NEW LOBBY</button>
@@ -172,18 +187,15 @@
               <button id="watch-replay" class="network-secondary" type="button">POST-MATCH REPLAY</button>
             </div>
             <p class="lan-help">On the host computer, run <b>pnpm dev:lan</b>. Other computers open the LAN address it prints.</p>
-            <button id="play-demo" class="network-demo" type="button"><span>WATCH BATTLE SHOWCASE</span><small>288 VISIBLE CRAFT · 16 AUTO-FACTORIES · OMNISCIENT</small></button>
-            <button id="play-local" class="network-link" type="button">PLAY LOCAL SKIRMISH</button>
           </div>
 
           <div id="network-lobby-view" class="hidden">
             <div class="lobby-titlebar"><div><small>CUSTOM ENGAGEMENT</small><h2>CREATE LOBBY</h2></div><span>HOST CONFIGURATION</span></div>
             <div class="lobby-heading"><div><small>MATCH CODE</small><strong id="lobby-match-code">—</strong></div><span id="lobby-status">CONTACTING AUTHORITY…</span></div>
-            <div class="lobby-share"><span><small>LAN INVITE</small><strong id="lobby-invite-url">Preparing invite…</strong></span><button id="copy-lobby-invite" type="button">COPY INVITE</button></div>
             <div class="lobby-grid">
               <div class="lobby-roster-column">
                 <div class="lobby-section-heading"><span>PLAYER SLOTS</span><small id="lobby-capacity">0 / 6</small></div>
-                <div class="lobby-slot-head"><span>PLAYER</span><span>TEAM</span><span>STATUS</span></div>
+                <div class="lobby-slot-head"><span>COMMANDER</span><span>TYPE</span><span>TEAM</span><span>STATUS</span></div>
                 <div id="lobby-slots" class="lobby-slots"></div>
                 <div class="lobby-loadout">
                   <label>YOUR TEAM
@@ -196,24 +208,40 @@
                 </div>
               </div>
               <section class="lobby-settings-panel">
-                <div class="lobby-section-heading"><span>GAME SETTINGS</span><small id="settings-authority">HOST CONTROL</small></div>
+                <div class="lobby-section-heading"><span>BATTLESPACE INTEL</span><small id="settings-authority">HOST CONTROL</small></div>
+                <div class="map-preview-shell" aria-hidden="true">
+                  <div id="map-preview" class="map-preview map-orbital-ring">
+                    <i class="map-orbit orbit-a"></i><i class="map-orbit orbit-b"></i><i class="map-core"></i>
+                    <b class="map-node node-a"></b><b class="map-node node-b"></b><b class="map-node node-c"></b><b class="map-node node-d"></b>
+                    <span>TACTICAL SCAN</span>
+                  </div>
+                </div>
                 <div class="setting-group-label">BATTLEFIELD</div>
                 <div class="lobby-settings-grid">
                   <label>MAP LAYOUT<select id="map-preset"><option value="orbital-ring">ORBITAL RING</option><option value="crossfire">CROSSFIRE</option><option value="open-expanse">OPEN EXPANSE</option></select></label>
                   <label>MAP SIZE<select id="map-size"><option value="small">SMALL · 2–4</option><option value="medium">MEDIUM · 2–6</option><option value="large">LARGE · 2–8</option></select></label>
                   <label>STARTING RESOURCES<select id="starting-resources"><option value="low">LOW · 500</option><option value="standard">STANDARD · 900</option><option value="high">HIGH · 1,800</option></select></label>
                   <label>RESOURCE DENSITY<select id="resource-density"><option value="scarce">SCARCE</option><option value="standard">STANDARD</option><option value="rich">RICH</option></select></label>
+                  <label id="team-spawn-setting">TEAM DEPLOYMENT<select id="team-spawn-mode"><option value="together">TOGETHER · ALLIED SECTOR</option><option value="interleaved">INTERLEAVED · EVEN SPACING</option><option value="random">RANDOM · SEEDED</option></select></label>
                 </div>
                 <div class="setting-group-label rules-label">GAME MODE</div>
                 <div class="mode-control lobby-mode-control"><button id="mode-teams" type="button"><b>TEAM CONQUEST</b><small>SHARED VICTORY</small></button><button id="mode-ffa" type="button"><b>FREE-FOR-ALL</b><small>LAST COMMANDER</small></button></div>
                 <p id="map-description">Balanced resource ring with a contested central field.</p>
               </section>
             </div>
-            <div id="host-controls" class="host-controls hidden">
-              <button id="add-ai" type="button">+ ADD AI</button>
-              <label>VIEW TEAM<select id="spectator-team-select"><option value="1">TEAM 1</option><option value="2">TEAM 2</option><option value="3">TEAM 3</option><option value="4">TEAM 4</option><option value="5">TEAM 5</option><option value="6">TEAM 6</option><option value="7">TEAM 7</option><option value="8">TEAM 8</option></select></label>
-              <button id="authorize-spectator" type="button">CREATE VIEW TOKEN</button>
-              <button id="start-match" class="network-primary" type="button">LAUNCH MATCH</button>
+            <div class="lobby-command-row">
+              <div class="lobby-transmission">
+                <div class="transmission-log"><small>COMMAND NETWORK</small><p><i></i> Lobby channel established. Share the access vector with allied commanders.</p></div>
+                <div class="lobby-share"><span><small>LAN INVITE</small><strong id="lobby-invite-url">Preparing invite…</strong></span><button id="copy-lobby-invite" type="button">COPY VECTOR</button></div>
+              </div>
+              <div id="host-controls" class="host-controls hidden">
+                <label>AI SKILL<select id="ai-difficulty"><option value="easy">EASY</option><option value="normal" selected>NORMAL</option><option value="hard">HARD</option></select></label>
+                <label>AI DOCTRINE<select id="ai-personality"><option value="balanced">BALANCED</option><option value="aggressive">AGGRESSIVE</option><option value="turtle">TURTLE</option><option value="economic">ECONOMIC</option></select></label>
+                <button id="add-ai" type="button">+ ADD AI</button>
+                <label>VIEW TEAM<select id="spectator-team-select"><option value="1">TEAM 1</option><option value="2">TEAM 2</option><option value="3">TEAM 3</option><option value="4">TEAM 4</option><option value="5">TEAM 5</option><option value="6">TEAM 6</option><option value="7">TEAM 7</option><option value="8">TEAM 8</option></select></label>
+                <button id="authorize-spectator" type="button">VIEW TOKEN</button>
+                <button id="start-match" class="network-primary" type="button">LAUNCH MATCH</button>
+              </div>
             </div>
             <div id="spectator-grant" class="spectator-grant hidden"><span><small>TEAM VIEW TOKEN</small><strong id="spectator-grant-token">—</strong></span><button id="copy-spectator-token" type="button">COPY TOKEN</button></div>
             <button id="leave-match" class="network-link" type="button">LEAVE NETWORK</button>

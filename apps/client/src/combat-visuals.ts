@@ -634,9 +634,9 @@ export function getBatchedTurretGeometry(weaponTypeId: WeaponTypeId): THREE.Buff
   if (cached) return cached;
   const parts = makeTurretGeometry("frigate", weaponTypeId);
   const geometry = merge([
-    applyVertexShade(parts.mount, 0.34),
-    applyVertexShade(parts.barrel, 0.48),
-    applyVertexShade(parts.accent, 0.92),
+    applyVertexShade(parts.mount, 0.46),
+    applyVertexShade(parts.barrel, 0.62),
+    applyVertexShade(parts.accent, 1),
   ]);
   batchedTurretGeometries.set(weaponTypeId, geometry);
   return geometry;

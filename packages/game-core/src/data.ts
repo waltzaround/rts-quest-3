@@ -121,24 +121,24 @@ export function getFighterSquadMemberPose(shipId: number, memberIndex: number, t
 
 export const SHIPS: Readonly<Record<ShipClass, ShipDefinition>> = {
   fighter: {
-    class: "fighter", radius: 12, mass: 40, maxHealth: 700, maxShield: 200, speed: 58,
+    class: "fighter", radius: 12, mass: 40, maxHealth: 700, maxShield: 200, speed: 72.5,
     turnRate: 150 * DEG, sensorRange: 270, buildPower: 0, buildRange: 0,
     hardpoints: FIGHTER_SQUAD_OFFSETS.map(([localX, localZ]) => hp(localX, localZ + 2.1, 0, 75, "autocannon")),
   },
   fabricator: {
-    class: "fabricator", radius: 9.5, mass: 58, maxHealth: 620, maxShield: 240, speed: 28,
+    class: "fabricator", radius: 9.5, mass: 58, maxHealth: 620, maxShield: 240, speed: 35,
     turnRate: 82 * DEG, sensorRange: 340, buildPower: 1.35, buildRange: 150,
     hardpoints: [hp(0, -3, 180, 150, "pointDefense")],
   },
   bomber: {
-    class: "bomber", radius: 6, mass: 30, maxHealth: 280, maxShield: 90, speed: 45,
+    class: "bomber", radius: 6, mass: 30, maxHealth: 280, maxShield: 90, speed: 56.25,
     turnRate: 105 * DEG, sensorRange: 290, buildPower: 0, buildRange: 0,
     hardpoints: [
       hp(-2.8, 4.2, 0, 48, "torpedo"), hp(2.8, 4.2, 0, 48, "torpedo"),
     ],
   },
   frigate: {
-    class: "frigate", radius: 13, mass: 95, maxHealth: 900, maxShield: 350, speed: 22,
+    class: "frigate", radius: 13, mass: 95, maxHealth: 900, maxShield: 350, speed: 27.5,
     turnRate: 68 * DEG, sensorRange: 370, buildPower: 0, buildRange: 0,
     hardpoints: [
       hp(-5, 8, 0, 120, "plasma"), hp(5, 8, 0, 120, "plasma"),
@@ -146,7 +146,7 @@ export const SHIPS: Readonly<Record<ShipClass, ShipDefinition>> = {
     ],
   },
   flakFrigate: {
-    class: "flakFrigate", radius: 14, mass: 112, maxHealth: 1_050, maxShield: 420, speed: 21,
+    class: "flakFrigate", radius: 14, mass: 112, maxHealth: 1_050, maxShield: 420, speed: 26.25,
     turnRate: 64 * DEG, sensorRange: 410, buildPower: 0, buildRange: 0,
     hardpoints: [
       hp(0, 8, 0, 150, "plasma"),
@@ -155,7 +155,7 @@ export const SHIPS: Readonly<Record<ShipClass, ShipDefinition>> = {
     ],
   },
   torpedoFrigate: {
-    class: "torpedoFrigate", radius: 14.5, mass: 125, maxHealth: 980, maxShield: 360, speed: 19,
+    class: "torpedoFrigate", radius: 14.5, mass: 125, maxHealth: 980, maxShield: 360, speed: 23.75,
     turnRate: 58 * DEG, sensorRange: 420, buildPower: 0, buildRange: 0,
     hardpoints: [
       hp(-5.5, 9, -18, 75, "torpedo"), hp(5.5, 9, 18, 75, "torpedo"),
@@ -164,7 +164,7 @@ export const SHIPS: Readonly<Record<ShipClass, ShipDefinition>> = {
     ],
   },
   destroyer: {
-    class: "destroyer", radius: 23, mass: 420, maxHealth: 3000, maxShield: 1200, speed: 14,
+    class: "destroyer", radius: 23, mass: 420, maxHealth: 3000, maxShield: 1200, speed: 17.5,
     turnRate: 38 * DEG, sensorRange: 500, buildPower: 0, buildRange: 0,
     hardpoints: [
       hp(-7, 13, 0, 105, "heavyRail"), hp(7, 13, 0, 105, "heavyRail"),
@@ -174,19 +174,19 @@ export const SHIPS: Readonly<Record<ShipClass, ShipDefinition>> = {
     ],
   },
   cruiser: {
-    class: "cruiser", radius: 34, mass: 980, maxHealth: 6_800, maxShield: 3_200, speed: 10.5,
+    class: "cruiser", radius: 34, mass: 980, maxHealth: 6_800, maxShield: 3_200, speed: 13.125,
     turnRate: 24 * DEG, sensorRange: 610, buildPower: 0, buildRange: 0,
     hardpoints: [
       hp(-10, 20, -12, 105, "heavyRail"), hp(10, 20, 12, 105, "heavyRail"),
       hp(-15, 10, -65, 115, "plasma"), hp(15, 10, 65, 115, "plasma"),
       hp(-16, 0, -90, 120, "beam"), hp(16, 0, 90, 120, "beam"),
-      hp(-12, -12, -130, 120, "torpedo"), hp(12, -12, 130, 120, "torpedo"),
+      hp(-7, -12, -130, 120, "torpedo"), hp(7, -12, 130, 120, "torpedo"),
       hp(-17, 5, -85, 145, "pointDefense"), hp(17, 5, 85, 145, "pointDefense"),
-      hp(-10, -18, -150, 140, "pointDefense"), hp(10, -18, 150, 140, "pointDefense"),
+      hp(-7, -18, -150, 140, "pointDefense"), hp(7, -18, 150, 140, "pointDefense"),
     ],
   },
   carrier: {
-    class: "carrier", radius: 46, mass: 2_100, maxHealth: 11_500, maxShield: 5_800, speed: 7.5,
+    class: "carrier", radius: 46, mass: 2_100, maxHealth: 11_500, maxShield: 5_800, speed: 9.375,
     turnRate: 15 * DEG, sensorRange: 760, buildPower: 0, buildRange: 0,
     hardpoints: [
       hp(-18, 24, -35, 115, "beam"), hp(18, 24, 35, 115, "beam"),
@@ -199,17 +199,17 @@ export const SHIPS: Readonly<Record<ShipClass, ShipDefinition>> = {
     ],
   },
   battleship: {
-    class: "battleship", radius: 52, mass: 3_600, maxHealth: 17_000, maxShield: 7_500, speed: 6.2,
+    class: "battleship", radius: 52, mass: 3_600, maxHealth: 17_000, maxShield: 7_500, speed: 7.75,
     turnRate: 11 * DEG, sensorRange: 700, buildPower: 0, buildRange: 0,
     hardpoints: [
-      hp(-13, 34, -18, 90, "heavyRail"), hp(13, 34, 18, 90, "heavyRail"),
-      hp(-17, 22, -35, 100, "heavyRail"), hp(17, 22, 35, 100, "heavyRail"),
-      hp(-19, 8, -70, 110, "heavyRail"), hp(19, 8, 70, 110, "heavyRail"),
-      hp(-18, -10, -110, 115, "plasma"), hp(18, -10, 110, 115, "plasma"),
+      hp(-5, 34, -18, 90, "heavyRail"), hp(5, 34, 18, 90, "heavyRail"),
+      hp(-8, 22, -35, 100, "heavyRail"), hp(8, 22, 35, 100, "heavyRail"),
+      hp(-12, 8, -70, 110, "heavyRail"), hp(12, 8, 70, 110, "heavyRail"),
+      hp(-15, -10, -110, 115, "plasma"), hp(15, -10, 110, 115, "plasma"),
       hp(-14, -28, -150, 120, "beam"), hp(14, -28, 150, 120, "beam"),
-      hp(-25, 15, -75, 150, "pointDefense"), hp(25, 15, 75, 150, "pointDefense"),
-      hp(-26, -2, -95, 155, "pointDefense"), hp(26, -2, 95, 155, "pointDefense"),
-      hp(-22, -22, -140, 150, "pointDefense"), hp(22, -22, 140, 150, "pointDefense"),
+      hp(-9, 15, -75, 150, "pointDefense"), hp(9, 15, 75, 150, "pointDefense"),
+      hp(-14, -2, -95, 155, "pointDefense"), hp(14, -2, 95, 155, "pointDefense"),
+      hp(-19, -22, -140, 150, "pointDefense"), hp(19, -22, 140, 150, "pointDefense"),
     ],
   },
 };
@@ -229,7 +229,7 @@ export const SHIP_TURRET_SCALES: Readonly<Record<ShipClass, number>> = {
 };
 
 export const SHIP_ECONOMY: Readonly<Record<ShipClass, ShipEconomyDefinition>> = {
-  fighter: { alloyCost: 380, energyCost: 200, buildTicks: 180, batchSize: 1, yardType: "shipyard", requiredStructures: [] },
+  fighter: { alloyCost: 380, energyCost: 200, buildTicks: 180, batchSize: 5, yardType: "shipyard", requiredStructures: [] },
   fabricator: { alloyCost: 320, energyCost: 210, buildTicks: 230, batchSize: 1, yardType: "shipyard", requiredStructures: [] },
   frigate: { alloyCost: 260, energyCost: 150, buildTicks: 190, batchSize: 1, yardType: "shipyard", requiredStructures: [] },
   bomber: { alloyCost: 1_500, energyCost: 1_050, buildTicks: 380, batchSize: 5, yardType: "shipyard", requiredStructures: [] },

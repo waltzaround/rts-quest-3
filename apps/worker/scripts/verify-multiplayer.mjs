@@ -207,6 +207,7 @@ try {
     mapSize: "large",
     startingResources: "high",
     resourceDensity: "rich",
+    teamSpawnMode: "together",
   };
   host.send({ type: "set_settings", settings: requestedSettings });
   const configuredLobby = await wing.waitFor((message) => message.type === "lobby"

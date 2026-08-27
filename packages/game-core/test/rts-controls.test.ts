@@ -78,6 +78,37 @@ describe("authoritative RTS commands", () => {
     }
   });
 
+  it("patrols continuously between the fleet origin and assigned endpoint", () => {
+    const simulation = createCombatScenario();
+    const ship = simulation.state.ships.find((candidate) => candidate.teamId === 1 && candidate.class === "destroyer")!;
+    const origin = { x: ship.x, z: ship.z };
+    const command: FleetCommand = {
+      type: "patrol",
+      playerId: "pilot-blue",
+      sequence: 1,
+      requestedTick: simulation.state.tick + 1,
+      unitIds: [ship.id],
+      queued: false,
+      destination: { x: origin.x - 110, z: origin.z },
+    };
+
+    expect(simulation.submitCommand(command).accepted).toBe(true);
+    simulation.step();
+    expect(ship.orders[0]).toMatchObject({ type: "patrol", patrolOrigin: origin });
+
+    let turnedBack = false;
+    for (let tick = 0; tick < 600; tick += 1) {
+      simulation.step();
+      const order = ship.orders[0];
+      if (order?.type === "patrol" && Math.hypot(order.destination.x - origin.x, order.destination.z - origin.z) < 1) {
+        turnedBack = true;
+        break;
+      }
+    }
+    expect(turnedBack).toBe(true);
+    expect(ship.orders[0]?.type).toBe("patrol");
+  });
+
   it("creates stable, spaced formation slots and minimizes crossing deterministically", () => {
     const simulation = createCombatScenario();
     const fleet = simulation.state.ships.filter((ship) => ship.teamId === 1);
@@ -89,6 +120,18 @@ describe("authoritative RTS commands", () => {
     for (let index = 1; index < orderedX.length; index += 1) {
       expect(orderedX[index]! - orderedX[index - 1]!).toBeGreaterThan(40);
     }
+  });
+
+  it("uses a short formation drag as frontage and fills additional ranks", () => {
+    const simulation = createCombatScenario();
+    const fleet = simulation.state.ships.filter((ship) => ship.teamId === 1);
+    const assignments = computeFormationAssignments(fleet, { x: -35, z: 120 }, { x: 35, z: 120 });
+    const roundedDepths = new Set(assignments.map((assignment) => Math.round(assignment.destination.z)));
+    const roundedLateral = new Set(assignments.map((assignment) => Math.round(assignment.destination.x)));
+
+    expect(assignments).toHaveLength(fleet.length);
+    expect(roundedDepths.size).toBeGreaterThan(1);
+    expect(roundedLateral.size).toBeLessThan(fleet.length);
   });
 
   it("replays the same scheduled commands into identical checksums", () => {

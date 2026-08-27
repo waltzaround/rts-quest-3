@@ -97,7 +97,7 @@ describe("horizontal infrastructure progression", () => {
     for (const [shipClass, yardType] of Object.entries(expectedYards) as [ShipClass, StructureType][]) {
       expect(SHIP_ECONOMY[shipClass].yardType).toBe(yardType);
     }
-    expect(SHIP_ECONOMY.fighter.batchSize).toBe(1);
+    expect(SHIP_ECONOMY.fighter.batchSize).toBe(5);
     expect(SHIP_ECONOMY.frigate.batchSize).toBe(1);
     expect(STRUCTURES.fleetShipyard.energyUpkeep).toBeGreaterThan(STRUCTURES.shipyard.energyUpkeep);
     expect(STRUCTURES.capitalShipyard.energyUpkeep).toBeGreaterThan(STRUCTURES.fleetShipyard.energyUpkeep);
@@ -237,16 +237,21 @@ describe("horizontal infrastructure progression", () => {
       command.type === "buildStructure" && command.position.x === remoteSite.x,
     )).toBe(true);
 
-    simulation.stepMany(220);
-    const construction = simulation.state.structures.find(
-      (structure) => structure.ownerPlayerId === player.id
-        && structure.type === "solarArray" && structure.x === remoteSite.x,
-    )!;
+    let construction: StructureState | undefined;
+    for (let tick = 0; tick < 220; tick += 1) {
+      simulation.step();
+      construction = simulation.state.structures.find(
+        (structure) => structure.ownerPlayerId === player.id
+          && structure.type === "solarArray" && structure.x === remoteSite.x,
+      );
+      if (construction
+        && simulation.getConstructionAssistingFabricatorIds(construction.id).includes(fabricator.id)) break;
+    }
     expect(construction).toBeDefined();
     expect(Math.hypot(fabricator.x - remoteSite.x, fabricator.z - remoteSite.z))
       .toBeLessThanOrEqual(SHIPS.fabricator.buildRange);
-    expect(simulation.getConstructionAssistingFabricatorIds(construction.id)).toContain(fabricator.id);
-    expect(simulation.getConstructionBuildPower(construction.id)).toBeCloseTo(2.35);
+    expect(simulation.getConstructionAssistingFabricatorIds(construction!.id)).toContain(fabricator.id);
+    expect(simulation.getConstructionBuildPower(construction!.id)).toBeCloseTo(2.35);
     expect(simulation.state.commandQueue.some((command) =>
       command.type === "buildStructure" && command.position.x === remoteSite.x,
     )).toBe(false);

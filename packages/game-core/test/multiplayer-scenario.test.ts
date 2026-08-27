@@ -9,7 +9,7 @@ const players = (count: number, teams: number) => Array.from({ length: count }, 
 }));
 
 describe("multiplayer scenarios", () => {
-  it("scales resource points with player count without changing two-player balance", () => {
+  it("scales resource points while guaranteeing three nodes at every spawn", () => {
     for (const playerCount of [2, 4, 6, 8]) {
       const scenario = createCombatScenario({
         seed: 8128,
@@ -18,11 +18,17 @@ describe("multiplayer scenarios", () => {
       });
 
       expect(scenario.state.resourceNodes, `${playerCount}-player resource points`)
-        .toHaveLength(playerCount * 4 + 1);
+        .toHaveLength(playerCount * 6 + 1);
       expect(scenario.state.resourceNodes.filter((node) => node.claimedByStructureId !== null))
         .toHaveLength(playerCount);
       expect(scenario.state.resourceNodes.filter((node) => node.claimedByStructureId === null))
-        .toHaveLength(playerCount * 3 + 1);
+        .toHaveLength(playerCount * 5 + 1);
+      for (const core of scenario.state.structures.filter((structure) => structure.type === "commandCore")) {
+        const nearbyNodes = scenario.state.resourceNodes.filter(
+          (node) => Math.hypot(node.x - core.x, node.z - core.z) <= 420,
+        );
+        expect(nearbyNodes, `${playerCount}-player spawn at ${core.x},${core.z}`).toHaveLength(3);
+      }
     }
   });
 
@@ -40,6 +46,17 @@ describe("multiplayer scenarios", () => {
       .filter((structure) => structure.type === "commandCore")
       .map((structure) => `${structure.x.toFixed(3)},${structure.z.toFixed(3)}`)).size).toBe(8);
     expect(first.snapshot()).toEqual(second.snapshot());
+  });
+
+  it("supports grouped, interleaved, and deterministic random team deployments", () => {
+    const config = players(4, 2);
+    const coreOwners = (mode: "together" | "interleaved" | "random") => createCombatScenario({
+      seed: 8128, players: config, teamSpawnMode: mode,
+    }).state.structures.filter((structure) => structure.type === "commandCore").map((core) => core.ownerPlayerId);
+
+    expect(coreOwners("together")).toEqual(["pilot-1", "pilot-3", "pilot-2", "pilot-4"]);
+    expect(coreOwners("interleaved")).toEqual(["pilot-1", "pilot-2", "pilot-3", "pilot-4"]);
+    expect(coreOwners("random")).toEqual(coreOwners("random"));
   });
 
   it("keeps a team alive while any allied Command Core survives", () => {

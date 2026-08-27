@@ -36,6 +36,13 @@ export type StructureType =
   | "railBattery";
 export type ShipyardType = "shipyard" | "fleetShipyard" | "capitalShipyard";
 export type ResourceType = "alloy";
+export type AiDifficulty = "easy" | "normal" | "hard";
+export type AiPersonality = "balanced" | "aggressive" | "turtle" | "economic";
+
+export interface AiCommanderSettings {
+  difficulty: AiDifficulty;
+  personality: AiPersonality;
+}
 
 export interface EconomyState {
   alloy: number;
@@ -153,12 +160,13 @@ export interface TurretState {
   fireSequence: number;
 }
 
-export type NavigationOrderType = "move" | "attackMove" | "hold";
+export type NavigationOrderType = "move" | "attackMove" | "patrol" | "hold";
 
 export interface NavigationOrder {
   type: NavigationOrderType;
   destination: Vec2;
   facing: number;
+  patrolOrigin?: Vec2;
 }
 
 interface FleetCommandBase {
@@ -171,7 +179,7 @@ interface FleetCommandBase {
 
 export type FleetCommand =
   | (FleetCommandBase & {
-      type: "move" | "attackMove";
+      type: "move" | "attackMove" | "patrol";
       destination: Vec2;
       formationEnd?: Vec2;
     })
@@ -334,6 +342,7 @@ export interface SimulationState {
   projectiles: ProjectileState[];
   commandQueue: GameCommand[];
   aiPlayerIds: PlayerId[];
+  aiCommanders: Record<PlayerId, AiCommanderSettings>;
   status: "playing" | "finished";
   winnerTeamId: TeamId | null;
   checksum: number;

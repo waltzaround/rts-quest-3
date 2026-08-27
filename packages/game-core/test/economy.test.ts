@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateChecksum, createCombatScenario, type StructureState } from "../src";
+import { calculateChecksum, createCombatScenario, STRUCTURES, type StructureState } from "../src";
 
 describe("continuous economy and production", () => {
   it("derives continuous income and storage from completed structures", () => {
@@ -22,7 +22,7 @@ describe("continuous economy and production", () => {
       type: "buildStructure", playerId: "pilot-blue", sequence: 2, requestedTick: 1,
       structureType: "storage", position: { x: -90, z: -205 }, queued: false,
     })).toEqual({ accepted: false, reason: "placement" });
-    simulation.stepMany(126);
+    simulation.stepMany(STRUCTURES.solarArray.buildTicks + 1);
     const solar = simulation.state.structures.find(
       (structure) => structure.ownerPlayerId === "pilot-blue" && structure.x === -90 && structure.z === -205,
     );
@@ -108,8 +108,8 @@ describe("continuous economy and production", () => {
     const unassisted = first.state.structures.find((structure) => structure.x === -500 && structure.z === -410)!;
     expect(first.getConstructionBuildPower(assisted.id)).toBe(2);
     expect(first.getConstructionBuildPower(unassisted.id)).toBe(1);
-    expect(assisted.buildProgress).toBeCloseTo(0.8, 8);
-    expect(unassisted.buildProgress).toBeCloseTo(0.4, 8);
+    expect(assisted.buildProgress).toBeCloseTo(100 / STRUCTURES.solarArray.buildTicks, 8);
+    expect(unassisted.buildProgress).toBeCloseTo(50 / STRUCTURES.solarArray.buildTicks, 8);
     expect(first.snapshot()).toEqual(second.snapshot());
   });
 
@@ -141,7 +141,7 @@ describe("continuous economy and production", () => {
     )).toBe(true);
     expect(simulation.state.ships.filter(
       (ship) => !startingShipIds.has(ship.id) && ship.ownerPlayerId === "pilot-blue" && ship.class === "fighter",
-    )).toHaveLength(1);
+    )).toHaveLength(5);
     expect(simulation.state.players[0]!.economy.alloy).toBeLessThan(900 + 90 * 0.05 * 14);
     expect(simulation.state.players[0]!.economy.energy).toBeLessThan(900 + 90 * 0.05 * 34);
   });
@@ -186,7 +186,7 @@ describe("continuous economy and production", () => {
     expect(Math.hypot(
       produced.orders[0]!.destination.x - rallyPoint.x,
       produced.orders[0]!.destination.z - rallyPoint.z,
-    )).toBeLessThan(30);
+    )).toBeLessThan(40);
   });
 
   it("keeps production at 1x per shipyard and scales through additional shipyards", () => {
@@ -223,7 +223,7 @@ describe("continuous economy and production", () => {
     simulation.stepMany(90);
     expect(simulation.state.ships.filter(
       (ship) => !startingShipIds.has(ship.id) && ship.ownerPlayerId === "pilot-blue" && ship.class === "fighter",
-    )).toHaveLength(2);
+    )).toHaveLength(10);
   });
 
   it("slows production proportionally when stored resources run out", () => {

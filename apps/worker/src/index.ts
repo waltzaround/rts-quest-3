@@ -123,7 +123,12 @@ export class Match implements DurableObject {
       const restoredLobby = persisted.lobby as LobbyState & { settings?: LobbySettings };
       this.lobby = this.redactLobby({
         ...restoredLobby,
-        settings: restoredLobby.settings ?? { ...DEFAULT_LOBBY_SETTINGS },
+        settings: { ...DEFAULT_LOBBY_SETTINGS, ...restoredLobby.settings },
+        slots: restoredLobby.slots.map((slot) => slot.isAi ? {
+          ...slot,
+          aiDifficulty: slot.aiDifficulty ?? "normal",
+          aiPersonality: slot.aiPersonality ?? "balanced",
+        } : slot),
       });
       if (this.lobby.phase === "lobby" && !this.lobby.slots.some((slot) => slot.isHost)) {
         const fallbackHost = this.lobby.slots.find((slot) => !slot.isAi);
@@ -505,6 +510,18 @@ export class Match implements DurableObject {
         if (!this.requireHost(socket, slot) || !this.requireLobby(socket)) return;
         this.addAi(socket, message);
         return;
+      case "set_ai_settings": {
+        if (!this.requireHost(socket, slot) || !this.requireLobby(socket)) return;
+        const aiSlot = this.lobby.slots.find((candidate) => candidate.playerId === message.playerId && candidate.isAi);
+        if (!aiSlot) {
+          this.fail(socket, "ai_slot_missing", "That AI commander is no longer in the lobby");
+          return;
+        }
+        aiSlot.aiDifficulty = message.difficulty;
+        aiSlot.aiPersonality = message.personality;
+        this.lobbyChanged();
+        return;
+      }
       case "remove_slot":
         if (!this.requireHost(socket, slot) || !this.requireLobby(socket)) return;
         this.removeSlot(socket, playerId, message.playerId);
@@ -580,6 +597,8 @@ export class Match implements DurableObject {
       connected: true,
       isHost: false,
       isAi: true,
+      aiDifficulty: message.difficulty ?? "normal",
+      aiPersonality: message.personality ?? "balanced",
     };
     this.lobby.slots.push(ai);
     this.lobbyChanged();
@@ -631,6 +650,8 @@ export class Match implements DurableObject {
         teamId: slot.teamId,
         color: slot.color,
         ai: slot.isAi,
+        aiDifficulty: slot.aiDifficulty ?? "normal",
+        aiPersonality: slot.aiPersonality ?? "balanced",
       })),
     });
     if (this.simulation.state.ships.length !== 0) {
