@@ -1498,20 +1498,30 @@ function renderLobby(): void {
   element("lobby-status").textContent = networkLobby.phase === "lobby"
     ? `${networkLobby.slots.length} SLOTS // ${networkLobby.mode.toUpperCase()} // ${networkLobby.settings.mapSize.toUpperCase()}`
     : networkLobby.phase === "playing" ? "ENGAGEMENT IN PROGRESS" : "ENGAGEMENT COMPLETE";
-  element("lobby-slots").innerHTML = networkLobby.slots.map((slot) => `
-    <div class="lobby-slot ${slot.playerId === localPlayerId ? "local" : ""}">
-      <i style="--slot-color:#${slot.color.toString(16).padStart(6, "0")}"></i>
-      <span><b>${escapeHtml(slot.name)}</b><small>${slot.isAi ? "AI COMMANDER" : slot.connected ? "LINKED" : "RECONNECTING"}</small></span>
-      <em>${networkLobby!.mode === "ffa" ? `SIDE ${slot.slotIndex + 1}` : `TEAM ${slot.teamId}`}</em>
-      ${slot.isHost ? "<strong>HOST</strong>" : slot.ready ? "<strong>READY</strong>" : "<strong>WAIT</strong>"}
-      ${localSlot?.isHost && slot.isAi ? `<button data-remove-slot="${escapeHtml(slot.playerId)}" title="Remove AI">×</button>` : ""}
-    </div>
-  `).join("");
+  const mapCapacity = MAP_PLAYER_CAPACITY[networkLobby.settings.mapSize];
+  const occupiedSlots = networkLobby.slots.map((slot) => {
+    const canAssignTeam = networkLobby!.mode === "teams" && networkLobby!.phase === "lobby"
+      && (localSlot?.isHost || slot.playerId === localPlayerId);
+    const teamControl = networkLobby!.mode === "ffa"
+      ? `<em>SIDE ${slot.slotIndex + 1}</em>`
+      : `<select class="slot-team-select" data-team-player="${escapeHtml(slot.playerId)}" aria-label="Team for ${escapeHtml(slot.name)}" ${canAssignTeam ? "" : "disabled"}>${Array.from({ length: 8 }, (_, index) => `<option value="${index + 1}" ${slot.teamId === index + 1 ? "selected" : ""}>TEAM ${index + 1}</option>`).join("")}</select>`;
+    return `
+      <div class="lobby-slot ${slot.playerId === localPlayerId ? "local" : ""}">
+        <i style="--slot-color:#${slot.color.toString(16).padStart(6, "0")}"></i>
+        <span><b>${escapeHtml(slot.name)}</b><small>${slot.isAi ? "COMPUTER · STANDARD" : slot.connected ? "HUMAN · CONNECTED" : "HUMAN · RECONNECTING"}</small></span>
+        ${teamControl}
+        ${slot.isHost ? "<strong>HOST</strong>" : slot.ready ? "<strong>READY</strong>" : "<strong>NOT READY</strong>"}
+        ${localSlot?.isHost && slot.isAi ? `<button data-remove-slot="${escapeHtml(slot.playerId)}" title="Remove AI">×</button>` : "<span class=\"slot-pad\"></span>"}
+      </div>`;
+  });
+  const emptySlots = Array.from({ length: Math.max(0, mapCapacity - networkLobby.slots.length) }, (_, index) => `
+    <div class="lobby-slot empty"><i></i><span><b>OPEN SLOT</b><small>AWAITING COMMANDER</small></span><em>—</em><strong>OPEN</strong><span class="slot-pad"></span></div>
+  `);
+  element("lobby-slots").innerHTML = [...occupiedSlots, ...emptySlots].join("");
   element("mode-teams").classList.toggle("active", networkLobby.mode === "teams");
   element("mode-ffa").classList.toggle("active", networkLobby.mode === "ffa");
   element<HTMLButtonElement>("mode-teams").disabled = !localSlot?.isHost;
   element<HTMLButtonElement>("mode-ffa").disabled = !localSlot?.isHost;
-  const mapCapacity = MAP_PLAYER_CAPACITY[networkLobby.settings.mapSize];
   const exceedsMapCapacity = networkLobby.slots.length > mapCapacity;
   const capacity = element("lobby-capacity");
   capacity.textContent = `${networkLobby.slots.length} / ${mapCapacity}`;
@@ -4523,6 +4533,11 @@ element("lobby-slots").addEventListener("click", (event) => {
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-remove-slot]");
   const playerId = button?.dataset.removeSlot;
   if (playerId) sendNetworkMessage({ type: "remove_slot", playerId });
+});
+element("lobby-slots").addEventListener("change", (event) => {
+  const select = (event.target as HTMLElement).closest<HTMLSelectElement>("[data-team-player]");
+  const playerId = select?.dataset.teamPlayer;
+  if (select && playerId) sendNetworkMessage({ type: "set_team", teamId: Number(select.value), playerId });
 });
 
 function updateAudioToggle(): void {

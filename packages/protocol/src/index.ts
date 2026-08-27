@@ -83,7 +83,7 @@ export type ClientMessage =
   | { type: "ping"; clientTime: number }
   | { type: "request_snapshot"; reason: "join" | "reconnect" | "checksum" | "manual" }
   | { type: "set_ready"; ready: boolean }
-  | { type: "set_team"; teamId: number }
+  | { type: "set_team"; teamId: number; playerId?: string }
   | { type: "set_mode"; mode: MatchMode }
   | { type: "set_settings"; settings: LobbySettings }
   | { type: "add_ai"; name?: string; teamId?: number }
@@ -308,7 +308,8 @@ export function parseClientMessage(raw: string): ClientMessage | null {
     case "set_ready":
       return typeof value.ready === "boolean" ? value as ClientMessage : null;
     case "set_team":
-      return isInteger(value.teamId) && value.teamId >= 1 && value.teamId <= MAX_PLAYERS ? value as ClientMessage : null;
+      return isInteger(value.teamId) && value.teamId >= 1 && value.teamId <= MAX_PLAYERS
+        && (value.playerId === undefined || isString(value.playerId, 80)) ? value as ClientMessage : null;
     case "set_mode":
       return value.mode === "ffa" || value.mode === "teams" ? value as ClientMessage : null;
     case "set_settings":

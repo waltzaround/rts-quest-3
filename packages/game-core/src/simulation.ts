@@ -49,6 +49,8 @@ const BASE_CONSTRUCTION_BUILD_POWER = 1;
 const OBSTACLE_CLEARANCE = 8;
 const PHYSICS_SUBSTEPS = 4;
 const CONTESTED_RESOURCE_NODES_PER_PLAYER = 3;
+const CAPITAL_SHIP_CLASSES: ReadonlySet<ShipClass> = new Set(["cruiser", "carrier", "battleship"]);
+const CAPITAL_VS_SMALL_CRAFT_HIT_RADIUS_SCALE = 0.78;
 
 export interface ScenarioOptions {
   seed?: number;
@@ -1121,6 +1123,7 @@ export class GameSimulation {
 
   private integrateProjectilesAndDamage(): void {
     const survivingProjectiles: ProjectileState[] = [];
+    const projectileOwners = new Map(this.state.ships.map((ship) => [ship.id, ship]));
     for (const projectile of this.state.projectiles) {
       projectile.previousX = projectile.x;
       projectile.previousZ = projectile.z;
@@ -1157,11 +1160,16 @@ export class GameSimulation {
       const queryZ = (projectile.previousZ + projectile.z) * 0.5;
       for (const target of this.spatialHash.query(queryX, queryZ, queryRadius)) {
         if (target.health <= 0 || !this.isHostile(projectile.ownerTeamId, target.teamId)) continue;
+        const owner = projectileOwners.get(projectile.ownerShipId);
+        const smallCraftEvasionScale = owner && CAPITAL_SHIP_CLASSES.has(owner.class) && isShip(target)
+          && (target.class === "fighter" || target.class === "bomber")
+          ? CAPITAL_VS_SMALL_CRAFT_HIT_RADIUS_SCALE
+          : 1;
         considerImpact(sweptCircleHitFraction({
           fromX: projectile.previousX, fromZ: projectile.previousZ,
           toX: projectile.x, toZ: projectile.z,
           centerX: target.x, centerZ: target.z,
-          radius: projectile.radius + getTargetRadius(target),
+          radius: projectile.radius + getTargetRadius(target) * smallCraftEvasionScale,
         }), `1:${target.id}`, target);
       }
       const resolvedImpact = impact as { fraction: number; key: string; target: CombatTargetState | null } | null;

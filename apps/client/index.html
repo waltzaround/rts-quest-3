@@ -177,11 +177,13 @@
           </div>
 
           <div id="network-lobby-view" class="hidden">
+            <div class="lobby-titlebar"><div><small>CUSTOM ENGAGEMENT</small><h2>CREATE LOBBY</h2></div><span>HOST CONFIGURATION</span></div>
             <div class="lobby-heading"><div><small>MATCH CODE</small><strong id="lobby-match-code">—</strong></div><span id="lobby-status">CONTACTING AUTHORITY…</span></div>
             <div class="lobby-share"><span><small>LAN INVITE</small><strong id="lobby-invite-url">Preparing invite…</strong></span><button id="copy-lobby-invite" type="button">COPY INVITE</button></div>
             <div class="lobby-grid">
               <div class="lobby-roster-column">
-                <div class="lobby-section-heading"><span>COMMANDERS</span><small id="lobby-capacity">0 / 6</small></div>
+                <div class="lobby-section-heading"><span>PLAYER SLOTS</span><small id="lobby-capacity">0 / 6</small></div>
+                <div class="lobby-slot-head"><span>PLAYER</span><span>TEAM</span><span>STATUS</span></div>
                 <div id="lobby-slots" class="lobby-slots"></div>
                 <div class="lobby-loadout">
                   <label>YOUR TEAM
@@ -194,14 +196,16 @@
                 </div>
               </div>
               <section class="lobby-settings-panel">
-                <div class="lobby-section-heading"><span>MATCH SETTINGS</span><small id="settings-authority">HOST CONTROL</small></div>
+                <div class="lobby-section-heading"><span>GAME SETTINGS</span><small id="settings-authority">HOST CONTROL</small></div>
+                <div class="setting-group-label">BATTLEFIELD</div>
                 <div class="lobby-settings-grid">
                   <label>MAP LAYOUT<select id="map-preset"><option value="orbital-ring">ORBITAL RING</option><option value="crossfire">CROSSFIRE</option><option value="open-expanse">OPEN EXPANSE</option></select></label>
                   <label>MAP SIZE<select id="map-size"><option value="small">SMALL · 2–4</option><option value="medium">MEDIUM · 2–6</option><option value="large">LARGE · 2–8</option></select></label>
                   <label>STARTING RESOURCES<select id="starting-resources"><option value="low">LOW · 500</option><option value="standard">STANDARD · 900</option><option value="high">HIGH · 1,800</option></select></label>
                   <label>RESOURCE DENSITY<select id="resource-density"><option value="scarce">SCARCE</option><option value="standard">STANDARD</option><option value="rich">RICH</option></select></label>
                 </div>
-                <div class="mode-control lobby-mode-control"><span>VICTORY SIDES</span><button id="mode-teams" type="button">TEAMS</button><button id="mode-ffa" type="button">FREE-FOR-ALL</button></div>
+                <div class="setting-group-label rules-label">GAME MODE</div>
+                <div class="mode-control lobby-mode-control"><button id="mode-teams" type="button"><b>TEAM CONQUEST</b><small>SHARED VICTORY</small></button><button id="mode-ffa" type="button"><b>FREE-FOR-ALL</b><small>LAST COMMANDER</small></button></div>
                 <p id="map-description">Balanced resource ring with a contested central field.</p>
               </section>
             </div>

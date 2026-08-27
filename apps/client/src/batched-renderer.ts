@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import {
   FIGHTER_SQUAD_OFFSETS,
   SHIP_TURRET_SCALES,
@@ -85,9 +86,61 @@ function createSelectionGeometry(): THREE.BufferGeometry {
 }
 
 function createThrusterTrailGeometry(): THREE.BufferGeometry {
-  const geometry = new THREE.ConeGeometry(1, 1, 7, 1, true);
-  geometry.rotateX(-Math.PI / 2);
-  return geometry;
+  // Two cheap shells share one instance and draw call. The inner shell gives
+  // the plume a white-hot core instead of requiring a second instanced batch.
+  const outer = new THREE.ConeGeometry(1, 1, 9, 2, true);
+  outer.rotateX(-Math.PI / 2);
+  outer.setAttribute("thrusterLayer", new THREE.BufferAttribute(
+    new Float32Array(outer.getAttribute("position").count), 1,
+  ));
+  const core = new THREE.ConeGeometry(1, 1, 7, 1, true);
+  core.rotateX(-Math.PI / 2);
+  core.scale(0.46, 0.46, 0.72);
+  core.translate(0, 0, 0.14);
+  core.setAttribute("thrusterLayer", new THREE.BufferAttribute(
+    new Float32Array(core.getAttribute("position").count).fill(1), 1,
+  ));
+  const merged = mergeGeometries([outer, core], false);
+  if (!merged) throw new Error("Unable to build thruster geometry");
+  return merged;
+}
+
+function createThrusterMaterial(time: { value: number }): THREE.MeshBasicMaterial {
+  const material = new THREE.MeshBasicMaterial({
+    color: 0xffffff, transparent: true, opacity: 0.52,
+    blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false,
+  });
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.thrusterTime = time;
+    shader.vertexShader = shader.vertexShader
+      .replace("#include <common>", `#include <common>
+        attribute float thrusterLayer;
+        varying float vThrusterAxial;
+        varying float vThrusterLayer;
+        varying float vThrusterPhase;`)
+      .replace("#include <begin_vertex>", `#include <begin_vertex>
+        vThrusterAxial = clamp(position.z + 0.5, 0.0, 1.0);
+        vThrusterLayer = thrusterLayer;
+        vThrusterPhase = dot(instanceMatrix[3].xz, vec2(0.071, 0.113));`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace("#include <common>", `#include <common>
+        uniform float thrusterTime;
+        varying float vThrusterAxial;
+        varying float vThrusterLayer;
+        varying float vThrusterPhase;`)
+      .replace("#include <opaque_fragment>", `
+        float plumeNoise = sin(vThrusterAxial * 31.0 - thrusterTime * 10.5 + vThrusterPhase);
+        plumeNoise += sin(vThrusterAxial * 13.0 + thrusterTime * 6.7 + vThrusterPhase * 1.9) * 0.5;
+        float tipFade = smoothstep(0.015, vThrusterLayer > 0.5 ? 0.22 : 0.34, vThrusterAxial);
+        float nozzleHeat = smoothstep(0.18, 1.0, vThrusterAxial);
+        float shimmer = 0.86 + plumeNoise * (0.065 + (1.0 - vThrusterAxial) * 0.055);
+        diffuseColor.a *= tipFade * shimmer * (vThrusterLayer > 0.5 ? 0.82 : 0.58);
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.92, 0.985, 1.0),
+          nozzleHeat * (vThrusterLayer > 0.5 ? 0.92 : 0.34));
+        #include <opaque_fragment>`);
+  };
+  material.customProgramCacheKey = () => "layered-thruster-v1";
+  return material;
 }
 
 function createBatch(
@@ -104,14 +157,14 @@ function createBatch(
 }
 
 const QUALITY_ENGINE_SCALE: Readonly<Record<RenderQuality, number>> = { low: 0.78, medium: 1, high: 1.16 };
-const TACTICAL_SCALE = [9, 14, 16, 10.5, 17, 18, 22, 28, 34, 38] as const;
-const TACTICAL_SELECTION_RADIUS = [13, 18, 20, 15, 21, 22, 27, 34, 40, 45] as const;
-const CLOSE_SELECTION_RADIUS = [22, 13, 17, 9.5, 18, 19, 29, 42, 56, 64] as const;
-const THRUSTER_REAR = [-3.65, -11.5, -15.1, -8.8, -15.4, -15.4, -29.2, -34.8, -45.5, -56] as const;
-const THRUSTER_WIDTH = [0.3, 1.05, 1.35, 1.1, 1.42, 1.48, 1.72, 2.35, 2.4, 2.7] as const;
-const THRUSTER_LENGTH = [3.2, 9, 12, 8.5, 12, 12, 21, 28, 34, 44] as const;
+const TACTICAL_SCALE = [9, 14, 16, 8, 17, 18, 22, 28, 34, 38] as const;
+const TACTICAL_SELECTION_RADIUS = [13, 18, 20, 12, 21, 22, 27, 34, 40, 45] as const;
+const CLOSE_SELECTION_RADIUS = [22, 13, 17, 7.5, 18, 19, 29, 42, 56, 64] as const;
+const THRUSTER_REAR = [-3.65, -11.5, -15.1, -5.1, -15.4, -15.4, -29.2, -34.8, -45.5, -56] as const;
+const THRUSTER_WIDTH = [0.3, 1.05, 1.35, 0.65, 1.42, 1.48, 1.72, 2.35, 2.4, 2.7] as const;
+const THRUSTER_LENGTH = [3.2, 9, 12, 5, 12, 12, 21, 28, 34, 44] as const;
 const THRUSTER_OFFSETS: ReadonlyArray<readonly number[]> = [
-  [-0.46, 0.46], [-7.8, 7.8], [-10.5, 10.5], [-5.3, 5.3], [-11.3, 11.3], [-11.8, 11.8],
+  [-0.46, 0.46], [-7.8, 7.8], [-10.5, 10.5], [-3.1, 3.1], [-11.3, 11.3], [-11.8, 11.8],
   [-9, -3, 3, 9], [-22, 22], [-30, -21, -5, 5, 21, 30], [-18, -11, -4, 4, 11, 18],
 ];
 const THRUSTER_COLOR = [0x8ff7ff, 0x79f0c8, 0x78e8ff, 0x72dfff, 0x82f3ff, 0x77dcff, 0x68cfff, 0x77c5ff, 0x9abaff, 0xffbd78] as const;
@@ -136,6 +189,7 @@ export class BatchedShipRenderer {
   private readonly selectionBatch: InstanceBatch;
   private readonly shieldBatch: InstanceBatch;
   private readonly thrusterBatch: InstanceBatch;
+  private readonly thrusterTime = { value: 0 };
   private readonly shipMatrices = new Float32Array(MAX_RENDER_SHIPS * 16);
   private readonly matrix = new THREE.Matrix4();
   private readonly localMatrix = new THREE.Matrix4();
@@ -250,10 +304,7 @@ export class BatchedShipRenderer {
     );
     this.thrusterBatch = createBatch(
       createThrusterTrailGeometry(),
-      new THREE.MeshBasicMaterial({
-        color: 0xffffff, transparent: true, opacity: 0.42,
-        blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false,
-      }),
+      createThrusterMaterial(this.thrusterTime),
       MAX_RENDER_SHIPS * 2,
       true,
     );
@@ -269,6 +320,7 @@ export class BatchedShipRenderer {
   }
 
   update(state: InterpolatedRenderState, now: number, tacticalScaleMultiplier = 1, visualTick = now * 0.02): void {
+    this.thrusterTime.value = now * 0.001;
     for (const batch of this.allBatches) batch.count = 0;
     this.metrics.shipInstances = state.shipCount;
     this.metrics.turretInstances = state.turretCount;

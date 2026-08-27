@@ -16,7 +16,7 @@ export const WEAPONS: Readonly<Record<WeaponTypeId, WeaponDefinition>> = {
     cooldownTicks: 16, burstSize: 4, burstIntervalTicks: 2,
     projectileSpeed: 240, projectileRadius: 2, projectileLifetimeTicks: 35,
     muzzleOffset: 4.6, muzzleSeparation: 0.3,
-    damage: 5, traverseRate: 190 * DEG, alignmentTolerance: 10 * DEG,
+    damage: 3, traverseRate: 190 * DEG, alignmentTolerance: 10 * DEG,
     targetPreference: {
       fighter: 0, fabricator: 14, bomber: 8, frigate: 20, flakFrigate: 24, torpedoFrigate: 26,
       destroyer: 45, cruiser: 58, carrier: 72, battleship: 82,
@@ -49,7 +49,7 @@ export const WEAPONS: Readonly<Record<WeaponTypeId, WeaponDefinition>> = {
     cooldownTicks: 39, burstSize: 1, burstIntervalTicks: 1,
     projectileSpeed: 510, projectileRadius: 2.5, projectileLifetimeTicks: 32,
     muzzleOffset: 8.7, muzzleSeparation: 0.42,
-    damage: 42, traverseRate: 65 * DEG, alignmentTolerance: 4 * DEG,
+    damage: 48, traverseRate: 65 * DEG, alignmentTolerance: 4 * DEG,
     targetPreference: {
       fighter: 150, fabricator: 54, bomber: 92, frigate: 28, flakFrigate: 30, torpedoFrigate: 24,
       destroyer: 8, cruiser: 3, carrier: 2, battleship: 0,
@@ -131,7 +131,7 @@ export const SHIPS: Readonly<Record<ShipClass, ShipDefinition>> = {
     hardpoints: [hp(0, -3, 180, 150, "pointDefense")],
   },
   bomber: {
-    class: "bomber", radius: 6.6, mass: 30, maxHealth: 280, maxShield: 90, speed: 45,
+    class: "bomber", radius: 6, mass: 30, maxHealth: 280, maxShield: 90, speed: 45,
     turnRate: 105 * DEG, sensorRange: 290, buildPower: 0, buildRange: 0,
     hardpoints: [
       hp(-2.8, 4.2, 0, 48, "torpedo"), hp(2.8, 4.2, 0, 48, "torpedo"),
@@ -152,7 +152,6 @@ export const SHIPS: Readonly<Record<ShipClass, ShipDefinition>> = {
       hp(0, 8, 0, 150, "plasma"),
       hp(-7, 5, -55, 145, "pointDefense"), hp(7, 5, 55, 145, "pointDefense"),
       hp(-8, -2, -105, 150, "pointDefense"), hp(8, -2, 105, 150, "pointDefense"),
-      hp(-4, -8, -155, 140, "pointDefense"), hp(4, -8, 155, 140, "pointDefense"),
     ],
   },
   torpedoFrigate: {
@@ -220,7 +219,7 @@ export const SHIP_TURRET_SCALES: Readonly<Record<ShipClass, number>> = {
   fighter: 0.24,
   fabricator: 0.5,
   frigate: 0.58,
-  bomber: 0.4,
+  bomber: 0.3,
   flakFrigate: 0.6,
   torpedoFrigate: 0.62,
   destroyer: 0.7,
@@ -230,14 +229,14 @@ export const SHIP_TURRET_SCALES: Readonly<Record<ShipClass, number>> = {
 };
 
 export const SHIP_ECONOMY: Readonly<Record<ShipClass, ShipEconomyDefinition>> = {
-  fighter: { alloyCost: 450, energyCost: 225, buildTicks: 180, batchSize: 1, yardType: "shipyard", requiredStructures: [] },
+  fighter: { alloyCost: 380, energyCost: 200, buildTicks: 180, batchSize: 1, yardType: "shipyard", requiredStructures: [] },
   fabricator: { alloyCost: 320, energyCost: 210, buildTicks: 230, batchSize: 1, yardType: "shipyard", requiredStructures: [] },
   frigate: { alloyCost: 260, energyCost: 150, buildTicks: 190, batchSize: 1, yardType: "shipyard", requiredStructures: [] },
-  bomber: { alloyCost: 1_800, energyCost: 1_300, buildTicks: 440, batchSize: 5, yardType: "shipyard", requiredStructures: [] },
-  flakFrigate: { alloyCost: 440, energyCost: 300, buildTicks: 250, batchSize: 1, yardType: "fleetShipyard", requiredStructures: [] },
-  torpedoFrigate: { alloyCost: 520, energyCost: 360, buildTicks: 275, batchSize: 1, yardType: "fleetShipyard", requiredStructures: [] },
+  bomber: { alloyCost: 1_500, energyCost: 1_050, buildTicks: 380, batchSize: 5, yardType: "shipyard", requiredStructures: [] },
+  flakFrigate: { alloyCost: 500, energyCost: 340, buildTicks: 250, batchSize: 1, yardType: "fleetShipyard", requiredStructures: [] },
+  torpedoFrigate: { alloyCost: 600, energyCost: 420, buildTicks: 275, batchSize: 1, yardType: "fleetShipyard", requiredStructures: [] },
   destroyer: { alloyCost: 760, energyCost: 520, buildTicks: 360, batchSize: 1, yardType: "fleetShipyard", requiredStructures: [] },
-  cruiser: { alloyCost: 1_550, energyCost: 1_150, buildTicks: 620, batchSize: 1, yardType: "fleetShipyard", requiredStructures: [] },
+  cruiser: { alloyCost: 1_750, energyCost: 1_300, buildTicks: 620, batchSize: 1, yardType: "fleetShipyard", requiredStructures: [] },
   carrier: { alloyCost: 3_600, energyCost: 3_100, buildTicks: 1_050, batchSize: 1, yardType: "capitalShipyard", requiredStructures: [] },
   battleship: { alloyCost: 4_800, energyCost: 4_200, buildTicks: 1_300, batchSize: 1, yardType: "capitalShipyard", requiredStructures: [] },
 };
@@ -251,7 +250,7 @@ export const STRUCTURES: Readonly<Record<StructureType, StructureDefinition>> = 
   },
   extractor: {
     type: "extractor", radius: 17, maxHealth: 1_050, maxShield: 180,
-    alloyCost: 220, energyCost: 80, buildTicks: 150,
+    alloyCost: 275, energyCost: 80, buildTicks: 180,
     alloyIncome: 11, energyIncome: 0, energyUpkeep: 1, alloyStorage: 0, energyStorage: 0,
     requiredStructures: ["commandCore"], buildPower: 0, assistRange: 0, sensorRange: 220,
   },
@@ -269,7 +268,7 @@ export const STRUCTURES: Readonly<Record<StructureType, StructureDefinition>> = 
   },
   solarArray: {
     type: "solarArray", radius: 20, maxHealth: 850, maxShield: 120,
-    alloyCost: 170, energyCost: 20, buildTicks: 125,
+    alloyCost: 210, energyCost: 20, buildTicks: 160,
     alloyIncome: 0, energyIncome: 22, energyUpkeep: 0, alloyStorage: 0, energyStorage: 0,
     requiredStructures: ["commandCore"], buildPower: 0, assistRange: 0, sensorRange: 190,
   },
@@ -293,7 +292,7 @@ export const STRUCTURES: Readonly<Record<StructureType, StructureDefinition>> = 
   },
   advancedFabrication: {
     type: "advancedFabrication", radius: 28, maxHealth: 2_400, maxShield: 750,
-    alloyCost: 1_320, energyCost: 820, buildTicks: 520,
+    alloyCost: 1_100, energyCost: 750, buildTicks: 520,
     alloyIncome: 0, energyIncome: 0, energyUpkeep: 12, alloyStorage: 350, energyStorage: 350,
     requiredStructures: ["commandCore", "fabricator", "solarArray"], buildPower: 0, assistRange: 0, sensorRange: 420,
   },
@@ -317,19 +316,19 @@ export const STRUCTURES: Readonly<Record<StructureType, StructureDefinition>> = 
   },
   fleetShipyard: {
     type: "fleetShipyard", radius: 42, maxHealth: 4_800, maxShield: 1_600,
-    alloyCost: 1_250, energyCost: 900, buildTicks: 600,
+    alloyCost: 1_100, energyCost: 800, buildTicks: 600,
     alloyIncome: 0, energyIncome: 0, energyUpkeep: 16, alloyStorage: 500, energyStorage: 500,
     requiredStructures: ["commandCore", "shipyard"], buildPower: 0, assistRange: 0, sensorRange: 520,
   },
   capitalInfrastructure: {
     type: "capitalInfrastructure", radius: 36, maxHealth: 6_200, maxShield: 2_600,
-    alloyCost: 2_650, energyCost: 2_100, buildTicks: 900,
+    alloyCost: 2_100, energyCost: 1_750, buildTicks: 900,
     alloyIncome: 0, energyIncome: 0, energyUpkeep: 30, alloyStorage: 900, energyStorage: 1_100,
     requiredStructures: ["advancedFabrication", "fleetShipyard", "fusionReactor", "storage"], buildPower: 0, assistRange: 0, sensorRange: 620,
   },
   capitalShipyard: {
     type: "capitalShipyard", radius: 58, maxHealth: 9_500, maxShield: 4_400,
-    alloyCost: 3_200, energyCost: 2_700, buildTicks: 1_100,
+    alloyCost: 2_800, energyCost: 2_400, buildTicks: 1_100,
     alloyIncome: 0, energyIncome: 0, energyUpkeep: 38, alloyStorage: 1_200, energyStorage: 1_400,
     requiredStructures: ["commandCore", "fleetShipyard"], buildPower: 0, assistRange: 0, sensorRange: 720,
   },

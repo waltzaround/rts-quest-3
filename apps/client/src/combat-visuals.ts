@@ -225,7 +225,7 @@ function bomberGeometry(): HullGeometrySet {
   const engine = merge([-7.4, 7.4].map((x) =>
     transformed(new THREE.ConeGeometry(1.55, 4.2, 7, 1, true), [x, 1.2, -12.2], [-Math.PI / 2, 0, 0]),
   ));
-  return scaleHullSet({ hull, armor, dark, accent, light, engine }, 0.72, 0.72, 0.72);
+  return scaleHullSet({ hull, armor, dark, accent, light, engine }, 0.42, 0.42, 0.42);
 }
 
 function frigateGeometry(): HullGeometrySet {

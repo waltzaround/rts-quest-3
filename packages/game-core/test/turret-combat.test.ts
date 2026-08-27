@@ -75,6 +75,7 @@ describe("moving multi-turret combat", () => {
 
   it("keeps fighter squadrons faster than bombers", () => {
     expect(SHIPS.fighter.radius).toBeGreaterThan(SHIPS.bomber.radius);
+    expect(SHIPS.bomber.radius).toBe(6);
     expect(SHIPS.fighter.speed).toBeGreaterThan(SHIPS.bomber.speed);
     expect(SHIPS.fighter.speed).toBeGreaterThanOrEqual(50);
   });

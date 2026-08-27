@@ -15,8 +15,8 @@ const ENGINE_UPDATE_INTERVAL_MS = 125;
 const ENGINE_CELL_SIZE = 135;
 const MAX_AUDIBLE_DISTANCE = 1_500;
 const CUE_LIFETIME_MS = 280;
-const MASTER_LEVEL = 0.76;
-const ENGINE_BUS_LEVEL = 0.4;
+const MASTER_LEVEL = 0.7;
+const ENGINE_BUS_LEVEL = 0.46;
 
 type CueKind = WeaponTypeId | "impact" | "explosion" | "command" | "construction" | "launch" | "victory";
 
@@ -107,33 +107,33 @@ const CUE_BASE_PRIORITY: Readonly<Record<CueKind, number>> = {
 };
 
 const CUE_GAIN: Readonly<Record<CueKind, number>> = {
-  pointDefense: 0.2,
-  autocannon: 0.25,
-  torpedo: 0.27,
-  plasma: 0.28,
-  heavyRail: 0.34,
-  beam: 0.3,
-  impact: 0.22,
-  explosion: 0.38,
-  command: 0.19,
-  construction: 0.23,
-  launch: 0.25,
-  victory: 0.31,
+  pointDefense: 0.16,
+  autocannon: 0.22,
+  torpedo: 0.3,
+  plasma: 0.25,
+  heavyRail: 0.36,
+  beam: 0.26,
+  impact: 0.2,
+  explosion: 0.4,
+  command: 0.15,
+  construction: 0.18,
+  launch: 0.23,
+  victory: 0.28,
 };
 
 const CUE_TONE: Readonly<Record<CueKind, { highpass: number; presence: number; boost: number }>> = {
-  pointDefense: { highpass: 520, presence: 3_200, boost: 6.5 },
-  autocannon: { highpass: 260, presence: 2_150, boost: 5.5 },
-  torpedo: { highpass: 90, presence: 1_050, boost: 4 },
-  plasma: { highpass: 190, presence: 1_850, boost: 6 },
-  heavyRail: { highpass: 75, presence: 2_750, boost: 6.5 },
-  beam: { highpass: 210, presence: 2_400, boost: 6 },
-  impact: { highpass: 145, presence: 1_650, boost: 4.5 },
-  explosion: { highpass: 55, presence: 920, boost: 3.5 },
-  command: { highpass: 360, presence: 1_750, boost: 4 },
-  construction: { highpass: 180, presence: 1_250, boost: 3.5 },
-  launch: { highpass: 120, presence: 1_400, boost: 4.5 },
-  victory: { highpass: 90, presence: 1_100, boost: 3 },
+  pointDefense: { highpass: 390, presence: 2_450, boost: 3.5 },
+  autocannon: { highpass: 180, presence: 1_600, boost: 3 },
+  torpedo: { highpass: 62, presence: 720, boost: 3.5 },
+  plasma: { highpass: 125, presence: 1_400, boost: 3.5 },
+  heavyRail: { highpass: 48, presence: 1_350, boost: 4 },
+  beam: { highpass: 145, presence: 1_750, boost: 3.5 },
+  impact: { highpass: 90, presence: 1_150, boost: 2.5 },
+  explosion: { highpass: 38, presence: 620, boost: 3 },
+  command: { highpass: 150, presence: 1_050, boost: 2 },
+  construction: { highpass: 110, presence: 920, boost: 2 },
+  launch: { highpass: 72, presence: 880, boost: 3 },
+  victory: { highpass: 52, presence: 720, boost: 2.5 },
 };
 
 const SHIP_ENGINE_WEIGHT: Readonly<Record<ShipState["class"], number>> = {
@@ -216,18 +216,18 @@ function createCueBuffers(context: AudioContext): Record<CueKind, AudioBuffer> {
       const needle = Math.sin(time * Math.PI * 2 * 2_850) * Math.exp(-time * 92);
       return snap * 0.72 + fizz * 0.25 + needle * 0.38;
     }, 0x01de_fade),
-    autocannon: makeBuffer(context, 0.115, (time, random) => {
+    autocannon: makeBuffer(context, 0.15, (time, random) => {
       const crack = noise(random) * Math.exp(-time * 118);
       const envelope = Math.exp(-time * 29);
-      const chirp = Math.sin(Math.PI * 2 * (1_050 * time - 2_800 * time * time));
-      const mechanism = Math.sin(Math.PI * 2 * 1_850 * time) * Math.exp(-time * 52);
-      return crack * 0.58 + chirp * envelope * 0.62 + mechanism * 0.22;
+      const body = Math.sin(Math.PI * 2 * (430 * time - 520 * time * time));
+      const mechanism = Math.sin(Math.PI * 2 * 1_180 * time) * Math.exp(-time * 48);
+      return crack * 0.62 + body * envelope * 0.68 + mechanism * 0.16;
     }, 0xac01_ca77),
     torpedo: makeBuffer(context, 0.48, (time, random) => {
       const attack = Math.min(1, time * 62);
       const envelope = attack * Math.exp(-time * 5.5);
-      const launch = Math.sin(Math.PI * 2 * (255 * time - 170 * time * time));
-      const turbine = Math.sin(Math.PI * 2 * (480 * time + Math.sin(time * 19) * 0.7));
+      const launch = Math.sin(Math.PI * 2 * (155 * time - 72 * time * time));
+      const turbine = Math.sin(Math.PI * 2 * (330 * time + Math.sin(time * 15) * 0.6));
       const ignition = noise(random) * Math.exp(-time * 105);
       const exhaust = noise(random) * attack * Math.exp(-time * 8.5);
       return ignition * 0.5 + (launch * 0.48 + turbine * 0.23 + exhaust * 0.28) * envelope;
@@ -242,10 +242,10 @@ function createCueBuffers(context: AudioContext): Record<CueKind, AudioBuffer> {
     }, 0x0b1a_5a11),
     heavyRail: makeBuffer(context, 0.42, (time, random) => {
       const crack = noise(random) * Math.exp(-time * 145);
-      const body = Math.sin(Math.PI * 2 * (195 * time - 105 * time * time)) * Math.exp(-time * 9);
-      const ring = Math.sin(Math.PI * 2 * 1_780 * time) * Math.exp(-time * 16);
-      const sparkle = Math.sin(Math.PI * 2 * 3_250 * time) * Math.exp(-time * 32);
-      return crack * 0.9 + body * 0.45 + ring * 0.31 + sparkle * 0.18;
+      const body = Math.sin(Math.PI * 2 * (118 * time - 38 * time * time)) * Math.exp(-time * 6.5);
+      const ring = Math.sin(Math.PI * 2 * 880 * time) * Math.exp(-time * 14);
+      const sparkle = Math.sin(Math.PI * 2 * 2_200 * time) * Math.exp(-time * 30);
+      return crack * 0.78 + body * 0.62 + ring * 0.27 + sparkle * 0.1;
     }, 0x7a11_5eed),
     beam: makeBuffer(context, 0.34, (time, random) => {
       const attack = Math.min(1, time * 130);
@@ -271,32 +271,35 @@ function createCueBuffers(context: AudioContext): Record<CueKind, AudioBuffer> {
       const flare = Math.sin(Math.PI * 2 * 760 * time) * Math.exp(-time * 13);
       return crack * 0.72 + (debris * 0.46 + body * 0.42) * envelope + flare * 0.2;
     }, 0xe7a1_0510),
-    command: makeBuffer(context, 0.15, (time) => {
-      const envelope = Math.sin(Math.min(1, time * 35) * Math.PI / 2) * Math.exp(-time * 16);
-      return (Math.sin(Math.PI * 2 * 660 * time) + Math.sin(Math.PI * 2 * 880 * time) * 0.35) * envelope * 0.65;
+    command: makeBuffer(context, 0.22, (time, random) => {
+      const strike = noise(random) * Math.exp(-time * 95);
+      const envelope = Math.min(1, time * 55) * Math.exp(-time * 15);
+      const acknowledgement = Math.sin(Math.PI * 2 * 185 * time)
+        + Math.sin(Math.PI * 2 * 277.5 * time) * 0.32;
+      return strike * 0.18 + acknowledgement * envelope * 0.56;
     }, 0xc011_a11d),
-    construction: makeBuffer(context, 0.58, (time) => {
-      const envelope = Math.sin(Math.min(1, time * 18) * Math.PI / 2) * Math.exp(-time * 3.5);
-      const confirmation = Math.sin(Math.PI * 2 * 440 * time) + Math.sin(Math.PI * 2 * 660 * time) * 0.58;
-      const shimmer = Math.sin(Math.PI * 2 * 1_320 * time) * Math.exp(-time * 7);
-      return confirmation * envelope * 0.5 + shimmer * 0.16;
+    construction: makeBuffer(context, 0.72, (time, random) => {
+      const envelope = Math.sin(Math.min(1, time * 14) * Math.PI / 2) * Math.exp(-time * 4.1);
+      const confirmation = Math.sin(Math.PI * 2 * 165 * time) + Math.sin(Math.PI * 2 * 247.5 * time) * 0.42;
+      const machinery = noise(random) * Math.exp(-time * 10) * 0.12;
+      return confirmation * envelope * 0.48 + machinery;
     }, 0xc057_0001),
     launch: makeBuffer(context, 0.68, (time, random) => {
       const attack = Math.min(1, time * 24);
       const envelope = attack * Math.exp(-time * 3.7);
-      const rise = Math.sin(Math.PI * 2 * (190 * time + 520 * time * time));
+      const rise = Math.sin(Math.PI * 2 * (105 * time + 235 * time * time));
       const air = noise(random) * attack * Math.exp(-time * 6.4);
       const latch = noise(random) * Math.exp(-time * 95);
       return latch * 0.35 + (rise * 0.52 + air * 0.3) * envelope;
     }, 0x1a0c_0001),
-    victory: makeBuffer(context, 1.45, (time) => {
+    victory: makeBuffer(context, 2.1, (time) => {
       const attack = Math.min(1, time * 8);
-      const envelope = attack * Math.exp(-time * 1.3);
-      const chord = Math.sin(Math.PI * 2 * 220 * time)
-        + Math.sin(Math.PI * 2 * 277.18 * time) * 0.7
-        + Math.sin(Math.PI * 2 * 329.63 * time) * 0.55
-        + Math.sin(Math.PI * 2 * 659.26 * time) * 0.2;
-      return chord * envelope * 0.29;
+      const envelope = attack * Math.exp(-time * 0.82);
+      const chord = Math.sin(Math.PI * 2 * 110 * time)
+        + Math.sin(Math.PI * 2 * 164.81 * time) * 0.68
+        + Math.sin(Math.PI * 2 * 220 * time) * 0.42
+        + Math.sin(Math.PI * 2 * 329.63 * time) * 0.16;
+      return chord * envelope * 0.3;
     }, 0x71c7_0001),
   };
 }
@@ -304,13 +307,21 @@ function createCueBuffers(context: AudioContext): Record<CueKind, AudioBuffer> {
 function createEngineBuffer(context: AudioContext): AudioBuffer {
   return makeBuffer(context, 2.4, (time, random) => {
     const noise = random() * 2 - 1;
-    const body = Math.sin(Math.PI * 2 * 74 * time) * 0.19
-      + Math.sin(Math.PI * 2 * 113 * time) * 0.13;
-    const turbine = Math.sin(Math.PI * 2 * (235 * time + Math.sin(time * 2.3) * 0.8)) * 0.18
-      + Math.sin(Math.PI * 2 * 410 * time) * 0.08;
-    const pulse = 0.82 + Math.sin(Math.PI * 2 * 2.1 * time) * 0.09;
-    return (noise * 0.17 + body + turbine) * pulse;
+    const body = Math.sin(Math.PI * 2 * 46 * time) * 0.23
+      + Math.sin(Math.PI * 2 * 73 * time) * 0.16;
+    const turbine = Math.sin(Math.PI * 2 * (172 * time + Math.sin(time * 1.7) * 0.7)) * 0.15
+      + Math.sin(Math.PI * 2 * 286 * time) * 0.06;
+    const pulse = 0.84 + Math.sin(Math.PI * 2 * 1.35 * time) * 0.07;
+    return (noise * 0.13 + body + turbine) * pulse;
   }, 0xe09e_1a11);
+}
+
+function createReverbImpulse(context: AudioContext): AudioBuffer {
+  return makeBuffer(context, 1.65, (time, random) => {
+    const earlyReflection = time > 0.045 && time < 0.052 ? (random() * 2 - 1) * 0.4 : 0;
+    const tail = (random() * 2 - 1) * Math.exp(-time * 3.1) * Math.min(1, time * 45);
+    return earlyReflection + tail * 0.34;
+  }, 0x5aace_001);
 }
 
 /**
@@ -551,11 +562,11 @@ export class ScalableBattleAudio {
     const context = new Context({ latencyHint: "interactive" });
     this.context = context;
     const compressor = context.createDynamicsCompressor();
-    compressor.threshold.value = -8;
-    compressor.knee.value = 10;
-    compressor.ratio.value = 3.5;
-    compressor.attack.value = 0.012;
-    compressor.release.value = 0.16;
+    compressor.threshold.value = -10;
+    compressor.knee.value = 14;
+    compressor.ratio.value = 3;
+    compressor.attack.value = 0.018;
+    compressor.release.value = 0.24;
     const masterHighpass = context.createBiquadFilter();
     masterHighpass.type = "highpass";
     masterHighpass.frequency.value = 34;
@@ -565,12 +576,22 @@ export class ScalableBattleAudio {
     master.connect(masterHighpass).connect(compressor).connect(context.destination);
     this.masterGain = master;
     const transientBus = context.createGain();
-    transientBus.gain.value = 0.96;
+    transientBus.gain.value = 0.9;
     const transientShelf = context.createBiquadFilter();
     transientShelf.type = "highshelf";
-    transientShelf.frequency.value = 1_650;
-    transientShelf.gain.value = 2.5;
+    transientShelf.frequency.value = 2_200;
+    transientShelf.gain.value = -2.5;
     transientBus.connect(transientShelf).connect(master);
+    const reverbSend = context.createGain();
+    reverbSend.gain.value = 0.16;
+    const reverb = context.createConvolver();
+    reverb.buffer = createReverbImpulse(context);
+    const reverbTone = context.createBiquadFilter();
+    reverbTone.type = "lowpass";
+    reverbTone.frequency.value = 1_850;
+    const reverbReturn = context.createGain();
+    reverbReturn.gain.value = 0.22;
+    transientBus.connect(reverbSend).connect(reverb).connect(reverbTone).connect(reverbReturn).connect(master);
     this.transientBus = transientBus;
     const engineBus = context.createGain();
     engineBus.gain.value = ENGINE_BUS_LEVEL;
@@ -761,12 +782,12 @@ export class ScalableBattleAudio {
       if (!voice) continue;
       used.add(voice);
       voice.key = cluster.key;
-      voice.level = Math.min(0.11, 0.008 + Math.sqrt(cluster.weight) * 0.013);
+      voice.level = Math.min(0.12, 0.01 + Math.sqrt(cluster.weight) * 0.014);
       setPannerPosition(voice.panner, cluster.x, cluster.y, cluster.z, at);
       setParam(voice.gain.gain, voice.level, at, 0.12);
       setParam(voice.source.playbackRate, cluster.rate, at, 0.16);
-      setParam(voice.highpass.frequency, 62 + Math.min(38, (cluster.rate - 0.8) * 85), at, 0.2);
-      setParam(voice.lowpass.frequency, Math.min(1_750, cluster.tone + cluster.count * 11), at, 0.2);
+      setParam(voice.highpass.frequency, 42 + Math.min(28, (cluster.rate - 0.8) * 65), at, 0.2);
+      setParam(voice.lowpass.frequency, Math.min(1_350, cluster.tone * 0.82 + cluster.count * 9), at, 0.2);
     }
     for (const voice of this.engineVoices) {
       if (used.has(voice)) continue;

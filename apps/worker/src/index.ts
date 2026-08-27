@@ -472,8 +472,19 @@ export class Match implements DurableObject {
           this.fail(socket, "ffa_teams_locked", "Free-for-all gives every pilot a separate team");
           return;
         }
-        slot.teamId = message.teamId;
-        slot.ready = false;
+        const targetSlot = message.playerId
+          ? this.lobby.slots.find((candidate) => candidate.playerId === message.playerId)
+          : slot;
+        if (!targetSlot) {
+          this.fail(socket, "slot_missing", "That commander is no longer in the lobby");
+          return;
+        }
+        if (targetSlot.playerId !== slot.playerId && !slot.isHost) {
+          this.fail(socket, "host_required", "Only the host can assign another commander's team");
+          return;
+        }
+        targetSlot.teamId = message.teamId;
+        if (!targetSlot.isAi) targetSlot.ready = false;
         this.lobbyChanged();
         return;
       case "set_mode":

@@ -224,7 +224,10 @@ export class RenderStateBuilder {
       this.state.shipLod[index] = lod;
       if (lod !== VisualLod.Culled) this.state.metrics.lod[lod] += 1;
 
-      if (lod === VisualLod.Close || (lod === VisualLod.Medium && source.ships.length <= 768)) {
+      // Keep weapon mounts readable throughout the normal 3D view. Tactical
+      // contacts are the only LOD that intentionally collapses a ship to an
+      // icon; hiding mounts at Far made most combat look like bare hulls.
+      if (lod === VisualLod.Close || lod === VisualLod.Far || (lod === VisualLod.Medium && source.ships.length <= 768)) {
         this.appendTurrets(ship, index, previous, alpha, lod, now, delta);
       }
     }
@@ -268,9 +271,7 @@ export class RenderStateBuilder {
     now: number,
     delta: number,
   ): void {
-    // Strike craft carry integrated guns and launch tubes; freestanding capital-style mounts look oversized on them.
-    if (ship.class === "fighter" || ship.class === "bomber") return;
-    const updateInterval = lod === VisualLod.Close ? 0 : 42;
+    const updateInterval = lod === VisualLod.Close ? 0 : lod === VisualLod.Medium ? 42 : 70;
     const localY = turretVisualHeight(ship.class);
     for (const turret of ship.turrets) {
       if (this.state.turretCount >= MAX_RENDER_TURRETS) return;
@@ -288,7 +289,6 @@ export class RenderStateBuilder {
         visualYaw = current + wrapAngle(this.targetTurretYaw[turret.id]! - current) * Math.min(1, delta * (lod === VisualLod.Close ? 30 : 12));
         this.visualTurretYaw[turret.id] = visualYaw;
       }
-      if (turret.weaponTypeId === "torpedo") visualYaw = 0;
       const index = this.state.turretCount++;
       this.state.turretOwner[index] = ownerIndex;
       this.state.turretType[index] = WEAPON_TO_ID[turret.weaponTypeId];
