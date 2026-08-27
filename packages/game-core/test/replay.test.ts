@@ -172,7 +172,7 @@ describe("replay tamper detection", () => {
     expect(playReplay(authorityTamper)).toMatchObject({ ok: false, reason: "checkpointMismatch" });
 
     const checkpointTamper = clone(replay);
-    checkpointTamper.checkpoints[1]!.checksum ^= 1;
+    checkpointTamper.checkpoints[1]!.checksum = (checkpointTamper.checkpoints[1]!.checksum ^ 1) >>> 0;
     expect(playReplay(checkpointTamper)).toMatchObject({ ok: false, reason: "checkpointMismatch" });
   });
 

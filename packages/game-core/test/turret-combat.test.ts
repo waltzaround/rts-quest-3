@@ -11,7 +11,7 @@ describe("moving multi-turret combat", () => {
     expect(WEAPONS.autocannon).toMatchObject({ delivery: "projectile", burstSize: 4, burstIntervalTicks: 2 });
     expect(WEAPONS.pointDefense).toMatchObject({ delivery: "projectile", burstSize: 6, burstIntervalTicks: 1 });
     expect(WEAPONS.plasma).toMatchObject({ delivery: "projectile", burstSize: 2, burstIntervalTicks: 5 });
-    expect(WEAPONS.torpedo.burstSize).toBe(1);
+    expect(WEAPONS.torpedo).toMatchObject({ delivery: "projectile", burstSize: 2, burstIntervalTicks: 4 });
     expect(WEAPONS.heavyRail.burstSize).toBe(1);
     expect(WEAPONS.beam.delivery).toBe("beam");
   });
@@ -115,16 +115,23 @@ describe("moving multi-turret combat", () => {
       (ship) => ship.teamId === 1 && ship.class === "bomber",
     ).map((ship) => ship.id));
     let torpedoShots = 0;
+    let firstLaunchDistance: number | null = null;
     for (let tick = 0; tick < 180; tick += 1) {
       const snapshot = simulation.step();
       torpedoShots += snapshot.events.filter((event) => {
         if (event.type !== "weaponFired" || !bomberIds.has(event.shipId)) return false;
-        return simulation.state.projectiles.some(
+        const projectile = simulation.state.projectiles.find(
           (projectile) => projectile.id === event.projectileId && projectile.weaponTypeId === "torpedo",
         );
+        if (projectile && firstLaunchDistance === null) {
+          firstLaunchDistance = Math.hypot(projectile.x - projectile.previousX, projectile.z - projectile.previousZ);
+        }
+        return Boolean(projectile);
       }).length;
     }
     expect(torpedoShots).toBeGreaterThan(0);
+    expect(firstLaunchDistance).not.toBeNull();
+    expect(firstLaunchDistance!).toBeLessThan(WEAPONS.torpedo.projectileSpeed * 0.05 * 0.2);
   });
 
   it("keeps capital ships moving while their weapons fire", () => {

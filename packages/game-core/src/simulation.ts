@@ -1124,8 +1124,15 @@ export class GameSimulation {
     for (const projectile of this.state.projectiles) {
       projectile.previousX = projectile.x;
       projectile.previousZ = projectile.z;
-      projectile.x += projectile.vx * FIXED_DT;
-      projectile.z += projectile.vz * FIXED_DT;
+      const weapon = WEAPONS[projectile.weaponTypeId];
+      const ageTicks = weapon.projectileLifetimeTicks - projectile.lifetimeTicks;
+      const launchProgress = projectile.weaponTypeId === "torpedo"
+        ? Math.min(1, Math.max(0, (ageTicks - 2) / 6))
+        : 1;
+      const easedLaunch = launchProgress * launchProgress * (3 - 2 * launchProgress);
+      const thrustScale = projectile.weaponTypeId === "torpedo" ? 0.08 + easedLaunch * 0.92 : 1;
+      projectile.x += projectile.vx * FIXED_DT * thrustScale;
+      projectile.z += projectile.vz * FIXED_DT * thrustScale;
       projectile.lifetimeTicks -= 1;
       let impact: { fraction: number; key: string; target: CombatTargetState | null } | null = null;
       const considerImpact = (fraction: number | null, key: string, target: CombatTargetState | null): void => {

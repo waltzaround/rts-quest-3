@@ -288,6 +288,7 @@ export class RenderStateBuilder {
         visualYaw = current + wrapAngle(this.targetTurretYaw[turret.id]! - current) * Math.min(1, delta * (lod === VisualLod.Close ? 30 : 12));
         this.visualTurretYaw[turret.id] = visualYaw;
       }
+      if (turret.weaponTypeId === "torpedo") visualYaw = 0;
       const index = this.state.turretCount++;
       this.state.turretOwner[index] = ownerIndex;
       this.state.turretType[index] = WEAPON_TO_ID[turret.weaponTypeId];

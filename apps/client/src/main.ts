@@ -2790,7 +2790,11 @@ function processEvents(events: SimulationEvent[]): void {
             );
           }
         } else if (isEffectVisible(muzzle.x, y, muzzle.z)) {
-          combatEffects.spawnMuzzle(muzzle.x, y, muzzle.z, WEAPONS[weaponTypeId].color, muzzleSize, now);
+          if (weaponTypeId === "torpedo") {
+            combatEffects.spawnMissileLaunch(muzzle.x, y, muzzle.z, WEAPONS.torpedo.color, now);
+          } else {
+            combatEffects.spawnMuzzle(muzzle.x, y, muzzle.z, WEAPONS[weaponTypeId].color, muzzleSize, now);
+          }
         }
       }
       if (event.turretId % 7 === 0) eventLines.unshift(`<b>T${event.tick}</b> turret ${event.turretId} → contact ${event.targetId}`);

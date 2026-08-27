@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import type { ProjectileState, ShipClass, WeaponTypeId } from "@space-rts/game-core";
+import { WEAPONS, type ProjectileState, type ShipClass, type WeaponTypeId } from "@space-rts/game-core";
 
 const MAX_PROJECTILES = 8_192;
 const VERTICES_PER_STREAK = 6;
@@ -516,15 +516,15 @@ export function createShipHull(shipClass: ShipClass, teamId: number): ShipHullVi
 
 function makeTurretGeometry(shipClass: ShipClass, weaponTypeId: WeaponTypeId): TurretGeometrySet {
   const large = shipClass === "destroyer" || shipClass === "cruiser" || shipClass === "carrier" || shipClass === "battleship";
-  const mountRadius = large ? 2.25 : shipClass === "fighter" ? 0.72 : shipClass === "bomber" ? 1.1 : 1.45;
+  const mountRadius = large ? 1.62 : shipClass === "fighter" ? 0.42 : shipClass === "bomber" ? 0.62 : 1.05;
   const housingScale = mountRadius / 1.45;
   const mount = merge([
     transformed(
-      new THREE.CylinderGeometry(mountRadius * 0.8, mountRadius, large ? 1.35 : 0.95, 10),
-      [0, 0.25, 0],
+      new THREE.CylinderGeometry(mountRadius * 0.78, mountRadius, large ? 0.72 : 0.5, 10),
+      [0, 0.12, 0],
     ),
     transformed(
-      extrudedShape([[0, 1.8], [-1.15, 0.55], [-0.95, -1.1], [0, -1.45], [0.95, -1.1], [1.15, 0.55]], 0.72, 0.58, 0.18),
+      extrudedShape([[0, 1.5], [-0.92, 0.46], [-0.76, -0.92], [0, -1.18], [0.76, -0.92], [0.92, 0.46]], 0.42, 0.34, 0.12),
       [0, 0, 0], [0, 0, 0], [housingScale, housingScale, housingScale],
     ),
   ]);
@@ -532,68 +532,67 @@ function makeTurretGeometry(shipClass: ShipClass, weaponTypeId: WeaponTypeId): T
   let accent: THREE.BufferGeometry;
   if (weaponTypeId === "torpedo") {
     barrel = merge([
-      transformed(new THREE.CylinderGeometry(0.72, 0.72, 5.8, 8), [-0.68, 0.95, 3.1], [Math.PI / 2, 0, 0]),
-      transformed(new THREE.CylinderGeometry(0.72, 0.72, 5.8, 8), [0.68, 0.95, 3.1], [Math.PI / 2, 0, 0]),
-      box([2.65, 0.72, 1.7], [0, 0.85, 0.9]),
+      box([2.4, 0.48, 2.85], [0, 0.52, 0.12]),
+      box([0.2, 0.32, 2.95], [-1.2, 0.58, 0.12]),
+      box([0.2, 0.32, 2.95], [1.2, 0.58, 0.12]),
     ]);
     accent = merge([
-      box([0.88, 0.3, 0.38], [-0.68, 1.5, 5.95]),
-      box([0.88, 0.3, 0.38], [0.68, 1.5, 5.95]),
+      box([0.48, 0.14, 0.62], [-0.58, 0.84, -0.58]),
+      box([0.48, 0.14, 0.62], [0.58, 0.84, -0.58]),
+      box([0.48, 0.14, 0.62], [-0.58, 0.84, 0.58]),
+      box([0.48, 0.14, 0.62], [0.58, 0.84, 0.58]),
     ]);
   } else if (weaponTypeId === "heavyRail") {
     barrel = merge([
-      box([0.78, 0.82, 9.8], [-0.72, 1.1, 5.0]),
-      box([0.78, 0.82, 9.8], [0.72, 1.1, 5.0]),
-      box([2.25, 0.72, 2.5], [0, 0.98, 1.5]),
-      box([3.05, 1.2, 1.3], [0, 0.94, -0.25]),
+      box([0.42, 0.5, 8.6], [-0.42, 0.78, 4.35]),
+      box([0.42, 0.5, 8.6], [0.42, 0.78, 4.35]),
+      box([1.45, 0.5, 2.2], [0, 0.66, 1.25]),
+      box([1.8, 0.62, 1.05], [0, 0.56, -0.2]),
     ]);
     accent = merge([
-      box([2.0, 0.32, 0.45], [0, 1.55, 3.2]),
-      box([2.0, 0.32, 0.45], [0, 1.55, 6.4]),
-      transformed(new THREE.TorusGeometry(1.02, 0.18, 4, 10), [0, 1.15, 1.1], [Math.PI / 2, 0, 0]),
+      box([1.2, 0.18, 0.3], [0, 1.08, 2.5]),
+      box([1.2, 0.18, 0.3], [0, 1.08, 4.55]),
+      box([1.2, 0.18, 0.3], [0, 1.08, 6.6]),
     ]);
   } else if (weaponTypeId === "plasma") {
     barrel = merge([
-      box([1.15, 1.05, 5.8], [-0.72, 0.98, 3.0]),
-      box([1.15, 1.05, 5.8], [0.72, 0.98, 3.0]),
-      box([3.1, 0.65, 1.3], [0, 0.83, 0.8]),
+      box([0.62, 0.62, 5.0], [-0.42, 0.72, 2.6]),
+      box([0.62, 0.62, 5.0], [0.42, 0.72, 2.6]),
+      box([1.7, 0.48, 1.35], [0, 0.55, 0.72]),
     ]);
     accent = merge([
-      box([0.62, 0.34, 0.5], [-0.72, 1.58, 5.85]),
-      box([0.62, 0.34, 0.5], [0.72, 1.58, 5.85]),
+      box([0.36, 0.22, 0.42], [-0.42, 1.08, 5.0]),
+      box([0.36, 0.22, 0.42], [0.42, 1.08, 5.0]),
     ]);
   } else if (weaponTypeId === "beam") {
     barrel = merge([
-      transformed(new THREE.CylinderGeometry(0.52, 0.72, 8.8, 8), [0, 1.05, 4.5], [Math.PI / 2, 0, 0]),
-      box([2.2, 0.72, 2.4], [0, 0.92, 1.45]),
+      transformed(new THREE.CylinderGeometry(0.3, 0.5, 7.8, 8), [0, 0.74, 4.0], [Math.PI / 2, 0, 0]),
+      box([1.35, 0.5, 2.0], [0, 0.58, 1.12]),
     ]);
     accent = merge([
-      transformed(new THREE.TorusGeometry(0.76, 0.18, 4, 10), [0, 1.1, 5.6], [Math.PI / 2, 0, 0]),
-      box([1.75, 0.28, 0.4], [0, 1.45, 2.5]),
+      transformed(new THREE.TorusGeometry(0.42, 0.1, 4, 8), [0, 0.79, 6.2], [Math.PI / 2, 0, 0]),
+      box([1.0, 0.18, 0.3], [0, 0.98, 2.35]),
     ]);
   } else if (weaponTypeId === "autocannon") {
     barrel = merge([
-      box([0.38, 0.42, 5.8], [-0.42, 0.95, 3.0]),
-      box([0.38, 0.42, 5.8], [0.42, 0.95, 3.0]),
-      box([0.28, 0.28, 5.25], [-0.86, 0.82, 2.75]),
-      box([0.28, 0.28, 5.25], [0.86, 0.82, 2.75]),
-      box([1.5, 0.68, 1.8], [0, 0.85, 1.0]),
+      box([0.22, 0.24, 4.5], [-0.3, 0.66, 2.3]),
+      box([0.22, 0.24, 4.5], [0.3, 0.66, 2.3]),
+      box([1.05, 0.46, 1.5], [0, 0.52, 0.78]),
+      box([0.72, 0.6, 0.8], [0, 0.56, -0.28]),
     ]);
     accent = merge([
-      box([1.3, 0.28, 0.32], [0, 1.28, 1.45]),
-      box([2.15, 0.22, 0.26], [0, 1.18, 5.75]),
+      box([0.82, 0.16, 0.24], [0, 0.9, 1.25]),
+      box([0.72, 0.14, 0.2], [0, 0.82, 4.55]),
     ]);
   } else {
     barrel = merge([
-      box([0.32, 0.35, 3.9], [-0.33, 0.92, 2.05]),
-      box([0.32, 0.35, 3.9], [0.33, 0.92, 2.05]),
-      box([0.24, 0.25, 3.45], [-0.7, 0.8, 1.9]),
-      box([0.24, 0.25, 3.45], [0.7, 0.8, 1.9]),
-      box([1.3, 0.65, 1.45], [0, 0.78, 0.85]),
+      box([0.18, 0.2, 3.1], [-0.25, 0.6, 1.62]),
+      box([0.18, 0.2, 3.1], [0.25, 0.6, 1.62]),
+      box([0.86, 0.42, 1.2], [0, 0.48, 0.62]),
     ]);
     accent = merge([
-      box([1.12, 0.25, 0.32], [0, 1.2, 1.18]),
-      transformed(new THREE.TorusGeometry(0.64, 0.14, 4, 8), [0, 0.93, 3.45], [Math.PI / 2, 0, 0]),
+      box([0.68, 0.14, 0.22], [0, 0.8, 0.95]),
+      box([0.54, 0.12, 0.18], [0, 0.74, 3.12]),
     ]);
   }
   return { mount, barrel, accent };
@@ -666,13 +665,50 @@ function weaponStyle(
 }
 
 const WEAPON_STYLE: Readonly<Record<WeaponTypeId, WeaponStyle>> = {
-  autocannon: weaponStyle(0xd5a354, 4.2, 6.5, 0.14, [0.18, 0.18, 0.85], 0.4),
-  torpedo: weaponStyle(0xff6d66, 8.2, 25, 1.18, [1.05, 1.05, 2.8]),
-  plasma: weaponStyle(0x58ddff, 7.2, 31, 1.05, [0.85, 0.85, 1.45]),
-  heavyRail: weaponStyle(0xfff0c2, 10.2, 58, 1.35, [0.82, 0.82, 5.5]),
-  pointDefense: weaponStyle(0x8dffb0, 6.8, 38, 0.34, [0.34, 0.34, 2.2]),
-  beam: weaponStyle(0xa8f7ff, 8.5, 70, 1.5, [0.55, 0.55, 4.5]),
+  autocannon: weaponStyle(0xf0bd69, 4.2, 4.2, 0.09, [0.12, 0.12, 0.5], 0.34),
+  torpedo: weaponStyle(0xff795f, 10, 8, 0.28, [0.46, 0.46, 1.35], 0.9),
+  plasma: weaponStyle(0x58ddff, 7.2, 14, 0.45, [0.55, 0.55, 0.9], 0.85),
+  heavyRail: weaponStyle(0xfff0c2, 10.2, 40, 0.42, [0.38, 0.38, 3.2], 1.08),
+  pointDefense: weaponStyle(0x8dffb0, 6.8, 5.5, 0.07, [0.12, 0.12, 0.65], 0.38),
+  beam: weaponStyle(0xa8f7ff, 8.5, 54, 0.55, [0.4, 0.4, 3.2]),
 };
+
+interface ProjectileVisualPose {
+  x: number;
+  y: number;
+  z: number;
+  directionX: number;
+  directionY: number;
+  directionZ: number;
+}
+
+function smoothstep(value: number): number {
+  const clamped = Math.min(1, Math.max(0, value));
+  return clamped * clamped * (3 - 2 * clamped);
+}
+
+function projectileVisualPose(projectile: ProjectileState, alpha: number, style: WeaponStyle): ProjectileVisualPose {
+  const x = THREE.MathUtils.lerp(projectile.previousX, projectile.x, alpha);
+  const z = THREE.MathUtils.lerp(projectile.previousZ, projectile.z, alpha);
+  const speed = Math.max(0.001, Math.hypot(projectile.vx, projectile.vz));
+  const horizontalX = projectile.vx / speed;
+  const horizontalZ = projectile.vz / speed;
+  if (projectile.weaponTypeId !== "torpedo") {
+    return { x, y: style.height, z, directionX: horizontalX, directionY: 0, directionZ: horizontalZ };
+  }
+  const ageTicks = Math.max(0, WEAPONS.torpedo.projectileLifetimeTicks - projectile.lifetimeTicks + alpha);
+  const rise = smoothstep(ageTicks / 3.5);
+  const pitch = smoothstep((ageTicks - 2) / 6);
+  const horizontal = Math.sin(pitch * Math.PI / 2);
+  return {
+    x,
+    y: style.height + rise * (1 - pitch) * 16,
+    z,
+    directionX: horizontalX * horizontal,
+    directionY: Math.cos(pitch * Math.PI / 2),
+    directionZ: horizontalZ * horizontal,
+  };
+}
 
 function projectileGeometry(weaponTypeId: WeaponTypeId): THREE.BufferGeometry {
   if (weaponTypeId === "torpedo") {
@@ -732,6 +768,8 @@ export class ProjectileVfx {
   private readonly quaternion = new THREE.Quaternion();
   private readonly position = new THREE.Vector3();
   private readonly scale = new THREE.Vector3();
+  private readonly direction = new THREE.Vector3();
+  private readonly forward = new THREE.Vector3(0, 0, 1);
 
   constructor(scene: THREE.Scene) {
     for (const weaponTypeId of Object.keys(WEAPON_STYLE) as WeaponTypeId[]) {
@@ -771,11 +809,10 @@ export class ProjectileVfx {
       const style = WEAPON_STYLE[projectile.weaponTypeId];
       const instanceIndex = counts.get(projectile.weaponTypeId) ?? 0;
       const head = this.heads.get(projectile.weaponTypeId)!;
-      const x = THREE.MathUtils.lerp(projectile.previousX, projectile.x, alpha);
-      const z = THREE.MathUtils.lerp(projectile.previousZ, projectile.z, alpha);
-      const yaw = Math.atan2(projectile.vx, projectile.vz);
-      this.position.set(x, style.height, z);
-      this.quaternion.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, yaw);
+      const pose = projectileVisualPose(projectile, alpha, style);
+      this.position.set(pose.x, pose.y, pose.z);
+      this.direction.set(pose.directionX, pose.directionY, pose.directionZ).normalize();
+      this.quaternion.setFromUnitVectors(this.forward, this.direction);
       this.scale.set(...style.headScale);
       this.matrix.compose(this.position, this.quaternion, this.scale);
       head.setMatrixAt(instanceIndex, this.matrix);
@@ -807,23 +844,24 @@ export class ProjectileVfx {
     for (let projectileIndex = 0; projectileIndex < projectileCount; projectileIndex += 1) {
       const projectile = projectiles[projectileIndex]!;
       const style = WEAPON_STYLE[projectile.weaponTypeId];
-      const headX = THREE.MathUtils.lerp(projectile.previousX, projectile.x, alpha);
-      const headZ = THREE.MathUtils.lerp(projectile.previousZ, projectile.z, alpha);
-      const speed = Math.max(0.001, Math.hypot(projectile.vx, projectile.vz));
-      const directionX = projectile.vx / speed;
-      const directionZ = projectile.vz / speed;
-      const tailX = headX - directionX * style.trailLength;
-      const tailZ = headZ - directionZ * style.trailLength;
-      const sideX = -directionZ * style.width * widthScale;
-      const sideZ = directionX * style.width * widthScale;
+      const pose = projectileVisualPose(projectile, alpha, style);
+      const tailX = pose.x - pose.directionX * style.trailLength;
+      const tailY = pose.y - pose.directionY * style.trailLength;
+      const tailZ = pose.z - pose.directionZ * style.trailLength;
+      const horizontalLength = Math.hypot(pose.directionX, pose.directionZ);
+      const sideX = horizontalLength > 0.05
+        ? -pose.directionZ / horizontalLength * style.width * widthScale
+        : style.width * widthScale;
+      const sideZ = horizontalLength > 0.05
+        ? pose.directionX / horizontalLength * style.width * widthScale
+        : 0;
       const headBrightness = (widthScale > 1 ? 0.65 : 1.25) * style.brightness;
-      const y = style.height;
-      setStreakVertex(positions, colors, vertex++, tailX - sideX * 0.2, y, tailZ - sideZ * 0.2, style.rgb, tailBrightness * style.brightness);
-      setStreakVertex(positions, colors, vertex++, tailX + sideX * 0.2, y, tailZ + sideZ * 0.2, style.rgb, tailBrightness * style.brightness);
-      setStreakVertex(positions, colors, vertex++, headX + sideX, y, headZ + sideZ, style.rgb, headBrightness);
-      setStreakVertex(positions, colors, vertex++, tailX - sideX * 0.2, y, tailZ - sideZ * 0.2, style.rgb, tailBrightness * style.brightness);
-      setStreakVertex(positions, colors, vertex++, headX + sideX, y, headZ + sideZ, style.rgb, headBrightness);
-      setStreakVertex(positions, colors, vertex++, headX - sideX, y, headZ - sideZ, style.rgb, headBrightness);
+      setStreakVertex(positions, colors, vertex++, tailX - sideX * 0.2, tailY, tailZ - sideZ * 0.2, style.rgb, tailBrightness * style.brightness);
+      setStreakVertex(positions, colors, vertex++, tailX + sideX * 0.2, tailY, tailZ + sideZ * 0.2, style.rgb, tailBrightness * style.brightness);
+      setStreakVertex(positions, colors, vertex++, pose.x + sideX, pose.y, pose.z + sideZ, style.rgb, headBrightness);
+      setStreakVertex(positions, colors, vertex++, tailX - sideX * 0.2, tailY, tailZ - sideZ * 0.2, style.rgb, tailBrightness * style.brightness);
+      setStreakVertex(positions, colors, vertex++, pose.x + sideX, pose.y, pose.z + sideZ, style.rgb, headBrightness);
+      setStreakVertex(positions, colors, vertex++, pose.x - sideX, pose.y, pose.z - sideZ, style.rgb, headBrightness);
     }
     if (vertex > 0) {
       positions.clearUpdateRanges();

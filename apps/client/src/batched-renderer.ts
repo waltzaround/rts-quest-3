@@ -726,6 +726,11 @@ export class CombatEffectRenderer {
     this.muzzle.spawn(x, y, z, size, color, now, 95);
   }
 
+  spawnMissileLaunch(x: number, y: number, z: number, color: number, now: number): void {
+    this.muzzle.spawn(x, y, z, 0.78, 0xffd69b, now, 175, 0, 16, 0);
+    this.shock.spawn(x, y + 0.2, z, 1.15, color, now, 260);
+  }
+
   spawnDamageImpact(
     x: number, y: number, z: number, radius: number,
     seed: number, damage: number, shielded: boolean, now: number,

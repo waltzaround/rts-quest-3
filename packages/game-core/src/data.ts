@@ -15,7 +15,7 @@ export const WEAPONS: Readonly<Record<WeaponTypeId, WeaponDefinition>> = {
     id: "autocannon", delivery: "projectile", range: 230, minimumRange: 0,
     cooldownTicks: 16, burstSize: 4, burstIntervalTicks: 2,
     projectileSpeed: 240, projectileRadius: 2, projectileLifetimeTicks: 35,
-    muzzleOffset: 5.8, muzzleSeparation: 0.42,
+    muzzleOffset: 4.6, muzzleSeparation: 0.3,
     damage: 5, traverseRate: 190 * DEG, alignmentTolerance: 10 * DEG,
     targetPreference: {
       fighter: 0, fabricator: 14, bomber: 8, frigate: 20, flakFrigate: 24, torpedoFrigate: 26,
@@ -24,10 +24,10 @@ export const WEAPONS: Readonly<Record<WeaponTypeId, WeaponDefinition>> = {
   },
   torpedo: {
     id: "torpedo", delivery: "projectile", range: 360, minimumRange: 65,
-    cooldownTicks: 44, burstSize: 1, burstIntervalTicks: 1,
+    cooldownTicks: 46, burstSize: 2, burstIntervalTicks: 4,
     projectileSpeed: 108, projectileRadius: 4.2, projectileLifetimeTicks: 78,
-    muzzleOffset: 6, muzzleSeparation: 0.68,
-    damage: 58, traverseRate: 72 * DEG, alignmentTolerance: 5 * DEG,
+    muzzleOffset: 0.35, muzzleSeparation: 0.58,
+    damage: 32, traverseRate: 72 * DEG, alignmentTolerance: 5 * DEG,
     targetPreference: {
       fighter: 180, fabricator: 84, bomber: 120, frigate: 48, flakFrigate: 52, torpedoFrigate: 40,
       destroyer: 20, cruiser: 6, carrier: 0, battleship: 2,
@@ -37,7 +37,7 @@ export const WEAPONS: Readonly<Record<WeaponTypeId, WeaponDefinition>> = {
     id: "plasma", delivery: "projectile", range: 320, minimumRange: 20,
     cooldownTicks: 28, burstSize: 2, burstIntervalTicks: 5,
     projectileSpeed: 135, projectileRadius: 3.5, projectileLifetimeTicks: 55,
-    muzzleOffset: 5.9, muzzleSeparation: 0.72,
+    muzzleOffset: 5.1, muzzleSeparation: 0.42,
     damage: 18, traverseRate: 105 * DEG, alignmentTolerance: 7 * DEG,
     targetPreference: {
       fighter: 58, fabricator: 8, bomber: 32, frigate: 0, flakFrigate: 4, torpedoFrigate: 4,
@@ -48,7 +48,7 @@ export const WEAPONS: Readonly<Record<WeaponTypeId, WeaponDefinition>> = {
     id: "heavyRail", delivery: "projectile", range: 430, minimumRange: 55,
     cooldownTicks: 39, burstSize: 1, burstIntervalTicks: 1,
     projectileSpeed: 510, projectileRadius: 2.5, projectileLifetimeTicks: 32,
-    muzzleOffset: 9.9, muzzleSeparation: 0.72,
+    muzzleOffset: 8.7, muzzleSeparation: 0.42,
     damage: 42, traverseRate: 65 * DEG, alignmentTolerance: 4 * DEG,
     targetPreference: {
       fighter: 150, fabricator: 54, bomber: 92, frigate: 28, flakFrigate: 30, torpedoFrigate: 24,
@@ -59,7 +59,7 @@ export const WEAPONS: Readonly<Record<WeaponTypeId, WeaponDefinition>> = {
     id: "pointDefense", delivery: "projectile", range: 185, minimumRange: 0,
     cooldownTicks: 15, burstSize: 6, burstIntervalTicks: 1,
     projectileSpeed: 320, projectileRadius: 1.4, projectileLifetimeTicks: 22,
-    muzzleOffset: 4.05, muzzleSeparation: 0.33,
+    muzzleOffset: 3.25, muzzleSeparation: 0.25,
     damage: 4, traverseRate: 270 * DEG, alignmentTolerance: 13 * DEG,
     targetPreference: {
       fighter: 0, fabricator: 42, bomber: 8, frigate: 85, flakFrigate: 92, torpedoFrigate: 90,
@@ -70,7 +70,7 @@ export const WEAPONS: Readonly<Record<WeaponTypeId, WeaponDefinition>> = {
     id: "beam", delivery: "beam", range: 390, minimumRange: 30,
     cooldownTicks: 30, burstSize: 1, burstIntervalTicks: 1,
     projectileSpeed: 0, projectileRadius: 0, projectileLifetimeTicks: 0,
-    muzzleOffset: 8.9, muzzleSeparation: 0,
+    muzzleOffset: 7.9, muzzleSeparation: 0,
     damage: 36, traverseRate: 82 * DEG, alignmentTolerance: 3 * DEG,
     targetPreference: {
       fighter: 120, fabricator: 38, bomber: 72, frigate: 18, flakFrigate: 20, torpedoFrigate: 16,
@@ -217,16 +217,16 @@ export const SHIPS: Readonly<Record<ShipClass, ShipDefinition>> = {
 
 /** Shared hardpoint scale keeps projectile origins aligned with the instanced turret meshes. */
 export const SHIP_TURRET_SCALES: Readonly<Record<ShipClass, number>> = {
-  fighter: 0.32,
-  fabricator: 0.72,
-  frigate: 0.78,
-  bomber: 0.56,
-  flakFrigate: 0.82,
-  torpedoFrigate: 0.86,
-  destroyer: 0.96,
-  cruiser: 1.06,
-  carrier: 1.08,
-  battleship: 1.16,
+  fighter: 0.24,
+  fabricator: 0.5,
+  frigate: 0.58,
+  bomber: 0.4,
+  flakFrigate: 0.6,
+  torpedoFrigate: 0.62,
+  destroyer: 0.7,
+  cruiser: 0.76,
+  carrier: 0.78,
+  battleship: 0.82,
 };
 
 export const SHIP_ECONOMY: Readonly<Record<ShipClass, ShipEconomyDefinition>> = {
