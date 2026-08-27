@@ -1,0 +1,20 @@
+{
+  "name": "@space-rts/game-core",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@space-rts/box3d-wasm": "workspace:*",
+    "@space-rts/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.11"
+  }
+}

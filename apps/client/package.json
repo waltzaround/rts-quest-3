@@ -1,0 +1,22 @@
+{
+  "name": "@space-rts/client",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json && vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@space-rts/box3d-wasm": "workspace:*",
+    "@space-rts/game-core": "workspace:*",
+    "@space-rts/protocol": "workspace:*",
+    "@space-rts/shared": "workspace:*",
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "@types/three": "^0.183.1",
+    "vite": "^8.2.2"
+  }
+}

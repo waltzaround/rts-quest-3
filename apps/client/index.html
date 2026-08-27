@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#060a10" />
+    <title>Voidfront // Economy Warfare Test</title>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="battlefield" aria-label="Space RTS combat simulation"></canvas>
+      <div id="selection-box" aria-hidden="true"></div>
+      <div id="command-mode" aria-live="polite"></div>
+
+      <header class="topbar panel-edge">
+        <div class="brand">
+          <span class="brand-mark">V</span>
+          <div><strong>VOIDFRONT</strong><small>TACTICAL COMMAND</small></div>
+        </div>
+        <div class="resource alloy"><span>ALLOY</span><strong id="alloy-value">900</strong><small id="alloy-rate">+14 / −0</small></div>
+        <div class="resource energy"><span>ENERGY</span><strong id="energy-value">900</strong><small id="energy-rate">+34 / −0</small></div>
+        <div class="resource efficiency"><span>GRID FLOW</span><strong id="economy-efficiency">100%</strong><small>ECONOMY</small></div>
+        <div class="team-score">
+          <span class="team blue"><i></i><span id="friendly-team-name">ASTER</span> <b id="blue-count">8</b></span>
+          <em>ENGAGED</em>
+          <span class="team red"><b id="red-count">0</b> <span id="hostile-team-name">CONTACTS</span><i></i></span>
+        </div>
+        <div id="view-mode-badge" class="view-mode-badge player"><span>PLAYER</span><small>TACTICAL VIEW</small></div>
+        <div class="clock"><span>SIM TIME</span><strong id="sim-time">00:00</strong></div>
+        <button class="connection online" id="network-open" type="button" title="Open multiplayer lobby">
+          <i></i><span><strong id="connection-title">MULTIPLAYER</strong><small id="connection-detail">LAN LOBBY</small></span>
+        </button>
+        <button class="system-button active" id="audio-toggle" type="button" title="Mute battle audio" aria-pressed="true">SND</button>
+        <button class="system-button" id="reset" title="Restart engagement (R)">R</button>
+      </header>
+
+      <aside class="left-rail panel-edge">
+        <div class="eyebrow">BATTLESPACE</div>
+        <canvas id="minimap" width="180" height="180"></canvas>
+        <div class="legend"><span><i class="ally"></i>ALLY</span><span><i class="hostile"></i>HOSTILE</span></div>
+        <div class="event-feed" id="event-feed"></div>
+      </aside>
+
+      <aside class="debug panel-edge">
+        <div class="panel-title"><span>SIM TELEMETRY</span><button id="collapse-debug">−</button></div>
+        <div id="debug-content">
+          <dl>
+            <div><dt>FRAME</dt><dd id="fps">-- FPS</dd></div>
+            <div><dt>LOCAL TICK</dt><dd id="tick">0</dd></div>
+            <div><dt>CHECKSUM</dt><dd id="checksum">00000000</dd></div>
+            <div><dt>SHIPS / TURRETS</dt><dd id="entity-count">0 / 0</dd></div>
+            <div><dt>TRACKING</dt><dd id="target-count">0</dd></div>
+            <div><dt>PROJECTILES</dt><dd id="projectile-count">0</dd></div>
+            <div><dt>PHYSICS BODIES</dt><dd id="physics-body-count">0</dd></div>
+            <div><dt>AVOIDING</dt><dd id="avoidance-count">0</dd></div>
+            <div><dt>AUDIO CLUSTERS / SHOTS</dt><dd id="audio-count">0 / 0</dd></div>
+            <div><dt>DRAW / TRI</dt><dd id="render-count">0 / 0</dd></div>
+            <div><dt>CPU FRAME / PREP</dt><dd id="cpu-frame">0 / 0 MS</dd></div>
+            <div><dt>GPU FRAME</dt><dd id="gpu-frame">N/A</dd></div>
+            <div><dt>SIM CPU</dt><dd id="sim-cpu">0 MS</dd></div>
+            <div><dt>VISIBLE / INSTANCED</dt><dd id="visible-ships">0 / 0</dd></div>
+            <div><dt>TURRETS SIM / DRAWN</dt><dd id="rendered-turrets">0 / 0</dd></div>
+            <div><dt>LOD C / M / F / T</dt><dd id="lod-counts">0 / 0 / 0 / 0</dd></div>
+            <div><dt>EFFECT POOL</dt><dd id="effect-pool">0 / 0</dd></div>
+            <div><dt>BATCHES / TRANS</dt><dd id="batch-count">0 / 0</dd></div>
+            <div><dt>MEMORY</dt><dd id="memory-count">N/A</dd></div>
+            <div><dt>RENDER BUDGET</dt><dd id="budget-status">OK</dd></div>
+          </dl>
+          <div class="debug-controls">
+            <label><input id="show-velocity" type="checkbox" /><span></span>VELOCITY</label>
+            <label><input id="show-arcs" type="checkbox" /><span></span>TURRET ARCS</label>
+            <label><input id="show-targets" type="checkbox" /><span></span>TARGET LINKS</label>
+            <label><input id="show-paths" type="checkbox" /><span></span>PROJECTILE PATHS</label>
+            <label><input id="show-colliders" type="checkbox" /><span></span>COLLIDERS</label>
+            <label><input id="show-avoidance" type="checkbox" /><span></span>AVOIDANCE</label>
+            <label><input id="show-sensors" type="checkbox" /><span></span>SENSOR RANGES</label>
+          </div>
+          <div class="debug-actions">
+            <button id="pause"><kbd>SPACE</kbd> PAUSE</button>
+            <button id="step"><kbd>.</kbd> STEP</button>
+          </div>
+          <div class="render-bench">
+            <label>QUALITY<select id="render-quality"><option value="low">LOW</option><option value="medium" selected>MEDIUM</option><option value="high">HIGH</option></select></label>
+            <label>VISUAL STRESS<select id="stress-count"><option value="0">OFF</option><option value="100">100 SHIPS</option><option value="250">250 SHIPS</option><option value="500">500 SHIPS</option><option value="1000">1,000 SHIPS</option><option value="2000">2,000 SHIPS</option></select></label>
+          </div>
+        </div>
+      </aside>
+
+      <footer class="command-deck">
+        <section class="selection">
+          <div class="unit-schematic"><span id="selection-icon">◇</span></div>
+          <div class="selection-copy"><div class="eyebrow" id="selection-eyebrow">TACTICAL CONTROL</div><h2 id="selection-title">NO SELECTION</h2><p id="selection-summary">Select a vessel or structure</p><div class="selection-bars" id="selection-bars"></div></div>
+        </section>
+        <section class="selection-detail" id="selection-detail">
+          <div class="directive-line">
+            <span class="status-dot"></span>
+            <div><div class="eyebrow">LIVE DIRECTIVE</div><strong id="directive">SELECT FLEET // BREAK CRIMSON LINE</strong></div>
+          </div>
+          <div class="selection-roster hidden" id="selection-roster" role="group" aria-label="Selected units"></div>
+          <div class="production-console hidden" id="selection-queue">
+            <div class="production-heading"><span id="production-label">SHIPYARD IDLE</span><small id="queue-count">QUEUE 0</small></div>
+            <div class="production-status"><div><i id="production-progress"></i></div><button id="cancel-production" title="Cancel active production">×</button></div>
+            <div class="queue-items" id="queue-items"></div>
+          </div>
+        </section>
+        <section class="command-card">
+          <div class="command-card-heading"><span id="command-context-title">COMMAND CARD</span><small id="command-context-subtitle">AWAITING SELECTION</small></div>
+          <div class="command-empty" id="command-empty"><span>◇</span><p>SELECT A FRIENDLY UNIT<br />OR STRUCTURE</p></div>
+          <div class="command-grid hidden" id="fleet-controls">
+            <button id="cmd-move"><b>↗</b><span>MOVE</span><kbd>M</kbd></button>
+            <button id="cmd-attack"><b>⌖</b><span>ATTACK MOVE</span><kbd>A</kbd></button>
+            <button id="focus"><b>◎</b><span>FOCUS FIRE</span><kbd>F</kbd></button>
+            <button id="cmd-stop"><b>■</b><span>STOP</span><kbd>S</kbd></button>
+            <button id="cmd-hold"><b>◉</b><span>HOLD</span><kbd>H</kbd></button>
+          </div>
+          <div class="command-grid progression-grid hidden" id="construction-controls">
+            <button id="build-extractor"><b>EX</b><span>EXTRACTOR</span><small>220A · 80E</small><em class="command-lock"></em></button>
+            <button id="build-solar"><b>SO</b><span>SOLAR ARRAY</span><small>170A · 20E</small><em class="command-lock"></em></button>
+            <button id="build-storage"><b>ST</b><span>STORAGE</span><small>180A · 60E</small><em class="command-lock"></em></button>
+            <button id="build-fabricator"><b>FB</b><span>FABRICATOR</span><small>340A · 180E</small><em class="command-lock"></em></button>
+            <button id="build-shipyard"><b>SY</b><span>SMALL YARD</span><small>480A · 320E</small><em class="command-lock"></em></button>
+            <button id="build-fleet-yard"><b>MY</b><span>MEDIUM YARD</span><small>1250A · 900E</small><em class="command-lock"></em></button>
+            <button id="build-fusion"><b>FR</b><span>FUSION REACTOR</span><small>650A · 480E</small><em class="command-lock"></em></button>
+            <button id="build-deep-extractor"><b>DX</b><span>DEEP EXTRACTOR</span><small>900A · 650E</small><em class="command-lock"></em></button>
+            <button id="build-capital-yard"><b>LY</b><span>LARGE YARD</span><small>3200A · 2700E</small><em class="command-lock"></em></button>
+            <button id="build-antimatter"><b>AR</b><span>ANTIMATTER</span><small>1800A · 2000E</small><em class="command-lock"></em></button>
+            <button id="build-singularity"><b>SH</b><span>HARVESTER</span><small>2600A · 2300E</small><em class="command-lock"></em></button>
+            <button id="build-quantum-storage"><b>QV</b><span>QUANTUM VAULT</span><small>1400A · 1100E</small><em class="command-lock"></em></button>
+            <button id="build-pd-battery"><b>PD</b><span>PD BATTERY</span><small>260A · 190E</small><em class="command-lock"></em></button>
+            <button id="build-missile-battery"><b>MS</b><span>MISSILE BATTERY</span><small>520A · 420E</small><em class="command-lock"></em></button>
+            <button id="build-rail-battery"><b>RG</b><span>RAIL BATTERY</span><small>820A · 650E</small><em class="command-lock"></em></button>
+          </div>
+          <div class="command-grid progression-grid hidden" id="production-controls">
+            <button id="queue-fighter"><b>F1</b><span>FIGHTER SQUAD ×5</span><small>450A · 225E</small><em class="command-lock"></em></button>
+            <button id="queue-fabricator"><b>MF</b><span>MOBILE FAB</span><small>320A · 210E</small><em class="command-lock"></em></button>
+            <button id="queue-frigate"><b>F2</b><span>FRIGATE</span><small>260A · 150E</small><em class="command-lock"></em></button>
+            <button id="queue-bomber"><b>BM</b><span>BOMBER ×5</span><small>1800A · 1300E</small><em class="command-lock"></em></button>
+            <button id="queue-flak-frigate"><b>FF</b><span>FLAK FRIGATE</span><small>440A · 300E</small><em class="command-lock"></em></button>
+            <button id="queue-torpedo-frigate"><b>TF</b><span>TORPEDO FRIGATE</span><small>520A · 360E</small><em class="command-lock"></em></button>
+            <button id="queue-destroyer"><b>DD</b><span>DESTROYER</span><small>760A · 520E</small><em class="command-lock"></em></button>
+            <button id="queue-cruiser"><b>CR</b><span>CRUISER</span><small>1550A · 1150E</small><em class="command-lock"></em></button>
+            <button id="queue-carrier"><b>CV</b><span>CARRIER</span><small>3600A · 3100E</small><em class="command-lock"></em></button>
+            <button id="queue-battleship"><b>BB</b><span>BATTLESHIP</span><small>4800A · 4200E</small><em class="command-lock"></em></button>
+            <button id="set-rally"><b>RP</b><span>SET RALLY</span><kbd>RMB / Y</kbd></button>
+          </div>
+        </section>
+      </footer>
+
+      <div class="camera-help">LEFT SELECT <b>·</b> RIGHT-DRAG FORMATION <b>·</b> SHIFT QUEUE <b>·</b> CTRL+1–9 GROUPS <b>·</b> \ FULLSCREEN</div>
+      <section id="replay-controls" class="replay-controls hidden" aria-label="Replay controls">
+        <button id="replay-toggle" type="button" aria-label="Play replay">▶</button>
+        <span id="replay-current">00:00</span>
+        <input id="replay-scrub" type="range" min="0" max="0" value="0" step="1" aria-label="Replay position" />
+        <span id="replay-end">00:00</span>
+        <button id="replay-speed" type="button" aria-label="Change replay speed">1×</button>
+      </section>
+      <div id="network-overlay" class="visible">
+        <section class="network-card panel-edge">
+          <button id="network-close" class="network-close" type="button" aria-label="Close multiplayer panel">×</button>
+          <div class="network-kicker">VOIDFRONT COMMAND NETWORK</div>
+          <h1>MULTIPLAYER</h1>
+          <p class="network-intro">Host or join an authoritative 2–8 player engagement on your local network.</p>
+
+          <div id="network-join-view">
+            <label>PILOT CALLSIGN<input id="pilot-name" maxlength="32" autocomplete="nickname" value="Commander" /></label>
+            <label>LOBBY CODE<input id="match-code" maxlength="4" inputmode="numeric" pattern="[0-9]{4}" autocomplete="one-time-code" spellcheck="false" placeholder="4 DIGITS" /></label>
+            <button id="create-match" class="network-primary" type="button">CREATE NEW LOBBY</button>
+            <button id="connect-match" class="network-secondary" type="button">JOIN LOBBY</button>
+            <div class="network-watch-options">
+              <label>TEAM SPECTATOR TOKEN<input id="spectator-token" maxlength="96" autocomplete="off" spellcheck="false" placeholder="HOST-ISSUED TOKEN" /></label>
+              <button id="watch-team" class="network-secondary" type="button">WATCH TEAM</button>
+              <button id="watch-replay" class="network-secondary" type="button">POST-MATCH REPLAY</button>
+            </div>
+            <p class="lan-help">On the host computer, run <b>pnpm dev:lan</b>. Other computers open the LAN address it prints.</p>
+            <button id="play-demo" class="network-demo" type="button"><span>WATCH BATTLE SHOWCASE</span><small>288 VISIBLE CRAFT · 16 AUTO-FACTORIES · OMNISCIENT</small></button>
+            <button id="play-local" class="network-link" type="button">PLAY LOCAL SKIRMISH</button>
+          </div>
+
+          <div id="network-lobby-view" class="hidden">
+            <div class="lobby-heading"><div><small>MATCH CODE</small><strong id="lobby-match-code">—</strong></div><span id="lobby-status">CONTACTING AUTHORITY…</span></div>
+            <div class="lobby-share"><span><small>LAN INVITE</small><strong id="lobby-invite-url">Preparing invite…</strong></span><button id="copy-lobby-invite" type="button">COPY INVITE</button></div>
+            <div class="lobby-grid">
+              <div class="lobby-roster-column">
+                <div class="lobby-section-heading"><span>COMMANDERS</span><small id="lobby-capacity">0 / 6</small></div>
+                <div id="lobby-slots" class="lobby-slots"></div>
+                <div class="lobby-loadout">
+                  <label>YOUR TEAM
+                    <select id="team-select">
+                      <option value="1">TEAM 1</option><option value="2">TEAM 2</option><option value="3">TEAM 3</option><option value="4">TEAM 4</option>
+                      <option value="5">TEAM 5</option><option value="6">TEAM 6</option><option value="7">TEAM 7</option><option value="8">TEAM 8</option>
+                    </select>
+                  </label>
+                  <button id="ready-toggle" type="button">MARK READY</button>
+                </div>
+              </div>
+              <section class="lobby-settings-panel">
+                <div class="lobby-section-heading"><span>MATCH SETTINGS</span><small id="settings-authority">HOST CONTROL</small></div>
+                <div class="lobby-settings-grid">
+                  <label>MAP LAYOUT<select id="map-preset"><option value="orbital-ring">ORBITAL RING</option><option value="crossfire">CROSSFIRE</option><option value="open-expanse">OPEN EXPANSE</option></select></label>
+                  <label>MAP SIZE<select id="map-size"><option value="small">SMALL · 2–4</option><option value="medium">MEDIUM · 2–6</option><option value="large">LARGE · 2–8</option></select></label>
+                  <label>STARTING RESOURCES<select id="starting-resources"><option value="low">LOW · 500</option><option value="standard">STANDARD · 900</option><option value="high">HIGH · 1,800</option></select></label>
+                  <label>RESOURCE DENSITY<select id="resource-density"><option value="scarce">SCARCE</option><option value="standard">STANDARD</option><option value="rich">RICH</option></select></label>
+                </div>
+                <div class="mode-control lobby-mode-control"><span>VICTORY SIDES</span><button id="mode-teams" type="button">TEAMS</button><button id="mode-ffa" type="button">FREE-FOR-ALL</button></div>
+                <p id="map-description">Balanced resource ring with a contested central field.</p>
+              </section>
+            </div>
+            <div id="host-controls" class="host-controls hidden">
+              <button id="add-ai" type="button">+ ADD AI</button>
+              <label>VIEW TEAM<select id="spectator-team-select"><option value="1">TEAM 1</option><option value="2">TEAM 2</option><option value="3">TEAM 3</option><option value="4">TEAM 4</option><option value="5">TEAM 5</option><option value="6">TEAM 6</option><option value="7">TEAM 7</option><option value="8">TEAM 8</option></select></label>
+              <button id="authorize-spectator" type="button">CREATE VIEW TOKEN</button>
+              <button id="start-match" class="network-primary" type="button">LAUNCH MATCH</button>
+            </div>
+            <div id="spectator-grant" class="spectator-grant hidden"><span><small>TEAM VIEW TOKEN</small><strong id="spectator-grant-token">—</strong></span><button id="copy-spectator-token" type="button">COPY TOKEN</button></div>
+            <button id="leave-match" class="network-link" type="button">LEAVE NETWORK</button>
+          </div>
+          <p id="network-error" role="alert"></p>
+        </section>
+      </div>
+      <div id="victory-overlay">
+        <div class="victory-kicker">COMBAT RESOLUTION</div>
+        <strong id="victory-title">VICTORY</strong>
+        <p id="victory-copy">Crimson fleet neutralized.</p>
+        <button id="play-again">RESTART ENGAGEMENT <kbd>R</kbd></button>
+      </div>
+      <div id="toast" role="status">SIMULATION RUNNING</div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

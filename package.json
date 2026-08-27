@@ -1,0 +1,23 @@
+{
+  "name": "space-rts",
+  "private": true,
+  "packageManager": "pnpm@10.26.1",
+  "pnpm": {
+    "patchedDependencies": {
+      "box3d.js@0.1.1": "patches/box3d.js@0.1.1.patch"
+    }
+  },
+  "scripts": {
+    "dev": "pnpm --filter @space-rts/client dev",
+    "dev:lan": "node scripts/dev-lan.mjs",
+    "dev:worker": "pnpm --filter @space-rts/worker dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm --filter @space-rts/game-core test && pnpm --filter @space-rts/protocol test && pnpm --filter @space-rts/box3d-wasm test",
+    "test:watch": "pnpm --filter @space-rts/game-core test:watch"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "typescript": "^5.9.2"
+  }
+}

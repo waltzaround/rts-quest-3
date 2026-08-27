@@ -1,0 +1,19 @@
+{
+  "name": "@space-rts/box3d-wasm",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./worker": "./src/worker.ts",
+    "./box3d.wasm": "./src/box3d.wasm"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "pnpm build && node --test test/*.test.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "box3d.js": "^0.1.1"
+  }
+}

@@ -1,0 +1,161 @@
+import assert from "node:assert/strict";
+import { parseClientMessage, parseServerMessage } from "../dist/index.js";
+
+const buildCommand = (structureType) => JSON.stringify({
+  type: "commands",
+  clientTick: 0,
+  commands: [{
+    type: "buildStructure",
+    playerId: "pilot-blue",
+    sequence: 1,
+    requestedTick: 1,
+    structureType,
+    position: { x: 120, z: -40 },
+    queued: false,
+    builderUnitIds: [14],
+  }],
+});
+
+for (const structureType of ["storage", "fabricator", "fusionReactor"]) {
+  const message = parseClientMessage(buildCommand(structureType));
+  assert.equal(message?.type, "commands", `${structureType} should pass protocol validation`);
+  assert.equal(message.commands[0]?.structureType, structureType);
+}
+
+assert.equal(parseClientMessage(JSON.stringify({
+  type: "commands",
+  clientTick: 0,
+  commands: [{
+    type: "queueUnit", playerId: "pilot-blue", sequence: 1, requestedTick: 1,
+    structureId: 12, shipClass: "fabricator", count: 1,
+  }],
+}))?.type, "commands", "Fabricator vessels should pass protocol validation");
+
+for (const structureType of ["commandCore", "advancedShipyard", "unknown"]) {
+  assert.equal(parseClientMessage(buildCommand(structureType)), null, `${structureType} should fail protocol validation`);
+}
+
+const playerView = {
+  version: 1,
+  simulationVersion: 7,
+  tick: 12,
+  viewerPlayerId: "pilot-blue",
+  viewerTeamId: 1,
+  ownLastCommandSequence: 3,
+  players: [],
+  teams: [],
+  ships: [],
+  structures: [],
+  resourceNodes: [],
+  obstacles: [],
+  projectiles: [],
+  status: "playing",
+  winnerTeamId: null,
+  checksum: 91234,
+};
+const frame = { type: "match_started", tick: 12, checksum: 91234, view: playerView };
+assert.equal(parseServerMessage(JSON.stringify(frame))?.type, "match_started", "player view frame should validate");
+assert.equal(parseServerMessage(JSON.stringify({ ...frame, type: "view" }))?.type, "view", "view update should validate");
+assert.equal(parseServerMessage(JSON.stringify({ ...frame, type: "snapshot", reason: "reconnect" }))?.type, "snapshot");
+const teamView = { ...playerView, viewerPlayerId: null, ownLastCommandSequence: null };
+assert.equal(
+  parseServerMessage(JSON.stringify({ ...frame, type: "view", view: teamView }))?.type,
+  "view",
+  "team spectator view should validate",
+);
+assert.equal(
+  parseServerMessage(JSON.stringify({ ...frame, view: { ...teamView, ownLastCommandSequence: 3 } })),
+  null,
+  "team views must not expose a player's command sequence",
+);
+
+for (const leakedField of ["seed", "nextEntityId", "nextTurretId", "nextQueueItemId", "commandQueue", "aiPlayerIds", "visibility"]) {
+  assert.equal(
+    parseServerMessage(JSON.stringify({ ...frame, view: { ...playerView, [leakedField]: leakedField === "seed" ? 123 : [] } })),
+    null,
+    `${leakedField} must not cross the projected-view protocol boundary`,
+  );
+}
+assert.equal(parseServerMessage(JSON.stringify({ ...frame, state: playerView, view: undefined })), null, "legacy state frames must fail");
+assert.equal(parseServerMessage(JSON.stringify({ type: "commands", tick: 12, commands: [] })), null, "command relays must fail");
+assert.equal(parseServerMessage(JSON.stringify({ type: "events", tick: 12, events: [] })), null, "global events must fail");
+assert.equal(parseServerMessage(JSON.stringify({ ...frame, checksum: playerView.checksum + 1 })), null, "frame checksum must match its view");
+
+const lobby = {
+  matchId: "secure-match",
+  phase: "lobby",
+  mode: "teams",
+  settings: {
+    mapPreset: "orbital-ring",
+    mapSize: "medium",
+    startingResources: "standard",
+    resourceDensity: "standard",
+  },
+  maxPlayers: 8,
+  slots: [],
+  createdAt: Date.now(),
+};
+assert.equal(parseServerMessage(JSON.stringify({ type: "lobby", lobby }))?.type, "lobby");
+assert.equal(parseServerMessage(JSON.stringify({ type: "lobby", lobby: { ...lobby, seed: 123 } })), null, "lobby seed must be private");
+assert.equal(parseClientMessage(JSON.stringify({ type: "set_settings", settings: lobby.settings }))?.type, "set_settings");
+assert.equal(parseClientMessage(JSON.stringify({
+  type: "set_settings",
+  settings: { ...lobby.settings, mapSize: "planet-sized" },
+})), null, "unknown lobby settings must fail validation");
+
+const spectatorToken = "grant-123456789";
+assert.equal(parseClientMessage(JSON.stringify({
+  type: "spectate", name: "Observer", mode: "team", token: spectatorToken,
+}))?.type, "spectate");
+assert.equal(parseClientMessage(JSON.stringify({ type: "spectate", name: "Observer", mode: "team" })), null);
+assert.equal(parseClientMessage(JSON.stringify({
+  type: "spectate", name: "Observer", mode: "replay", token: spectatorToken,
+})), null, "clients cannot supply a live omniscient token");
+assert.equal(parseClientMessage(JSON.stringify({ type: "spectate", name: "Observer", mode: "replay" }))?.type, "spectate");
+assert.equal(parseClientMessage(JSON.stringify({ type: "authorize_spectator", teamId: 1 }))?.type, "authorize_spectator");
+assert.equal(parseClientMessage(JSON.stringify({ type: "request_replay_chunk", index: 0 }))?.type, "request_replay_chunk");
+assert.equal(parseClientMessage(JSON.stringify({ type: "request_replay_chunk", index: -1 })), null);
+assert.equal(parseClientMessage(JSON.stringify({
+  type: "commands", clientTick: 0,
+  commands: [{
+    type: "buildStructure", playerId: "pilot-blue", sequence: 2, requestedTick: 2,
+    structureType: "storage", position: { x: 0, z: 0 }, queued: false, builderUnitIds: "14",
+  }],
+})), null, "builder IDs must be a bounded entity-ID array");
+
+assert.equal(parseServerMessage(JSON.stringify({
+  type: "spectator_authorized", token: spectatorToken, mode: "team", teamId: 1,
+}))?.type, "spectator_authorized");
+assert.equal(parseServerMessage(JSON.stringify({
+  type: "spectator_welcome", spectatorId: "spectator-1", reconnectToken: "reconnect-123456789",
+  mode: "team", teamId: 1, lobby, tick: 12,
+}))?.type, "spectator_welcome");
+assert.equal(parseServerMessage(JSON.stringify({
+  type: "spectator_welcome", spectatorId: "replay-1", reconnectToken: null,
+  mode: "replay", teamId: null, lobby: { ...lobby, phase: "finished" }, tick: 120,
+}))?.type, "spectator_welcome");
+
+const replayManifest = {
+  version: 1,
+  matchId: lobby.matchId,
+  format: "space-rts-replay",
+  tick: 120,
+  checksum: 123456,
+  status: "finished",
+  physicsBackend: "box3d-wasm",
+  winnerTeamId: 1,
+  completedAt: Date.now(),
+  byteLength: 60_000,
+  chunkBytes: 32 * 1024,
+  chunkCount: 2,
+  encoding: "base64-json",
+};
+assert.equal(parseServerMessage(JSON.stringify({ type: "replay_manifest", manifest: replayManifest }))?.type, "replay_manifest");
+assert.equal(parseServerMessage(JSON.stringify({
+  type: "replay_chunk", index: 0, chunkCount: 2, data: "c2VjdXJlLXJlcGxheQ==",
+}))?.type, "replay_chunk");
+assert.equal(parseServerMessage(JSON.stringify({
+  type: "replay_chunk", index: 2, chunkCount: 2, data: "bad",
+})), null, "out-of-range replay chunks must fail validation");
+
+console.log("Protocol command, projected-view, spectator, and replay validation passed");

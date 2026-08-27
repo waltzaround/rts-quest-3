@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "voidfront-rts",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-23",
+  "upload_source_maps": false,
+  "durable_objects": {
+    "bindings": [
+      { "name": "MATCH", "class_name": "Match" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["Match"] }
+  ],
+  "observability": { "enabled": true }
+}
