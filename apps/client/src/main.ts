@@ -23,6 +23,7 @@ import {
   getTurretMuzzleWorldPosition,
   getTurretWorldPosition,
   parseReplay,
+  restoreSimulation,
   type DebugSnapshot,
   type CombatTargetState,
   type EconomyCommand,
@@ -657,6 +658,7 @@ function createPlayableScenario(): ReturnType<typeof createCombatScenario> {
 
 let simulation = createPlayableScenario();
 let physicsWorld: PlanarCirclePhysicsWorld | null = null;
+let pendingLockstepState: { state: SimulationState; notice?: string } | null = null;
 let lastDebug: DebugSnapshot = simulation.debugSnapshot();
 let accumulator = 0;
 let lastTime = performance.now();
@@ -695,6 +697,11 @@ loadPhysicsRuntime()
       const archive = pendingReplayArchive;
       pendingReplayArchive = null;
       installReplayArchive(archive);
+    }
+    if (pendingLockstepState) {
+      const pending = pendingLockstepState;
+      pendingLockstepState = null;
+      installLockstepState(pending.state, pending.notice);
     }
   })
   .catch((error: unknown) => {
@@ -820,7 +827,8 @@ function buildClientVisibilityView(): ClientVisibilityView {
   const player = state.players.find((candidate) => candidate.id === localPlayerId);
   const localTeamId = demoMode || clientViewMode === "post-match-omniscient"
     ? null
-    : networkMode && networkView ? networkView.viewerTeamId : player?.teamId ?? null;
+    : clientViewMode === "team-spectator" ? spectatorTeamId
+      : networkMode && networkView ? networkView.viewerTeamId : player?.teamId ?? null;
   if (networkMode && networkView) {
     const ships = state.ships as readonly ShipState[];
     const structures: readonly StructureState[] = state.structures.map((structure) => ({
@@ -1529,6 +1537,35 @@ function handleServerMessage(message: ServerMessage): void {
     case "lobby":
       updateNetworkLobby(message.lobby);
       return;
+    case "lockstep_state":
+      serverTick = Math.max(serverTick, message.tick);
+      if (!physicsWorld) {
+        pendingLockstepState = {
+          state: message.state,
+          notice: message.reason === "checksum" ? "LOCKSTEP RESYNCHRONIZED" : "LOCKSTEP SYNCHRONIZED",
+        };
+        return;
+      }
+      installLockstepState(
+        message.state,
+        message.reason === "checksum" ? "LOCKSTEP RESYNCHRONIZED" : "LOCKSTEP SYNCHRONIZED",
+      );
+      if (message.reason === "start") {
+        networkLobby = networkLobby ? { ...networkLobby, phase: "playing" } : null;
+        element("network-overlay").classList.remove("visible");
+      }
+      return;
+    case "lockstep_commands":
+      for (const command of message.commands) simulation.submitCommand(command);
+      return;
+    case "lockstep_frame":
+      serverTick = Math.max(serverTick, message.tick);
+      if (pendingLockstepState || networkView) return;
+      while (simulation.state.tick < message.tick) tickSimulation();
+      if (simulation.state.tick === message.tick && simulation.state.checksum !== message.checksum) {
+        sendNetworkMessage({ type: "request_snapshot", reason: "checksum" });
+      }
+      return;
     case "match_started":
       serverTick = message.tick;
       adoptAuthoritativeView(message.view, "MATCH SYNCHRONIZED");
@@ -1585,6 +1622,27 @@ function handleServerMessage(message: ServerMessage): void {
       renderLobby();
       return;
   }
+}
+
+function installLockstepState(state: SimulationState, notice?: string): void {
+  simulation = restoreSimulation(state, physicsWorld ?? undefined);
+  networkView = null;
+  accumulator = 0;
+  lastDebug = simulation.debugSnapshot();
+  clientView = buildClientVisibilityView();
+  clearWorldVisuals();
+  previousTransforms.clear();
+  for (const ship of clientView.ships) previousTransforms.set(ship.id, captureTransform(ship));
+  battleAudio.captureWorld(clientView.ships, clientView.structures);
+  element("network-overlay").classList.remove("visible");
+  element("directive").textContent = canIssuePlayerCommands()
+    ? "DETERMINISTIC LOCKSTEP // COMMAND YOUR FLEET"
+    : "LOCKSTEP OBSERVER // LOCAL SIMULATION";
+  if (notice) {
+    eventLines = [`<b>NET</b> ${escapeHtml(notice.toLowerCase())}`];
+    showToast(notice);
+  }
+  updateSelectionHud();
 }
 
 function adoptAuthoritativeView(view: ProjectedViewState, notice?: string): void {
@@ -4620,8 +4678,10 @@ function animate(now: number): void {
   const preparationStartedAt = performance.now();
   const interpolationAlpha = clientViewMode === "post-match-omniscient"
     ? replayPlaying ? accumulator / FIXED_DT : 1
-    : networkMode && networkView
-      ? Math.min(1, Math.max(0, (now - networkViewReceivedAt) / networkViewInterpolationMs))
+    : networkMode
+      ? networkView
+        ? Math.min(1, Math.max(0, (now - networkViewReceivedAt) / networkViewInterpolationMs))
+        : 1
       : paused ? 1 : accumulator / FIXED_DT;
   updateVisuals(interpolationAlpha, now);
   renderPreparationMs = performance.now() - preparationStartedAt;

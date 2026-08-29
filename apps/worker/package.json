@@ -7,7 +7,8 @@
     "dev": "wrangler dev",
     "build": "wrangler deploy --dry-run --outdir dist",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "verify:multiplayer": "node scripts/verify-multiplayer.mjs"
+    "verify:multiplayer": "node scripts/verify-lockstep.mjs",
+    "verify:multiplayer:legacy": "node scripts/verify-multiplayer.mjs"
   },
   "dependencies": {
     "@space-rts/box3d-wasm": "workspace:*",

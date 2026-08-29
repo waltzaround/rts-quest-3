@@ -1,6 +1,7 @@
 import type {
   CommandResult,
   GameCommand,
+  SimulationState,
   PlayerViewState,
   ShipClass,
   StructureType,
@@ -142,6 +143,9 @@ export type ServerMessage =
   | { type: "lobby"; lobby: LobbyState }
   | { type: "match_started"; tick: number; checksum: number; view: ProjectedViewState }
   | { type: "view"; tick: number; checksum: number; view: ProjectedViewState }
+  | { type: "lockstep_state"; tick: number; checksum: number; state: SimulationState; reason: "start" | "join" | "reconnect" | "checksum" | "manual" }
+  | { type: "lockstep_commands"; commands: GameCommand[] }
+  | { type: "lockstep_frame"; tick: number; checksum: number }
   | { type: "command_results"; tick: number; outcomes: CommandOutcome[] }
   | { type: "checksum"; tick: number; checksum: number }
   | { type: "snapshot"; tick: number; checksum: number; view: ProjectedViewState; reason: "periodic" | "join" | "reconnect" | "checksum" | "manual" }
@@ -375,7 +379,7 @@ export function parseClientMessage(raw: string): ClientMessage | null {
 }
 
 export function parseServerMessage(raw: string): ServerMessage | null {
-  if (raw.length > MAX_MESSAGE_BYTES * 16) return null;
+  if (raw.length > MAX_REPLAY_BYTES) return null;
   let value: unknown;
   try {
     value = JSON.parse(raw) as unknown;
@@ -383,6 +387,31 @@ export function parseServerMessage(raw: string): ServerMessage | null {
     return null;
   }
   if (!isRecord(value) || !isString(value.type, 32)) return null;
+  if (value.type === "lockstep_state") {
+    const state = value.state;
+    return isInteger(value.tick) && value.tick >= 0
+      && isInteger(value.checksum)
+      && isRecord(state) && state.version === 7
+      && state.tick === value.tick && state.checksum === value.checksum
+      && isInteger(state.seed)
+      && Array.isArray(state.players) && Array.isArray(state.teams)
+      && Array.isArray(state.ships) && Array.isArray(state.structures)
+      && Array.isArray(state.resourceNodes) && Array.isArray(state.obstacles)
+      && Array.isArray(state.projectiles) && Array.isArray(state.commandQueue)
+      && Array.isArray(state.aiPlayerIds) && isRecord(state.aiCommanders)
+      && Array.isArray(state.visibility)
+      && ["start", "join", "reconnect", "checksum", "manual"].includes(String(value.reason))
+      ? value as ServerMessage : null;
+  }
+  if (value.type === "lockstep_commands") {
+    return Array.isArray(value.commands) && value.commands.length >= 1
+      && value.commands.length <= MAX_COMMAND_BATCH && value.commands.every(isGameCommand)
+      ? value as ServerMessage : null;
+  }
+  if (value.type === "lockstep_frame") {
+    return isInteger(value.tick) && value.tick >= 0 && isInteger(value.checksum)
+      ? value as ServerMessage : null;
+  }
   if ("state" in value || "events" in value || "commands" in value || "seed" in value) return null;
   if (value.type === "match_started" || value.type === "view") {
     return isViewFrame(value) ? value as ServerMessage : null;

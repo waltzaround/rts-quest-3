@@ -64,13 +64,6 @@ interface PersistedMatch {
 
 const PLAYER_COLORS = [0x59a7ff, 0xff5576, 0x62e6a7, 0xf3b65b, 0xb886ff, 0x55e1e8, 0xff8b55, 0xd8e65b];
 const PHYSICS_BACKEND = "box3d-wasm-precompiled";
-const VIEW_INTERVAL_TICKS = 2;
-const LARGE_BATTLE_VIEW_INTERVAL_TICKS = 5;
-const LARGE_BATTLE_VIEW_SHIP_COUNT = 384;
-const VERY_LARGE_BATTLE_VIEW_INTERVAL_TICKS = 6;
-const VERY_LARGE_BATTLE_VIEW_SHIP_COUNT = 640;
-const CHECKSUM_INTERVAL_TICKS = 5;
-const SNAPSHOT_INTERVAL_TICKS = SIMULATION_HZ * 5;
 const PERSIST_INTERVAL_TICKS = SIMULATION_HZ;
 const REPLAY_CHECKPOINT_INTERVAL_TICKS = SIMULATION_HZ * 5;
 
@@ -321,6 +314,7 @@ export class Match implements DurableObject {
       if (this.replayRecorder) this.replayRecorder.setPlayerState(slot.playerId, "playing");
       else simPlayer.state = "playing";
       this.invalidatePlayerViews();
+      this.broadcastLockstepState("manual");
     }
     this.sortSlots();
     this.send(socket, {
@@ -438,8 +432,8 @@ export class Match implements DurableObject {
       return;
     }
     if (attachment.spectatorMode === "team" && message.type === "checksum") {
-      const view = this.viewForSocket(socket);
-      if (view && message.tick === view.tick && message.checksum !== view.checksum) {
+      const state = this.simulation?.state;
+      if (state && message.tick === state.tick && message.checksum !== state.checksum) {
         this.sendSnapshot(socket, "checksum");
       }
       return;
@@ -669,7 +663,7 @@ export class Match implements DurableObject {
     this.replayCompletedAt = null;
     this.invalidatePlayerViews();
     this.lobby.phase = "playing";
-    this.broadcastPlayerViews("match_started");
+    this.broadcastLockstepState("start");
     this.broadcastLobby();
     this.ensureTicking();
     this.ctx.waitUntil(this.persist());
@@ -686,8 +680,7 @@ export class Match implements DurableObject {
     }
     if (message.clientChecksum !== undefined
       && message.clientTick === this.simulation.state.tick) {
-      const view = this.playerView(playerId);
-      if (view && message.clientChecksum !== view.checksum) this.sendSnapshot(socket, "checksum");
+      if (message.clientChecksum !== this.simulation.state.checksum) this.sendSnapshot(socket, "checksum");
     }
 
     const accepted: GameCommand[] = [];
@@ -701,6 +694,7 @@ export class Match implements DurableObject {
     });
     this.send(socket, { type: "command_results", tick: this.simulation.state.tick, outcomes });
     if (accepted.length > 0) {
+      this.broadcast({ type: "lockstep_commands", commands: accepted });
       this.invalidatePlayerViews();
       this.ctx.waitUntil(this.persist());
     }
@@ -741,6 +735,7 @@ export class Match implements DurableObject {
       if (this.replayRecorder) this.replayRecorder.setPlayerState(playerId, "disconnected");
       else simPlayer.state = "disconnected";
       this.invalidatePlayerViews();
+      this.broadcastLockstepState("manual");
     }
     this.broadcastLobby();
     this.ctx.waitUntil(this.persist());
@@ -752,14 +747,11 @@ export class Match implements DurableObject {
     const finished = this.simulation.state.status === "finished";
     // A match may end between regular view intervals. Always deliver the terminal state
     // before stopping the authority so clients can show victory/defeat instead of appearing frozen.
-    const viewIntervalTicks = this.simulation.state.ships.length >= VERY_LARGE_BATTLE_VIEW_SHIP_COUNT
-      ? VERY_LARGE_BATTLE_VIEW_INTERVAL_TICKS
-      : this.simulation.state.ships.length >= LARGE_BATTLE_VIEW_SHIP_COUNT
-        ? LARGE_BATTLE_VIEW_INTERVAL_TICKS
-        : VIEW_INTERVAL_TICKS;
-    if (finished || debug.tick % viewIntervalTicks === 0) this.broadcastPlayerViews("view");
-    if (debug.tick % CHECKSUM_INTERVAL_TICKS === 0) this.broadcastPlayerChecksums();
-    if (debug.tick % SNAPSHOT_INTERVAL_TICKS === 0) this.broadcastSnapshot("periodic");
+    this.broadcast({
+      type: "lockstep_frame",
+      tick: this.simulation.state.tick,
+      checksum: this.simulation.state.checksum,
+    });
     if (debug.tick % PERSIST_INTERVAL_TICKS === 0) this.ctx.waitUntil(this.persist());
     if (finished) {
       this.lobby.phase = "finished";
@@ -833,20 +825,29 @@ export class Match implements DurableObject {
     this.broadcast({ type: "lobby", lobby: this.publicLobby() });
   }
 
-  private broadcastSnapshot(reason: Extract<ServerMessage, { type: "snapshot" }>["reason"]): void {
-    for (const socket of this.ctx.getWebSockets()) this.sendSnapshot(socket, reason);
+  private sendSnapshot(socket: WebSocket, reason: Extract<ServerMessage, { type: "snapshot" }>["reason"]): void {
+    if (!this.simulation) return;
+    const lockstepReason = reason === "periodic" ? "manual" : reason;
+    this.send(socket, {
+      type: "lockstep_state",
+      tick: this.simulation.state.tick,
+      checksum: this.simulation.state.checksum,
+      state: this.simulation.snapshot(),
+      reason: lockstepReason,
+    });
   }
 
-  private sendSnapshot(socket: WebSocket, reason: Extract<ServerMessage, { type: "snapshot" }>["reason"]): void {
-    const view = this.viewForSocket(socket);
-    if (!view) return;
-    this.send(socket, {
-      type: "snapshot",
-      tick: view.tick,
-      checksum: view.checksum,
-      view,
-      reason,
-    });
+  private broadcastLockstepState(reason: "start" | "manual"): void {
+    if (!this.simulation) return;
+    for (const socket of this.ctx.getWebSockets()) {
+      this.send(socket, {
+        type: "lockstep_state",
+        tick: this.simulation.state.tick,
+        checksum: this.simulation.state.checksum,
+        state: this.simulation.snapshot(),
+        reason,
+      });
+    }
   }
 
   private playerView(playerId: string): PlayerViewState | null {
@@ -888,22 +889,6 @@ export class Match implements DurableObject {
   private invalidatePlayerViews(): void {
     this.viewCacheTick = -1;
     this.viewCache.clear();
-  }
-
-  private broadcastPlayerViews(type: "match_started" | "view"): void {
-    for (const socket of this.ctx.getWebSockets()) {
-      const view = this.viewForSocket(socket);
-      if (!view) continue;
-      this.send(socket, { type, tick: view.tick, checksum: view.checksum, view });
-    }
-  }
-
-  private broadcastPlayerChecksums(): void {
-    for (const socket of this.ctx.getWebSockets()) {
-      const view = this.viewForSocket(socket);
-      if (!view) continue;
-      this.send(socket, { type: "checksum", tick: view.tick, checksum: view.checksum });
-    }
   }
 
   private sortSlots(): void {

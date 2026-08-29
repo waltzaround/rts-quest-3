@@ -114,8 +114,10 @@ export class GameSimulation {
     this.physicsWorld = physicsWorld ?? null;
     this.productionRateMultiplier = Math.max(1, productionRateMultiplier);
     for (const structure of this.state.structures) structure.repeatProduction ??= false;
-    initializeTeamVisibility(this.state);
-    updateTeamVisibility(this.state);
+    if (this.state.visibility.length === 0) {
+      initializeTeamVisibility(this.state);
+      updateTeamVisibility(this.state);
+    }
     this.refreshVisibilityCache();
     this.state.checksum = calculateChecksum(this.state);
   }

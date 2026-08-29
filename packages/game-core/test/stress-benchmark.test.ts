@@ -15,6 +15,7 @@ interface StressResult {
   stringifyAverageMs: number;
   snapshotKiB: number;
   simCpuPerSecondMs: number;
+  lockstepKiBPerSecond: number;
 }
 
 function percentile(values: readonly number[], fraction: number): number {
@@ -82,6 +83,9 @@ describe("synthetic authority stress benchmark", () => {
         stringifyAverageMs: average(stringifySamples),
         snapshotKiB: viewBytes / 1_024,
         simCpuPerSecondMs: average(tickSamples) * SIMULATION_HZ,
+        lockstepKiBPerSecond: Buffer.byteLength(JSON.stringify({
+          type: "lockstep_frame", tick: simulation.state.tick, checksum: simulation.state.checksum,
+        })) * SIMULATION_HZ / 1_024,
       });
     }
 
@@ -95,6 +99,7 @@ describe("synthetic authority stress benchmark", () => {
       "JSON ms": result.stringifyAverageMs.toFixed(2),
       "snapshot KiB": result.snapshotKiB.toFixed(0),
       "sim CPU ms/s": result.simCpuPerSecondMs.toFixed(0),
+      "lockstep KiB/s": result.lockstepKiBPerSecond.toFixed(2),
     })));
   }, 120_000);
 });

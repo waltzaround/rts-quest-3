@@ -94,6 +94,27 @@ assert.equal(parseServerMessage(JSON.stringify({ type: "commands", tick: 12, com
 assert.equal(parseServerMessage(JSON.stringify({ type: "events", tick: 12, events: [] })), null, "global events must fail");
 assert.equal(parseServerMessage(JSON.stringify({ ...frame, checksum: playerView.checksum + 1 })), null, "frame checksum must match its view");
 
+const lockstepState = {
+  version: 7, seed: 0x7233, tick: 12, nextEntityId: 1, nextTurretId: 1, nextQueueItemId: 1,
+  players: [], teams: [], ships: [], structures: [], resourceNodes: [], obstacles: [], visibility: [],
+  projectiles: [], commandQueue: [], aiPlayerIds: [], aiCommanders: {},
+  status: "playing", winnerTeamId: null, checksum: 91234,
+};
+assert.equal(parseServerMessage(JSON.stringify({
+  type: "lockstep_state", tick: 12, checksum: 91234, state: lockstepState, reason: "start",
+}))?.type, "lockstep_state", "complete lockstep bootstrap state should validate");
+assert.equal(parseServerMessage(JSON.stringify({
+  type: "lockstep_state", tick: 13, checksum: 91234, state: lockstepState, reason: "start",
+})), null, "lockstep bootstrap tick must match its state");
+assert.equal(parseServerMessage(JSON.stringify({
+  type: "lockstep_frame", tick: 13, checksum: 12345,
+}))?.type, "lockstep_frame", "lockstep frame marker should validate");
+assert.equal(parseServerMessage(JSON.stringify({
+  type: "lockstep_commands", commands: [{
+    type: "hold", playerId: "pilot-blue", sequence: 4, requestedTick: 20, unitIds: [7], queued: false,
+  }],
+}))?.type, "lockstep_commands", "validated command streams should cross the lockstep boundary");
+
 const lobby = {
   matchId: "secure-match",
   phase: "lobby",
@@ -176,4 +197,4 @@ assert.equal(parseServerMessage(JSON.stringify({
   type: "replay_chunk", index: 2, chunkCount: 2, data: "bad",
 })), null, "out-of-range replay chunks must fail validation");
 
-console.log("Protocol command, projected-view, spectator, and replay validation passed");
+console.log("Protocol command, lockstep, projected-view, spectator, and replay validation passed");
