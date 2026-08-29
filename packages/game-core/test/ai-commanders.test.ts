@@ -29,4 +29,36 @@ describe("AI commander profiles", () => {
     expect(easyQueue).toHaveLength(0);
     expect(hardQueue.length).toBeGreaterThan(easyQueue.length);
   });
+
+  it("scouts, discovers remote deposits, and sends mobile fabricators to expand", () => {
+    const simulation = createCombatScenario({
+      seed: 789,
+      resourceDensity: "rich",
+      players: [
+        { id: "human", name: "Human", teamId: 1 },
+        { id: "bot", name: "Expansion Bot", teamId: 2, ai: true, aiDifficulty: "hard", aiPersonality: "economic" },
+      ],
+    });
+    const bot = simulation.state.players.find((player) => player.id === "bot")!;
+    const initialDiscoveries = simulation.state.visibility.find(
+      (visibility) => visibility.teamId === bot.teamId,
+    )!.discoveredResourceNodeIds.length;
+
+    simulation.stepMany(5_000);
+
+    const discoveries = simulation.state.visibility.find(
+      (visibility) => visibility.teamId === bot.teamId,
+    )!.discoveredResourceNodeIds.length;
+    const extractors = simulation.state.structures.filter(
+      (structure) => structure.ownerPlayerId === bot.id && structure.type === "extractor",
+    );
+    const core = simulation.state.structures.find(
+      (structure) => structure.ownerPlayerId === bot.id && structure.type === "commandCore",
+    )!;
+    const deployedShips = simulation.state.ships.filter((ship) => ship.ownerPlayerId === bot.id
+      && Math.hypot(ship.x - core.x, ship.z - core.z) > 500);
+    expect(discoveries).toBeGreaterThan(initialDiscoveries);
+    expect(extractors.length).toBeGreaterThan(1);
+    expect(deployedShips.length).toBeGreaterThan(0);
+  });
 });

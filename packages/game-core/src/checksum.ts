@@ -107,6 +107,7 @@ export function calculateChecksum(state: SimulationState): number {
     hash = hashUint(hash, quantize(structure.shields));
     hash = hashUint(hash, quantize(structure.buildProgress));
     hash = hashUint(hash, structure.resourceNodeId ?? 0);
+    if (structure.repeatProduction) hash = hashUint(hash, 1);
     hash = hashUint(hash, quantize(structure.rallyPoint.x));
     hash = hashUint(hash, quantize(structure.rallyPoint.z));
     for (const item of structure.productionQueue) {
@@ -176,7 +177,9 @@ export function calculateChecksum(state: SimulationState): number {
         hash = hashUint(hash, command.count);
       } else if (command.type === "cancelProduction") {
         hash = hashUint(hash, command.queueItemId);
-      } else {
+      } else if (command.type === "setProductionRepeat") {
+        hash = hashUint(hash, command.enabled ? 1 : 0);
+      } else if (command.type === "setRallyPoint") {
         hash = hashUint(hash, quantize(command.position.x));
         hash = hashUint(hash, quantize(command.position.z));
       }

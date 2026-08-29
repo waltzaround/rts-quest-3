@@ -138,7 +138,7 @@ export const SHIPS: Readonly<Record<ShipClass, ShipDefinition>> = {
     ],
   },
   frigate: {
-    class: "frigate", radius: 13, mass: 95, maxHealth: 900, maxShield: 350, speed: 27.5,
+    class: "frigate", radius: 13, mass: 95, maxHealth: 900, maxShield: 350, speed: 31.5,
     turnRate: 68 * DEG, sensorRange: 370, buildPower: 0, buildRange: 0,
     hardpoints: [
       hp(-5, 8, 0, 120, "plasma"), hp(5, 8, 0, 120, "plasma"),
@@ -146,7 +146,7 @@ export const SHIPS: Readonly<Record<ShipClass, ShipDefinition>> = {
     ],
   },
   flakFrigate: {
-    class: "flakFrigate", radius: 14, mass: 112, maxHealth: 1_050, maxShield: 420, speed: 26.25,
+    class: "flakFrigate", radius: 14, mass: 112, maxHealth: 1_050, maxShield: 420, speed: 30,
     turnRate: 64 * DEG, sensorRange: 410, buildPower: 0, buildRange: 0,
     hardpoints: [
       hp(0, 8, 0, 150, "plasma"),
@@ -155,7 +155,7 @@ export const SHIPS: Readonly<Record<ShipClass, ShipDefinition>> = {
     ],
   },
   torpedoFrigate: {
-    class: "torpedoFrigate", radius: 14.5, mass: 125, maxHealth: 980, maxShield: 360, speed: 23.75,
+    class: "torpedoFrigate", radius: 14.5, mass: 125, maxHealth: 980, maxShield: 360, speed: 27.5,
     turnRate: 58 * DEG, sensorRange: 420, buildPower: 0, buildRange: 0,
     hardpoints: [
       hp(-5.5, 9, -18, 75, "torpedo"), hp(5.5, 9, 18, 75, "torpedo"),
@@ -164,7 +164,7 @@ export const SHIPS: Readonly<Record<ShipClass, ShipDefinition>> = {
     ],
   },
   destroyer: {
-    class: "destroyer", radius: 23, mass: 420, maxHealth: 3000, maxShield: 1200, speed: 17.5,
+    class: "destroyer", radius: 23, mass: 420, maxHealth: 3000, maxShield: 1200, speed: 20,
     turnRate: 38 * DEG, sensorRange: 500, buildPower: 0, buildRange: 0,
     hardpoints: [
       hp(-7, 13, 0, 105, "heavyRail"), hp(7, 13, 0, 105, "heavyRail"),
@@ -174,7 +174,7 @@ export const SHIPS: Readonly<Record<ShipClass, ShipDefinition>> = {
     ],
   },
   cruiser: {
-    class: "cruiser", radius: 34, mass: 980, maxHealth: 6_800, maxShield: 3_200, speed: 13.125,
+    class: "cruiser", radius: 34, mass: 980, maxHealth: 6_800, maxShield: 3_200, speed: 15,
     turnRate: 24 * DEG, sensorRange: 610, buildPower: 0, buildRange: 0,
     hardpoints: [
       hp(-10, 20, -12, 105, "heavyRail"), hp(10, 20, 12, 105, "heavyRail"),
@@ -186,7 +186,7 @@ export const SHIPS: Readonly<Record<ShipClass, ShipDefinition>> = {
     ],
   },
   carrier: {
-    class: "carrier", radius: 46, mass: 2_100, maxHealth: 11_500, maxShield: 5_800, speed: 9.375,
+    class: "carrier", radius: 46, mass: 2_100, maxHealth: 11_500, maxShield: 5_800, speed: 11,
     turnRate: 15 * DEG, sensorRange: 760, buildPower: 0, buildRange: 0,
     hardpoints: [
       hp(-18, 24, -35, 115, "beam"), hp(18, 24, 35, 115, "beam"),
@@ -199,7 +199,7 @@ export const SHIPS: Readonly<Record<ShipClass, ShipDefinition>> = {
     ],
   },
   battleship: {
-    class: "battleship", radius: 52, mass: 3_600, maxHealth: 17_000, maxShield: 7_500, speed: 7.75,
+    class: "battleship", radius: 52, mass: 3_600, maxHealth: 17_000, maxShield: 7_500, speed: 9,
     turnRate: 11 * DEG, sensorRange: 700, buildPower: 0, buildRange: 0,
     hardpoints: [
       hp(-5, 34, -18, 90, "heavyRail"), hp(5, 34, 18, 90, "heavyRail"),
@@ -265,6 +265,18 @@ export const STRUCTURES: Readonly<Record<StructureType, StructureDefinition>> = 
     alloyCost: 2_600, energyCost: 2_300, buildTicks: 820,
     alloyIncome: 70, energyIncome: 0, energyUpkeep: 55, alloyStorage: 1_000, energyStorage: 0,
     requiredStructures: ["capitalShipyard"], buildPower: 0, assistRange: 0, sensorRange: 560,
+  },
+  alloyRefinery: {
+    type: "alloyRefinery", radius: 24, maxHealth: 2_250, maxShield: 620,
+    alloyCost: 850, energyCost: 780, buildTicks: 390,
+    alloyIncome: 18, energyIncome: 0, energyUpkeep: 28, alloyStorage: 500, energyStorage: 0,
+    requiredStructures: ["fleetShipyard", "fusionReactor"], buildPower: 0, assistRange: 0, sensorRange: 340,
+  },
+  matterForge: {
+    type: "matterForge", radius: 33, maxHealth: 4_600, maxShield: 1_850,
+    alloyCost: 2_300, energyCost: 2_650, buildTicks: 760,
+    alloyIncome: 45, energyIncome: 0, energyUpkeep: 82, alloyStorage: 1_500, energyStorage: 0,
+    requiredStructures: ["capitalShipyard", "antimatterReactor"], buildPower: 0, assistRange: 0, sensorRange: 520,
   },
   solarArray: {
     type: "solarArray", radius: 20, maxHealth: 850, maxShield: 120,
@@ -332,26 +344,86 @@ export const STRUCTURES: Readonly<Record<StructureType, StructureDefinition>> = 
     alloyIncome: 0, energyIncome: 0, energyUpkeep: 38, alloyStorage: 1_200, energyStorage: 1_400,
     requiredStructures: ["commandCore", "fleetShipyard"], buildPower: 0, assistRange: 0, sensorRange: 720,
   },
+  radarArray: {
+    type: "radarArray", radius: 19, maxHealth: 1_250, maxShield: 420,
+    alloyCost: 420, energyCost: 360, buildTicks: 240,
+    alloyIncome: 0, energyIncome: 0, energyUpkeep: 9, alloyStorage: 0, energyStorage: 0,
+    requiredStructures: ["commandCore", "shipyard"], buildPower: 0, assistRange: 0, sensorRange: 1_050,
+  },
   pointDefenseBattery: {
-    type: "pointDefenseBattery", radius: 16, maxHealth: 1_350, maxShield: 280,
-    alloyCost: 260, energyCost: 190, buildTicks: 170,
-    alloyIncome: 0, energyIncome: 0, energyUpkeep: 4, alloyStorage: 0, energyStorage: 0,
-    requiredStructures: ["commandCore"], buildPower: 0, assistRange: 0, sensorRange: 310,
+    type: "pointDefenseBattery", radius: 23, maxHealth: 2_600, maxShield: 620,
+    alloyCost: 620, energyCost: 430, buildTicks: 320,
+    alloyIncome: 0, energyIncome: 0, energyUpkeep: 10, alloyStorage: 0, energyStorage: 0,
+    requiredStructures: ["commandCore"], buildPower: 0, assistRange: 0, sensorRange: 350,
     weaponTypeId: "pointDefense",
+    hardpoints: [
+      { localX: -10, localZ: -7, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "pointDefense" },
+      { localX: 10, localZ: -7, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "pointDefense" },
+      { localX: -10, localZ: 7, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "pointDefense" },
+      { localX: 10, localZ: 7, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "pointDefense" },
+      { localX: -5, localZ: 0, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "autocannon" },
+      { localX: 5, localZ: 0, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "autocannon" },
+    ],
   },
   missileBattery: {
-    type: "missileBattery", radius: 20, maxHealth: 1_900, maxShield: 450,
-    alloyCost: 520, energyCost: 420, buildTicks: 280,
-    alloyIncome: 0, energyIncome: 0, energyUpkeep: 8, alloyStorage: 0, energyStorage: 0,
-    requiredStructures: ["commandCore", "shipyard"], buildPower: 0, assistRange: 0, sensorRange: 440,
+    type: "missileBattery", radius: 28, maxHealth: 3_400, maxShield: 900,
+    alloyCost: 1_050, energyCost: 860, buildTicks: 480,
+    alloyIncome: 0, energyIncome: 0, energyUpkeep: 18, alloyStorage: 0, energyStorage: 0,
+    requiredStructures: ["commandCore", "shipyard"], buildPower: 0, assistRange: 0, sensorRange: 480,
     weaponTypeId: "torpedo",
+    hardpoints: [
+      { localX: -11, localZ: -4, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "torpedo" },
+      { localX: 0, localZ: 8, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "torpedo" },
+      { localX: 11, localZ: -4, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "torpedo" },
+      { localX: -14, localZ: 9, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "pointDefense" },
+      { localX: 14, localZ: 9, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "pointDefense" },
+    ],
   },
   railBattery: {
-    type: "railBattery", radius: 23, maxHealth: 2_650, maxShield: 720,
-    alloyCost: 820, energyCost: 650, buildTicks: 380,
-    alloyIncome: 0, energyIncome: 0, energyUpkeep: 12, alloyStorage: 0, energyStorage: 0,
-    requiredStructures: ["commandCore", "fleetShipyard"], buildPower: 0, assistRange: 0, sensorRange: 540,
+    type: "railBattery", radius: 32, maxHealth: 4_900, maxShield: 1_400,
+    alloyCost: 1_750, energyCost: 1_350, buildTicks: 650,
+    alloyIncome: 0, energyIncome: 0, energyUpkeep: 27, alloyStorage: 0, energyStorage: 0,
+    requiredStructures: ["commandCore", "fleetShipyard"], buildPower: 0, assistRange: 0, sensorRange: 590,
     weaponTypeId: "heavyRail",
+    hardpoints: [
+      { localX: -10, localZ: 0, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "heavyRail" },
+      { localX: 10, localZ: 0, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "heavyRail" },
+      { localX: -18, localZ: -8, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "pointDefense" },
+      { localX: 18, localZ: -8, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "pointDefense" },
+    ],
+  },
+  plasmaBattery: {
+    type: "plasmaBattery", radius: 35, maxHealth: 5_600, maxShield: 2_050,
+    alloyCost: 2_150, energyCost: 1_900, buildTicks: 760,
+    alloyIncome: 0, energyIncome: 0, energyUpkeep: 36, alloyStorage: 0, energyStorage: 0,
+    requiredStructures: ["commandCore", "fleetShipyard"], buildPower: 0, assistRange: 0, sensorRange: 690,
+    weaponTypeId: "plasma",
+    hardpoints: [
+      { localX: -13, localZ: -9, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "plasma" },
+      { localX: 13, localZ: -9, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "plasma" },
+      { localX: -13, localZ: 9, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "plasma" },
+      { localX: 13, localZ: 9, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "plasma" },
+      { localX: -21, localZ: 0, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "pointDefense" },
+      { localX: 21, localZ: 0, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "pointDefense" },
+    ],
+  },
+  beamBattery: {
+    type: "beamBattery", radius: 45, maxHealth: 10_500, maxShield: 5_200,
+    alloyCost: 5_200, energyCost: 4_800, buildTicks: 1_450,
+    alloyIncome: 0, energyIncome: 0, energyUpkeep: 88, alloyStorage: 0, energyStorage: 0,
+    requiredStructures: ["commandCore", "capitalShipyard"], buildPower: 0, assistRange: 0, sensorRange: 950,
+    weaponTypeId: "beam",
+    hardpoints: [
+      { localX: -16, localZ: -8, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "beam" },
+      { localX: 0, localZ: 13, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "beam" },
+      { localX: 16, localZ: -8, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "beam" },
+      { localX: -23, localZ: 8, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "plasma" },
+      { localX: 23, localZ: 8, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "plasma" },
+      { localX: -28, localZ: -15, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "pointDefense" },
+      { localX: 28, localZ: -15, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "pointDefense" },
+      { localX: -28, localZ: 15, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "pointDefense" },
+      { localX: 28, localZ: 15, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "pointDefense" },
+    ],
   },
 };
 
@@ -362,7 +434,9 @@ export const ALL_SHIP_CLASSES: readonly ShipClass[] = [
 
 export const SHIPYARD_TYPES = ["shipyard", "fleetShipyard", "capitalShipyard"] as const;
 
-export const DEFENSIVE_STRUCTURE_TYPES = ["pointDefenseBattery", "missileBattery", "railBattery"] as const;
+export const DEFENSIVE_STRUCTURE_TYPES = [
+  "pointDefenseBattery", "missileBattery", "railBattery", "plasmaBattery", "beamBattery",
+] as const;
 
 export const RESOURCE_EXTRACTOR_TYPES = ["extractor", "deepCoreExtractor", "singularityHarvester"] as const;
 
@@ -370,6 +444,8 @@ export const BUILDABLE_STRUCTURE_TYPES = [
   "extractor", "solarArray", "storage", "fabricator", "shipyard",
   "fleetShipyard", "capitalShipyard",
   "fusionReactor", "deepCoreExtractor",
-  "antimatterReactor", "singularityHarvester", "quantumStorage",
+  "alloyRefinery",
+  "antimatterReactor", "singularityHarvester", "matterForge", "quantumStorage",
+  "radarArray",
   ...DEFENSIVE_STRUCTURE_TYPES,
 ] as const satisfies readonly Exclude<StructureType, "commandCore">[];

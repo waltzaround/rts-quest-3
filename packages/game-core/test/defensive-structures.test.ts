@@ -1,7 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { SHIPS, STRUCTURES, createCombatScenario } from "../src";
+import { DEFENSIVE_STRUCTURE_TYPES, SHIPS, STRUCTURES, createCombatScenario } from "../src";
 
 describe("mobile-fabricator defenses", () => {
+  it("exposes distinct fleet-tech T2 and capital-tech T3 batteries", () => {
+    expect(DEFENSIVE_STRUCTURE_TYPES).toContain("plasmaBattery");
+    expect(DEFENSIVE_STRUCTURE_TYPES).toContain("beamBattery");
+    expect(STRUCTURES.plasmaBattery).toMatchObject({
+      weaponTypeId: "plasma",
+      requiredStructures: ["commandCore", "fleetShipyard"],
+    });
+    expect(STRUCTURES.beamBattery).toMatchObject({
+      weaponTypeId: "beam",
+      requiredStructures: ["commandCore", "capitalShipyard"],
+    });
+    expect(STRUCTURES.beamBattery.maxHealth).toBeGreaterThan(STRUCTURES.plasmaBattery.maxHealth);
+  });
+
   it("requires a mobile Fabricator to place defensive structures, including near a Command Core", () => {
     const simulation = createCombatScenario({ enemyCommander: false });
     simulation.state.obstacles = [];

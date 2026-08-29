@@ -72,8 +72,8 @@ export interface ScenarioOptions {
   /** Lightweight title-screen battle with two fighter-heavy AI fleets. */
   menuBattle?: boolean;
   enemyCommander?: boolean;
-  mapPreset?: "orbital-ring" | "crossfire" | "open-expanse";
-  mapSize?: "small" | "medium" | "large";
+  mapPreset?: "orbital-ring" | "crossfire" | "open-expanse" | "asteroid-belt" | "spiral-arms" | "shattered-core";
+  mapSize?: "small" | "medium" | "large" | "huge" | "colossal";
   startingResources?: "low" | "standard" | "high";
   resourceDensity?: "scarce" | "standard" | "rich";
   teamSpawnMode?: "together" | "interleaved" | "random";
@@ -113,6 +113,7 @@ export class GameSimulation {
     this.state = state;
     this.physicsWorld = physicsWorld ?? null;
     this.productionRateMultiplier = Math.max(1, productionRateMultiplier);
+    for (const structure of this.state.structures) structure.repeatProduction ??= false;
     initializeTeamVisibility(this.state);
     updateTeamVisibility(this.state);
     this.refreshVisibilityCache();
@@ -130,7 +131,10 @@ export class GameSimulation {
 
   maintainMenuBattleReinforcements(capPerPlayer = 28, cadenceTicks = 90): void {
     if (this.state.status !== "playing") return;
-    for (const structure of this.state.structures) structure.productionQueue = [];
+    for (const structure of this.state.structures) {
+      structure.productionQueue = [];
+      structure.repeatProduction = false;
+    }
     for (const player of this.state.players) {
       player.economy.alloy = 0;
       player.economy.energy = 0;
@@ -283,7 +287,9 @@ export class GameSimulation {
         return { accepted: false, reason: "placement" };
       }
       normalizedCommand = { ...command, builderUnitIds };
-    } else if (command.type === "queueUnit" || command.type === "cancelProduction" || command.type === "setRallyPoint") {
+    } else if (command.type === "queueUnit" || command.type === "cancelProduction"
+      || command.type === "setProductionRepeat" || command.type === "clearProductionQueue"
+      || command.type === "setRallyPoint") {
       const structure = this.state.structures.find((candidate) => candidate.id === command.structureId);
       if (!structure || structure.ownerPlayerId !== command.playerId
         || !SHIPYARD_TYPES.includes(structure.type as ShipyardType) || structure.buildProgress < 1) {
@@ -320,8 +326,15 @@ export class GameSimulation {
   ): boolean {
     if (!this.canBuildStructure(playerId, structureType)) return false;
     const definition = STRUCTURES[structureType];
+    const isExtractor = RESOURCE_EXTRACTOR_TYPES.includes(
+      structureType as (typeof RESOURCE_EXTRACTOR_TYPES)[number],
+    );
+    const resourceNode = isExtractor
+      ? this.state.resourceNodes.find((candidate) => candidate.id === resourceNodeId)
+      : undefined;
+    const placementPosition = resourceNode ?? position;
     const upgradeSource = this.getResourceExtractorUpgradeSource(playerId, structureType, resourceNodeId);
-    const inStaticBuildRange = this.hasStaticBuildAnchorInRange(playerId, position);
+    const inStaticBuildRange = this.hasStaticBuildAnchorInRange(playerId, placementPosition);
     const hasAssignedMobileBuilder = this.getAssignedMobileBuilders(playerId, builderUnitIds).length > 0;
     if (DEFENSIVE_STRUCTURE_TYPES.includes(structureType as (typeof DEFENSIVE_STRUCTURE_TYPES)[number])
       && !hasAssignedMobileBuilder) return false;
@@ -331,26 +344,31 @@ export class GameSimulation {
     for (const structure of this.state.structures) {
       if (structure.id === upgradeSource?.id) continue;
       const minimumDistance = STRUCTURES[structure.type].radius + definition.radius + PLACEMENT_PADDING;
-      if (Math.hypot(structure.x - position.x, structure.z - position.z) < minimumDistance) return false;
+      if (Math.hypot(structure.x - placementPosition.x, structure.z - placementPosition.z) < minimumDistance) return false;
     }
     for (const obstacle of this.state.obstacles) {
       const minimumDistance = obstacle.radius + definition.radius + PLACEMENT_PADDING;
-      if (Math.hypot(obstacle.x - position.x, obstacle.z - position.z) < minimumDistance) return false;
+      if (Math.hypot(obstacle.x - placementPosition.x, obstacle.z - placementPosition.z) < minimumDistance) return false;
     }
     for (const command of this.state.commandQueue) {
       if (command.type !== "buildStructure") continue;
+      const queuedIsExtractor = RESOURCE_EXTRACTOR_TYPES.includes(
+        command.structureType as (typeof RESOURCE_EXTRACTOR_TYPES)[number],
+      );
+      if (isExtractor && queuedIsExtractor && command.resourceNodeId === resourceNodeId
+        && resourceNode?.claimedByStructureId === null) continue;
       const minimumDistance = STRUCTURES[command.structureType].radius + definition.radius + PLACEMENT_PADDING;
-      if (Math.hypot(command.position.x - position.x, command.position.z - position.z) < minimumDistance) return false;
-      if (RESOURCE_EXTRACTOR_TYPES.includes(structureType as (typeof RESOURCE_EXTRACTOR_TYPES)[number])
-        && command.resourceNodeId === resourceNodeId) return false;
+      const queuedNode = queuedIsExtractor
+        ? this.state.resourceNodes.find((candidate) => candidate.id === command.resourceNodeId)
+        : undefined;
+      const queuedPosition = queuedNode ?? command.position;
+      if (Math.hypot(queuedPosition.x - placementPosition.x, queuedPosition.z - placementPosition.z) < minimumDistance) return false;
     }
-    if (RESOURCE_EXTRACTOR_TYPES.includes(structureType as (typeof RESOURCE_EXTRACTOR_TYPES)[number])) {
-      const node = this.state.resourceNodes.find((candidate) => candidate.id === resourceNodeId);
+    if (isExtractor) {
       const player = this.state.players.find((candidate) => candidate.id === playerId);
-      return Boolean(player && node
-        && isResourceNodeDiscoveredByTeam(this.state, player.teamId, node.id)
-        && (node.claimedByStructureId === null || upgradeSource !== null)
-        && Math.hypot(node.x - position.x, node.z - position.z) <= 34);
+      return Boolean(player && resourceNode
+        && isResourceNodeDiscoveredByTeam(this.state, player.teamId, resourceNode.id)
+        && (resourceNode.claimedByStructureId === null || upgradeSource !== null));
     }
     return resourceNodeId === undefined;
   }
@@ -419,11 +437,34 @@ export class GameSimulation {
     builder: ShipState,
     position: Readonly<{ x: number; z: number }>,
   ): void {
+    const siteOrderRadius = Math.max(1, SHIPS[builder.class].buildRange);
     builder.orders = builder.orders.filter((order) =>
       order.type !== "move"
-        || Math.hypot(order.destination.x - position.x, order.destination.z - position.z) >= 0.001,
+        || Math.hypot(order.destination.x - position.x, order.destination.z - position.z) > siteOrderRadius,
     );
     builder.focusTargetEntityId = null;
+  }
+
+  private cancelCompetingResourceExtractorOrders(
+    resourceNodeId: EntityId,
+    position: Readonly<{ x: number; z: number }>,
+  ): void {
+    const competingOrders = this.state.commandQueue.filter(
+      (command): command is Extract<GameCommand, { type: "buildStructure" }> =>
+        command.type === "buildStructure"
+        && command.resourceNodeId === resourceNodeId
+        && RESOURCE_EXTRACTOR_TYPES.includes(
+          command.structureType as (typeof RESOURCE_EXTRACTOR_TYPES)[number],
+        ),
+    );
+    if (competingOrders.length === 0) return;
+    const cancelledCommands: ReadonlySet<GameCommand> = new Set(competingOrders as GameCommand[]);
+    this.state.commandQueue = this.state.commandQueue.filter((command) => !cancelledCommands.has(command));
+    for (const command of competingOrders) {
+      for (const builder of this.getAssignedMobileBuilders(command.playerId, command.builderUnitIds ?? [])) {
+        this.removeMobileBuilderSiteOrder(builder, position);
+      }
+    }
   }
 
   canBuildStructure(playerId: string, structureType: Exclude<StructureType, "commandCore">): boolean {
@@ -580,7 +621,20 @@ export class GameSimulation {
         if (!this.canBuildStructure(command.playerId, command.structureType)
           || !this.canPlaceStructure(
             command.playerId, command.structureType, command.position, command.resourceNodeId, builderUnitIds,
-          )) continue;
+          )) {
+          const claimedNode = command.resourceNodeId === undefined
+            ? undefined
+            : this.state.resourceNodes.find((candidate) => candidate.id === command.resourceNodeId);
+          if (claimedNode?.claimedByStructureId !== null && claimedNode?.claimedByStructureId !== undefined
+            && RESOURCE_EXTRACTOR_TYPES.includes(
+              command.structureType as (typeof RESOURCE_EXTRACTOR_TYPES)[number],
+            )) {
+            for (const builder of this.getAssignedMobileBuilders(command.playerId, builderUnitIds)) {
+              this.removeMobileBuilderSiteOrder(builder, claimedNode);
+            }
+          }
+          continue;
+        }
         const node = command.resourceNodeId === undefined
           ? undefined
           : this.state.resourceNodes.find((candidate) => candidate.id === command.resourceNodeId);
@@ -620,14 +674,17 @@ export class GameSimulation {
           type: command.structureType,
           x: node?.x ?? command.position.x, z: node?.z ?? command.position.z, yaw: 0,
           health: definition.maxHealth * 0.1, shields: 0, buildProgress: 0,
-          resourceNodeId: node?.id ?? null, productionQueue: [],
+          resourceNodeId: node?.id ?? null, productionQueue: [], repeatProduction: false,
           rallyPoint: this.defaultRallyPoint(command.playerId, node?.x ?? command.position.x, node?.z ?? command.position.z),
         };
         if (upgradeSource) {
           this.state.structures = this.state.structures.filter((candidate) => candidate.id !== upgradeSource.id);
         }
         this.state.structures.push(structure);
-        if (node) node.claimedByStructureId = structure.id;
+        if (node) {
+          node.claimedByStructureId = structure.id;
+          this.cancelCompetingResourceExtractorOrders(node.id, constructionPosition);
+        }
         this.events.push({ type: "constructionStarted", tick: this.state.tick, playerId: command.playerId, structureId: structure.id, structureType: structure.type });
       } else {
         const structure = this.state.structures.find((candidate) => candidate.id === command.structureId);
@@ -644,6 +701,11 @@ export class GameSimulation {
           }
         } else if (command.type === "cancelProduction") {
           structure.productionQueue = structure.productionQueue.filter((item) => item.id !== command.queueItemId);
+        } else if (command.type === "setProductionRepeat") {
+          structure.repeatProduction = command.enabled;
+        } else if (command.type === "clearProductionQueue") {
+          structure.productionQueue = [];
+          structure.repeatProduction = false;
         } else {
           structure.rallyPoint = { ...command.position };
         }
@@ -756,6 +818,14 @@ export class GameSimulation {
         if (item.progress < 1 - 1e-9) continue;
         item.progress = 1;
         structure.productionQueue.shift();
+        if (structure.repeatProduction) {
+          const repeatedItem = { id: this.state.nextQueueItemId++, shipClass: item.shipClass, progress: 0 };
+          structure.productionQueue.push(repeatedItem);
+          this.events.push({
+            type: "unitQueued", tick: this.state.tick, playerId: player.id,
+            structureId: structure.id, shipClass: item.shipClass, queueItemId: repeatedItem.id,
+          });
+        }
         const spawnYaw = Math.atan2(structure.rallyPoint.x - structure.x, structure.rallyPoint.z - structure.z);
         const batch = Array.from({ length: definition.batchSize }, () =>
           this.spawnShip(player, item.shipClass, structure.x, structure.z, spawnYaw, structure.type as ShipyardType));
@@ -1133,7 +1203,7 @@ export class GameSimulation {
         this.shotsFired += 1;
         this.events.push({
           type: "weaponFired", tick: this.state.tick, turretId: turret.id,
-          shipId: ship.id, targetId: target.id, projectileId,
+          shipId: ship.id, targetId: target.id, projectileId, weaponTypeId: turret.weaponTypeId,
         });
         if (weapon.delivery === "beam") this.applyDamage(target, weapon.damage, projectileId);
       }
@@ -1142,57 +1212,67 @@ export class GameSimulation {
 
   private fireDefensiveStructures(): void {
     for (const structure of this.state.structures) {
-      const weaponTypeId = STRUCTURES[structure.type].weaponTypeId;
-      if (!weaponTypeId || structure.buildProgress < 1 || structure.health <= 0) continue;
-      const weapon = WEAPONS[weaponTypeId];
-      const burstTicks = Math.max(1, (weapon.burstSize - 1) * weapon.burstIntervalTicks + 1);
-      const cycleTicks = burstTicks + weapon.cooldownTicks;
-      const phase = (this.state.tick + structure.id * 17) % cycleTicks;
-      if (phase >= burstTicks || phase % weapon.burstIntervalTicks !== 0) continue;
+      const definition = STRUCTURES[structure.type];
+      const mounts = definition.hardpoints
+        ?? (definition.weaponTypeId ? [{
+          localX: 0, localZ: 0, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: definition.weaponTypeId,
+        }] : []);
+      if (mounts.length === 0 || structure.buildProgress < 1 || structure.health <= 0) continue;
+      for (let mountIndex = 0; mountIndex < mounts.length; mountIndex += 1) {
+        const mount = mounts[mountIndex]!;
+        const weaponTypeId = mount.weaponTypeId;
+        const weapon = WEAPONS[weaponTypeId];
+        const burstTicks = Math.max(1, (weapon.burstSize - 1) * weapon.burstIntervalTicks + 1);
+        const cycleTicks = burstTicks + weapon.cooldownTicks;
+        const phase = (this.state.tick + structure.id * 17 + mountIndex * 11) % cycleTicks;
+        if (phase >= burstTicks || phase % weapon.burstIntervalTicks !== 0) continue;
 
-      let target: CombatTargetState | null = null;
-      let bestScore = Infinity;
-      for (const candidate of this.spatialHash.query(structure.x, structure.z, weapon.range)) {
-        if (candidate.id === structure.id || candidate.health <= 0
-          || !this.isHostile(structure.teamId, candidate.teamId)
-          || !this.isEntityVisible(structure.teamId, candidate.id)) continue;
-        const rangeSquared = distanceSquared(structure, candidate);
-        if (rangeSquared > weapon.range ** 2 || rangeSquared < weapon.minimumRange ** 2) continue;
-        const preference = isShip(candidate)
-          ? weapon.targetPreference[candidate.class]
-          : getStructureTargetPreference(weaponTypeId, candidate.type);
-        const score = preference * 10_000_000 + rangeSquared;
-        if (score < bestScore || (score === bestScore && candidate.id < (target?.id ?? Infinity))) {
-          target = candidate;
-          bestScore = score;
+        let target: CombatTargetState | null = null;
+        let bestScore = Infinity;
+        for (const candidate of this.spatialHash.query(structure.x, structure.z, weapon.range)) {
+          if (candidate.id === structure.id || candidate.health <= 0
+            || !this.isHostile(structure.teamId, candidate.teamId)
+            || !this.isEntityVisible(structure.teamId, candidate.id)) continue;
+          const rangeSquared = distanceSquared(structure, candidate);
+          if (rangeSquared > weapon.range ** 2 || rangeSquared < weapon.minimumRange ** 2) continue;
+          const preference = isShip(candidate)
+            ? weapon.targetPreference[candidate.class]
+            : getStructureTargetPreference(weaponTypeId, candidate.type);
+          const score = preference * 10_000_000 + rangeSquared;
+          if (score < bestScore || (score === bestScore && candidate.id < (target?.id ?? Infinity))) {
+            target = candidate;
+            bestScore = score;
+          }
         }
-      }
-      if (!target) continue;
+        if (!target) continue;
 
-      const dx = target.x - structure.x;
-      const dz = target.z - structure.z;
-      const length = Math.hypot(dx, dz) || 1;
-      const muzzleDistance = STRUCTURES[structure.type].radius * 0.48;
-      const muzzle = {
-        x: structure.x + dx / length * muzzleDistance,
-        z: structure.z + dz / length * muzzleDistance,
-      };
-      const projectileId = this.state.nextEntityId++;
-      if (weapon.delivery === "projectile") {
-        this.state.projectiles.push({
-          id: projectileId, ownerShipId: structure.id, ownerTeamId: structure.teamId,
-          weaponTypeId, targetEntityId: target.id,
-          x: muzzle.x, z: muzzle.z, previousX: muzzle.x, previousZ: muzzle.z,
-          vx: dx / length * weapon.projectileSpeed, vz: dz / length * weapon.projectileSpeed,
-          radius: weapon.projectileRadius, damage: weapon.damage, lifetimeTicks: weapon.projectileLifetimeTicks,
+        const mountX = structure.x + mount.localX;
+        const mountZ = structure.z + mount.localZ;
+        const dx = target.x - mountX;
+        const dz = target.z - mountZ;
+        const length = Math.hypot(dx, dz) || 1;
+        const muzzle = {
+          x: mountX + dx / length * weapon.muzzleOffset,
+          z: mountZ + dz / length * weapon.muzzleOffset,
+        };
+        const projectileId = this.state.nextEntityId++;
+        if (weapon.delivery === "projectile") {
+          this.state.projectiles.push({
+            id: projectileId, ownerShipId: structure.id, ownerTeamId: structure.teamId,
+            weaponTypeId, targetEntityId: target.id,
+            x: muzzle.x, z: muzzle.z, previousX: muzzle.x, previousZ: muzzle.z,
+            vx: dx / length * weapon.projectileSpeed, vz: dz / length * weapon.projectileSpeed,
+            radius: weapon.projectileRadius, damage: weapon.damage, lifetimeTicks: weapon.projectileLifetimeTicks,
+          });
+        }
+        this.shotsFired += 1;
+        this.events.push({
+          type: "weaponFired", tick: this.state.tick,
+          turretId: -(structure.id * 16 + mountIndex + 1),
+          shipId: structure.id, targetId: target.id, projectileId, weaponTypeId,
         });
+        if (weapon.delivery === "beam") this.applyDamage(target, weapon.damage, projectileId);
       }
-      this.shotsFired += 1;
-      this.events.push({
-        type: "weaponFired", tick: this.state.tick, turretId: -structure.id,
-        shipId: structure.id, targetId: target.id, projectileId,
-      });
-      if (weapon.delivery === "beam") this.applyDamage(target, weapon.damage, projectileId);
     }
   }
 
@@ -1262,6 +1342,19 @@ export class GameSimulation {
         this.applyDamage(resolvedImpact.target, projectile.damage, projectile.id);
       } else if (resolvedImpact === null && projectile.lifetimeTicks > 0) {
         survivingProjectiles.push(projectile);
+      } else {
+        const owner = projectileOwners.get(projectile.ownerShipId);
+        if (owner?.class !== "fighter") {
+          if (resolvedImpact) {
+            projectile.x = projectile.previousX + (projectile.x - projectile.previousX) * resolvedImpact.fraction;
+            projectile.z = projectile.previousZ + (projectile.z - projectile.previousZ) * resolvedImpact.fraction;
+          }
+          this.events.push({
+            type: "projectileDetonated", tick: this.state.tick,
+            projectileId: projectile.id, weaponTypeId: projectile.weaponTypeId,
+            x: projectile.x, z: projectile.z,
+          });
+        }
       }
     }
     this.state.projectiles = survivingProjectiles;
@@ -1329,7 +1422,9 @@ export class GameSimulation {
       const queueDepth = (settings.difficulty === "easy" ? 1 : settings.difficulty === "hard" ? 4 : 3)
         + (settings.personality === "aggressive" ? 1 : 0);
       for (const yard of yards) {
-        if (yard.productionQueue.length >= queueDepth) continue;
+        const yardQueueDepth = yard.type === "shipyard" && !hasMobileFabricator ? 1
+          : settings.personality === "economic" ? Math.min(2, queueDepth) : queueDepth;
+        if (yard.productionQueue.length >= yardQueueDepth) continue;
         const roster = this.aiProductionRoster(yard.type as ShipyardType, hasMobileFabricator, settings.personality);
         const shipClass = roster[(ownedShips.length + yard.id + this.state.tick / thinkTicks) % roster.length | 0]!;
         if (!this.canStructureProduceShipClass(playerId, yard.id, shipClass)) continue;
@@ -1338,25 +1433,17 @@ export class GameSimulation {
           requestedTick: this.state.tick + 1, structureId: yard.id, shipClass, count: 1,
         });
       }
-      const extractors = this.state.structures.filter(
-        (structure) => structure.ownerPlayerId === playerId && structure.type === "extractor",
-      );
-      const extractorTarget = (settings.difficulty === "easy" ? 2 : settings.difficulty === "hard" ? 4 : 3)
-        + (settings.personality === "economic" ? 1 : 0);
-      if (extractors.length < extractorTarget && this.state.tick % (thinkTicks * 6) === 0) {
-        const core = this.state.structures.find((structure) => structure.ownerPlayerId === playerId && structure.type === "commandCore");
-        const node = core && this.state.resourceNodes
-          .filter((candidate) => candidate.claimedByStructureId === null)
-          .sort((a, b) => Math.hypot(a.x - core.x, a.z - core.z) - Math.hypot(b.x - core.x, b.z - core.z) || a.id - b.id)[0];
-        if (node && this.canPlaceStructure(playerId, "extractor", node, node.id)) {
-          this.submitCommand({
-            type: "buildStructure", playerId, sequence: player.lastCommandSequence + 1,
-            requestedTick: this.state.tick + 1, structureType: "extractor",
-            position: { x: node.x, z: node.z }, resourceNodeId: node.id, queued: false,
-          });
-        }
+      if (this.state.tick % (thinkTicks * 4) === 0) {
+        this.dispatchAiScouts(playerId, settings);
+        this.expandAiEconomy(playerId, settings);
       }
-      if (this.state.tick % (thinkTicks * 3) === 0) this.advanceAiInfrastructure(playerId, settings.personality);
+      const activeConstructionCount = this.state.structures.filter(
+        (structure) => structure.ownerPlayerId === playerId && structure.buildProgress < 1,
+      ).length;
+      const constructionLimit = settings.difficulty === "easy" ? 1 : 2;
+      if (this.state.tick % (thinkTicks * 3) === 0
+        && activeConstructionCount < constructionLimit
+        && player.economy.efficiency >= 0.7) this.advanceAiInfrastructure(playerId, settings.personality);
       if ((settings.personality === "turtle" || settings.difficulty === "hard")
         && this.state.tick % (thinkTicks * 8) === 0) this.advanceAiDefenses(playerId, settings);
       const attackThreshold = settings.personality === "aggressive" ? 3
@@ -1369,12 +1456,13 @@ export class GameSimulation {
         );
         const center = fleet.reduce((point, ship) => ({ x: point.x + ship.x, z: point.z + ship.z }), { x: 0, z: 0 });
         if (fleet.length > 0) { center.x /= fleet.length; center.z /= fleet.length; }
-        const target = this.state.structures
-          .filter((structure) => this.isHostile(player.teamId, structure.teamId)
-            && this.isEntityVisible(player.teamId, structure.id))
+        const target = ([...this.state.structures, ...this.state.ships] as CombatTargetState[])
+          .filter((candidate) => this.isHostile(player.teamId, candidate.teamId)
+            && this.isEntityVisible(player.teamId, candidate.id))
           .sort((left, right) => {
-            const priority = (structure: StructureState) => structure.type === "commandCore" ? 0
-              : SHIPYARD_TYPES.includes(structure.type as ShipyardType) ? 1 : 2;
+            const priority = (candidate: CombatTargetState) => !isShip(candidate) && candidate.type === "commandCore" ? 0
+              : !isShip(candidate) && SHIPYARD_TYPES.includes(candidate.type as ShipyardType) ? 1
+                : isShip(candidate) ? 2 : 3;
             return priority(left) - priority(right)
               || distanceSquared(center, left) - distanceSquared(center, right)
               || left.id - right.id;
@@ -1385,9 +1473,126 @@ export class GameSimulation {
             requestedTick: this.state.tick + 1, unitIds: fleet.map((ship) => ship.id), queued: false,
             destination: { x: target.x, z: target.z },
           });
+        } else if (fleet.length >= attackThreshold && !target) {
+          const strikeGroup = fleet
+            .filter((ship) => ship.orders.length === 0)
+            .sort((left, right) => left.id - right.id)
+            .slice(0, Math.max(attackThreshold, Math.ceil(fleet.length * 0.6)));
+          const core = this.state.structures.find(
+            (structure) => structure.ownerPlayerId === playerId && structure.type === "commandCore",
+          );
+          if (core && strikeGroup.length >= attackThreshold) {
+            const inwardLength = Math.hypot(core.x, core.z) || 1;
+            this.submitCommand({
+              type: "attackMove", playerId, sequence: player.lastCommandSequence + 1,
+              requestedTick: this.state.tick + 1, unitIds: strikeGroup.map((ship) => ship.id), queued: false,
+              destination: { x: core.x - core.x / inwardLength * 900, z: core.z - core.z / inwardLength * 900 },
+            });
+          }
         }
       }
     }
+  }
+
+  private dispatchAiScouts(playerId: PlayerId, settings: AiCommanderSettings): void {
+    const player = this.state.players.find((candidate) => candidate.id === playerId);
+    const core = this.state.structures.find(
+      (structure) => structure.ownerPlayerId === playerId && structure.type === "commandCore",
+    );
+    if (!player || !core) return;
+    const scoutLimit = (settings.difficulty === "easy" ? 1 : settings.difficulty === "hard" ? 3 : 2)
+      + (settings.personality === "economic" ? 1 : 0);
+    const activeScouts = this.state.ships.filter(
+      (ship) => ship.ownerPlayerId === playerId && ship.orders[0]?.type === "patrol",
+    ).length;
+    const candidates = this.state.ships
+      .filter((ship) => ship.ownerPlayerId === playerId
+        && ship.orders.length === 0
+        && (ship.class === "fighter" || ship.class === "frigate" || ship.class === "bomber"))
+      .sort((left, right) => {
+        const rank = (ship: ShipState) => ship.class === "fighter" ? 0 : ship.class === "frigate" ? 1 : 2;
+        return rank(left) - rank(right) || left.id - right.id;
+      })
+      .slice(0, Math.max(0, scoutLimit - activeScouts));
+    const radialLength = Math.hypot(core.x, core.z) || 1;
+    const inwardX = -core.x / radialLength;
+    const inwardZ = -core.z / radialLength;
+    const tangentX = inwardZ;
+    const tangentZ = -inwardX;
+    const explorationDistance = Math.max(720, radialLength * 0.36);
+    const explorationStep = Math.max(130, radialLength * 0.055);
+    const laneSpacing = Math.max(420, radialLength * 0.175);
+    for (let index = 0; index < candidates.length; index += 1) {
+      const scout = candidates[index]!;
+      const lane = index - (candidates.length - 1) / 2;
+      const destination = {
+        x: core.x + inwardX * (explorationDistance + index * explorationStep) + tangentX * lane * laneSpacing,
+        z: core.z + inwardZ * (explorationDistance + index * explorationStep) + tangentZ * lane * laneSpacing,
+      };
+      this.submitCommand({
+        type: "patrol", playerId, sequence: player.lastCommandSequence + 1,
+        requestedTick: this.state.tick + 1, unitIds: [scout.id], queued: false, destination,
+      });
+    }
+  }
+
+  private expandAiEconomy(playerId: PlayerId, settings: AiCommanderSettings): void {
+    const player = this.state.players.find((candidate) => candidate.id === playerId);
+    const core = this.state.structures.find(
+      (structure) => structure.ownerPlayerId === playerId && structure.type === "commandCore",
+    );
+    if (!player || !core) return;
+    const extractorTarget = (settings.difficulty === "easy" ? 3 : settings.difficulty === "hard" ? 7 : 5)
+      + (settings.personality === "economic" ? 2 : settings.personality === "turtle" ? 1 : 0);
+    const extractors = this.state.structures.filter(
+      (structure) => structure.ownerPlayerId === playerId
+        && RESOURCE_EXTRACTOR_TYPES.includes(structure.type as typeof RESOURCE_EXTRACTOR_TYPES[number]),
+    );
+    if (extractors.length < extractorTarget) {
+      const reservedNodeIds = new Set(this.state.commandQueue
+        .filter((command) => command.type === "buildStructure"
+          && command.playerId === playerId && command.resourceNodeId !== undefined)
+        .map((command) => command.type === "buildStructure" ? command.resourceNodeId : undefined));
+      const node = this.state.resourceNodes
+        .filter((candidate) => candidate.claimedByStructureId === null
+          && !reservedNodeIds.has(candidate.id)
+          && isResourceNodeDiscoveredByTeam(this.state, player.teamId, candidate.id))
+        .sort((left, right) => distanceSquared(core, left) - distanceSquared(core, right) || left.id - right.id)[0];
+      const reservedBuilders = new Set(this.state.commandQueue.flatMap((command) =>
+        command.type === "buildStructure" ? command.builderUnitIds ?? [] : []));
+      const builder = this.state.ships
+        .filter((ship) => ship.ownerPlayerId === playerId && SHIPS[ship.class].buildPower > 0 && !reservedBuilders.has(ship.id))
+        .sort((left, right) => distanceSquared(left, node ?? core) - distanceSquared(right, node ?? core) || left.id - right.id)[0];
+      if (node) {
+        const builderUnitIds = builder ? [builder.id] : [];
+        if (this.canPlaceStructure(playerId, "extractor", node, node.id, builderUnitIds)) {
+          this.submitCommand({
+            type: "buildStructure", playerId, sequence: player.lastCommandSequence + 1,
+            requestedTick: this.state.tick + 1, structureType: "extractor",
+            position: { x: node.x, z: node.z }, resourceNodeId: node.id,
+            builderUnitIds, queued: false,
+          });
+          return;
+        }
+      }
+    }
+    if (this.state.structures.some(
+      (structure) => structure.ownerPlayerId === playerId && structure.buildProgress < 1,
+    )) return;
+    if (player.economy.efficiency < 0.7) return;
+    const solarTarget = (settings.difficulty === "easy" ? 2 : settings.difficulty === "hard" ? 4 : 3)
+      + (settings.personality === "economic" ? 1 : 0);
+    const solarCount = this.state.structures.filter(
+      (structure) => structure.ownerPlayerId === playerId && structure.type === "solarArray",
+    ).length;
+    const hasComfortableEnergy = player.economy.energyIncome >= Math.max(50, player.economy.alloyIncome * 2.5);
+    if (solarCount >= solarTarget || hasComfortableEnergy || !this.canBuildStructure(playerId, "solarArray")) return;
+    const position = this.findAiBuildPosition(playerId, "solarArray", core);
+    if (!position) return;
+    this.submitCommand({
+      type: "buildStructure", playerId, sequence: player.lastCommandSequence + 1,
+      requestedTick: this.state.tick + 1, structureType: "solarArray", position, queued: false,
+    });
   }
 
   private aiProductionRoster(yardType: ShipyardType, hasFabricator: boolean, personality: AiPersonality): readonly ShipClass[] {
@@ -1401,7 +1606,7 @@ export class GameSimulation {
     if (!hasFabricator) return ["fabricator"];
     return personality === "aggressive" ? ["fighter", "bomber", "fighter", "frigate", "bomber"]
       : personality === "turtle" ? ["frigate", "fighter", "frigate", "bomber"]
-        : personality === "economic" ? ["frigate", "fighter", "fabricator", "bomber"]
+        : personality === "economic" ? ["fighter", "fighter", "frigate", "bomber"]
           : ["fighter", "fighter", "bomber", "frigate"];
   }
 
@@ -1412,10 +1617,10 @@ export class GameSimulation {
     );
     if (!player || !core) return;
     const progression: readonly Exclude<StructureType, "commandCore">[] = personality === "economic"
-      ? ["fabricator", "storage", "fleetShipyard", "fusionReactor", "antimatterReactor", "quantumStorage", "capitalShipyard"]
+      ? ["fabricator", "storage", "fleetShipyard", "fusionReactor", "alloyRefinery", "capitalShipyard", "antimatterReactor", "matterForge", "quantumStorage"]
       : personality === "aggressive"
-        ? ["fabricator", "fleetShipyard", "fusionReactor", "capitalShipyard", "storage", "antimatterReactor", "quantumStorage"]
-        : ["fabricator", "storage", "fleetShipyard", "fusionReactor", "capitalShipyard", "antimatterReactor", "quantumStorage"];
+        ? ["fabricator", "fleetShipyard", "fusionReactor", "alloyRefinery", "capitalShipyard", "storage", "antimatterReactor", "matterForge", "quantumStorage"]
+        : ["fabricator", "storage", "fleetShipyard", "fusionReactor", "alloyRefinery", "capitalShipyard", "antimatterReactor", "matterForge", "quantumStorage"];
     for (const structureType of progression) {
       if (this.state.structures.some((structure) => structure.ownerPlayerId === playerId && structure.type === structureType)) continue;
       if (!this.canBuildStructure(playerId, structureType)) return;
@@ -1444,7 +1649,9 @@ export class GameSimulation {
     );
     const limit = settings.personality === "turtle" ? (settings.difficulty === "hard" ? 8 : 6) : 3;
     if (defenses.length >= limit) return;
-    const choices: readonly Exclude<StructureType, "commandCore">[] = ["pointDefenseBattery", "missileBattery", "railBattery"];
+    const choices: readonly Exclude<StructureType, "commandCore">[] = [
+      "pointDefenseBattery", "missileBattery", "railBattery", "plasmaBattery", "beamBattery",
+    ];
     const structureType = choices[defenses.length % choices.length]!;
     if (!this.canBuildStructure(playerId, structureType)) return;
     const position = this.findAiBuildPosition(playerId, structureType, core);
@@ -1564,9 +1771,10 @@ export function createCombatScenario(options: ScenarioOptions = {}): GameSimulat
   if (configs.length < 2 || configs.length > 8) throw new Error("A scenario requires 2–8 players");
   if (new Set(configs.map((player) => player.id)).size !== configs.length) throw new Error("Player IDs must be unique");
   const mapPreset = options.mapPreset ?? "orbital-ring";
+  const mapRandom = createMapRandom(seed, mapPreset);
   const mapSize = options.mapSize ?? "medium";
   const resourceDensity = options.resourceDensity ?? "standard";
-  const baseRadius = { small: 1_600, medium: 2_400, large: 4_000 }[mapSize];
+  const baseRadius = { small: 1_600, medium: 2_400, large: 4_000, huge: 6_000, colossal: 8_500 }[mapSize];
   const mapScale = baseRadius / 420;
   const startingResourceAmount = { low: 500, standard: 900, high: 1_800 }[options.startingResources ?? "standard"];
   const density = {
@@ -1590,7 +1798,7 @@ export function createCombatScenario(options: ScenarioOptions = {}): GameSimulat
   const state: SimulationState = {
     version: 7, seed, tick: 0, nextEntityId: 1, nextTurretId: 1, nextQueueItemId: 1,
     players, teams, ships: [], structures: [], resourceNodes: [],
-    obstacles: createScenarioObstacles(players.length, mapPreset, baseRadius),
+    obstacles: createScenarioObstacles(players.length, mapPreset, baseRadius, seed),
     visibility: [],
     projectiles: [], commandQueue: [],
     aiPlayerIds: configs.filter((player) => player.ai).map((player) => player.id),
@@ -1606,6 +1814,21 @@ export function createCombatScenario(options: ScenarioOptions = {}): GameSimulat
     state.resourceNodes.push(node);
     return node;
   };
+  const addMapNode = (x: number, z: number, richness: number): ResourceNodeState => {
+    let candidateX = x;
+    let candidateZ = z;
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const blocked = state.obstacles.some((obstacle) =>
+        Math.hypot(obstacle.x - candidateX, obstacle.z - candidateZ) < obstacle.radius + 48,
+      );
+      if (!blocked) break;
+      const angle = Math.atan2(candidateX, candidateZ) + 0.31 + mapRandom() * 0.17;
+      const radius = Math.max(90, Math.hypot(candidateX, candidateZ) + 45 + attempt * 12);
+      candidateX = Math.sin(angle) * radius;
+      candidateZ = Math.cos(angle) * radius;
+    }
+    return addNode(quantizePhysics(candidateX), quantizePhysics(candidateZ), richness);
+  };
   const addStructure = (
     player: PlayerState,
     type: StructureType,
@@ -1620,7 +1843,7 @@ export function createCombatScenario(options: ScenarioOptions = {}): GameSimulat
       id: state.nextEntityId++, ownerPlayerId: player.id, teamId: player.teamId,
       type, x, z, yaw,
       health: definition.maxHealth, shields: definition.maxShield, buildProgress: 1,
-      resourceNodeId: node?.id ?? null, productionQueue: [],
+      resourceNodeId: node?.id ?? null, productionQueue: [], repeatProduction: false,
       rallyPoint: { ...rallyPoint },
     };
     state.structures.push(structure);
@@ -1679,26 +1902,51 @@ export function createCombatScenario(options: ScenarioOptions = {}): GameSimulat
       }
     }
   } else {
-    addNode(0, 0, 1.9 * density.richness);
+    if (mapPreset !== "asteroid-belt" && mapPreset !== "shattered-core") {
+      addMapNode((mapRandom() - 0.5) * baseRadius * 0.06, (mapRandom() - 0.5) * baseRadius * 0.06, 1.9 * density.richness);
+    }
     const contestedCount = Math.max(
       4,
       Math.round(players.length * CONTESTED_RESOURCE_NODES_PER_PLAYER * density.count),
     );
-    const contestedRadius = baseRadius * 0.52;
+    const layoutRotation = mapPreset === "orbital-ring"
+      ? (mapRandom() - 0.5) * Math.PI * 2 / contestedCount * 0.6
+      : mapRandom() * Math.PI * 2;
     for (let index = 0; index < contestedCount; index += 1) {
-      let angle = index / contestedCount * Math.PI * 2;
-      let radius = contestedRadius;
-      if (mapPreset === "crossfire") {
+      const progress = index / contestedCount;
+      let angle = progress * Math.PI * 2 + layoutRotation;
+      let radius = baseRadius * (0.49 + (mapRandom() - 0.5) * 0.1);
+      let x: number;
+      let z: number;
+      if (mapPreset === "orbital-ring" && index < players.length) {
+        // Preserve one fair inward expansion lane per spawn, then randomize the remaining ring nodes.
+        angle = index / players.length * Math.PI * 2 + (mapRandom() - 0.5) * 0.08;
+        radius = baseRadius * (0.5 + (mapRandom() - 0.5) * 0.025);
+      } else if (mapPreset === "crossfire") {
         angle += Math.PI / 4;
-        radius *= index % 2 === 0 ? 0.72 : 1.14;
+        radius *= index % 2 === 0 ? 0.7 : 1.15;
       } else if (mapPreset === "open-expanse") {
-        radius *= 0.72 + index % 3 * 0.24;
+        radius = baseRadius * (0.25 + mapRandom() * 0.48);
+        angle = mapRandom() * Math.PI * 2;
+      } else if (mapPreset === "spiral-arms") {
+        const armProgress = Math.floor(index / 2) / Math.max(1, Math.ceil(contestedCount / 2) - 1);
+        angle = layoutRotation + (index % 2) * Math.PI + armProgress * Math.PI * 1.65 + (mapRandom() - 0.5) * 0.18;
+        radius = baseRadius * (0.16 + armProgress * 0.52);
+      } else if (mapPreset === "shattered-core") {
+        const cluster = index % 3;
+        angle = layoutRotation + cluster * Math.PI * 2 / 3 + (mapRandom() - 0.5) * 0.42;
+        radius = baseRadius * (0.3 + Math.floor(index / 3) / Math.max(1, Math.ceil(contestedCount / 3)) * 0.38);
+      } else if (mapPreset === "asteroid-belt") {
+        const along = (progress - 0.5) * baseRadius * 1.35;
+        const across = (index % 2 === 0 ? -1 : 1) * baseRadius * (0.13 + mapRandom() * 0.09);
+        x = along * Math.cos(layoutRotation) - across * Math.sin(layoutRotation);
+        z = along * Math.sin(layoutRotation) + across * Math.cos(layoutRotation);
+        addMapNode(x, z, (1.25 + index % 3 * 0.12 + mapRandom() * 0.08) * density.richness);
+        continue;
       }
-      addNode(
-        Math.sin(angle) * radius,
-        Math.cos(angle) * radius,
-        (1.25 + index % 3 * 0.12) * density.richness,
-      );
+      x = Math.sin(angle) * radius;
+      z = Math.cos(angle) * radius;
+      addMapNode(x, z, (1.25 + index % 3 * 0.12 + mapRandom() * 0.08) * density.richness);
     }
     for (let index = 0; index < players.length; index += 1) {
       const player = players[index]!;
@@ -1751,6 +1999,7 @@ export function createCombatScenario(options: ScenarioOptions = {}): GameSimulat
         placeShowcaseStructure("fusionReactor", 440, -210);
         placeShowcaseStructure("antimatterReactor", 520, 210);
         placeShowcaseStructure("quantumStorage", 390, 260);
+        placeShowcaseStructure("radarArray", 265, -250);
         placeShowcaseStructure("pointDefenseBattery", 175, -70);
         placeShowcaseStructure("missileBattery", 215, 35);
         placeShowcaseStructure("railBattery", 300, 145);
@@ -1923,6 +2172,21 @@ function orderPlayersForSpawns(
     }
   }
   return ordered;
+}
+
+function createMapRandom(seed: number, preset: string): () => number {
+  let presetHash = 2_166_136_261;
+  for (let index = 0; index < preset.length; index += 1) {
+    presetHash = Math.imul(presetHash ^ preset.charCodeAt(index), 16_777_619) >>> 0;
+  }
+  let state = (seed ^ presetHash ^ 0x6d2b_79f5) >>> 0;
+  return () => {
+    state += 0x6d2b79f5;
+    let value = state;
+    value = Math.imul(value ^ value >>> 15, value | 1);
+    value ^= value + Math.imul(value ^ value >>> 7, value | 61);
+    return ((value ^ value >>> 14) >>> 0) / 0x1_0000_0000;
+  };
 }
 
 export function createShowcaseScenario(): GameSimulation {
@@ -2150,22 +2414,55 @@ function createScenarioObstacles(
   playerCount: number,
   mapPreset: NonNullable<ScenarioOptions["mapPreset"]> = "orbital-ring",
   baseRadius = 2_400,
+  seed = 0xc0ffee,
 ): ObstacleState[] {
+  const random = createMapRandom(seed ^ Math.imul(playerCount, 0x85ebca6b), mapPreset);
   const obstacleCount = mapPreset === "open-expanse" ? Math.max(2, Math.ceil(playerCount / 2))
-    : mapPreset === "crossfire" ? Math.max(4, playerCount)
-      : playerCount;
-  return Array.from({ length: obstacleCount }, (_, index) => {
-    const angle = Math.PI + index / obstacleCount * Math.PI * 2 + (mapPreset === "crossfire" ? Math.PI / 4 : 0);
-    const radialScale = mapPreset === "open-expanse" ? 0.42 : mapPreset === "crossfire" && index % 2 === 0 ? 0.2 : 0.32;
-    return {
+    : mapPreset === "crossfire" ? Math.max(6, playerCount * 2)
+      : mapPreset === "asteroid-belt" ? Math.max(10, playerCount * 3)
+        : mapPreset === "shattered-core" ? Math.max(9, playerCount * 2)
+          : mapPreset === "spiral-arms" ? Math.max(6, playerCount)
+            : playerCount;
+  const rotation = random() * Math.PI * 2;
+  const obstacles: ObstacleState[] = [];
+  for (let index = 0; index < obstacleCount; index += 1) {
+    let x = 0;
+    let z = 0;
+    if (mapPreset === "asteroid-belt") {
+      const along = (index / Math.max(1, obstacleCount - 1) - 0.5) * baseRadius * 1.18;
+      const across = (random() - 0.5) * baseRadius * 0.16;
+      x = along * Math.cos(rotation) - across * Math.sin(rotation);
+      z = along * Math.sin(rotation) + across * Math.cos(rotation);
+    } else if (mapPreset === "crossfire") {
+      const lane = index % 2 === 0 ? 1 : -1;
+      const along = (Math.floor(index / 2) / Math.max(1, Math.ceil(obstacleCount / 2) - 1) - 0.5) * baseRadius * 1.05;
+      const across = lane * along + (random() - 0.5) * baseRadius * 0.08;
+      x = along * Math.cos(rotation) - across * Math.sin(rotation);
+      z = along * Math.sin(rotation) + across * Math.cos(rotation);
+    } else {
+      const progress = index / obstacleCount;
+      let angle = rotation + progress * Math.PI * 2 + (random() - 0.5) * 0.28;
+      let radialScale = 0.3 + (random() - 0.5) * 0.08;
+      if (mapPreset === "open-expanse") radialScale = 0.25 + random() * 0.36;
+      else if (mapPreset === "spiral-arms") {
+        angle = rotation + (index % 2) * Math.PI + progress * Math.PI * 1.8;
+        radialScale = 0.16 + progress * 0.43;
+      } else if (mapPreset === "shattered-core") radialScale = 0.1 + random() * 0.28;
+      x = Math.sin(angle) * baseRadius * radialScale;
+      z = Math.cos(angle) * baseRadius * radialScale;
+    }
+    const radiusBase = mapPreset === "open-expanse" ? 22 : mapPreset === "asteroid-belt" ? 35 : 30;
+    const radius = radiusBase * (0.72 + random() * 0.58);
+    obstacles.push({
       id: index + 1,
       type: "asteroid",
-      x: quantizePhysics(Math.sin(angle) * baseRadius * radialScale),
-      z: quantizePhysics(Math.cos(angle) * baseRadius * radialScale),
-      radius: mapPreset === "open-expanse" ? 25 : 32,
-      visualSeed: (Math.imul(index + 1, 0x9e3779b1) ^ Math.imul(playerCount, 0x85ebca6b) ^ Math.imul(mapPreset.length, 0xc2b2ae35)) >>> 0,
-    };
-  });
+      x: quantizePhysics(x),
+      z: quantizePhysics(z),
+      radius: quantizePhysics(radius),
+      visualSeed: Math.floor(random() * 0x1_0000_0000) >>> 0,
+    });
+  }
+  return obstacles;
 }
 
 function quantizePhysics(value: number): number {

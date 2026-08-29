@@ -20,6 +20,8 @@ export type StructureType =
   | "extractor"
   | "deepCoreExtractor"
   | "singularityHarvester"
+  | "alloyRefinery"
+  | "matterForge"
   | "solarArray"
   | "storage"
   | "quantumStorage"
@@ -31,9 +33,12 @@ export type StructureType =
   | "fleetShipyard"
   | "capitalInfrastructure"
   | "capitalShipyard"
+  | "radarArray"
   | "pointDefenseBattery"
   | "missileBattery"
-  | "railBattery";
+  | "railBattery"
+  | "plasmaBattery"
+  | "beamBattery";
 export type ShipyardType = "shipyard" | "fleetShipyard" | "capitalShipyard";
 export type ResourceType = "alloy";
 export type AiDifficulty = "easy" | "normal" | "hard";
@@ -135,6 +140,8 @@ export interface StructureDefinition {
   sensorRange: number;
   /** Optional shared weapon used by completed defensive emplacements. */
   weaponTypeId?: WeaponTypeId;
+  /** Independent weapon mounts used by fortress-style defensive structures. */
+  hardpoints?: readonly TurretHardpointDefinition[];
 }
 
 export interface ShipEconomyDefinition {
@@ -211,6 +218,15 @@ export type EconomyCommand =
       type: "cancelProduction";
       structureId: EntityId;
       queueItemId: EntityId;
+    })
+  | (EconomyCommandBase & {
+      type: "setProductionRepeat";
+      structureId: EntityId;
+      enabled: boolean;
+    })
+  | (EconomyCommandBase & {
+      type: "clearProductionQueue";
+      structureId: EntityId;
     })
   | (EconomyCommandBase & {
       type: "setRallyPoint";
@@ -309,6 +325,7 @@ export interface StructureState {
   buildProgress: number;
   resourceNodeId: EntityId | null;
   productionQueue: ProductionQueueItem[];
+  repeatProduction: boolean;
   rallyPoint: Vec2;
 }
 
@@ -320,8 +337,9 @@ export type SimulationEvent =
   | { type: "constructionCompleted"; tick: number; playerId: PlayerId; structureId: EntityId; structureType: StructureType }
   | { type: "unitQueued"; tick: number; playerId: PlayerId; structureId: EntityId; shipClass: ShipClass; queueItemId: EntityId }
   | { type: "unitProduced"; tick: number; playerId: PlayerId; structureId: EntityId; shipId: EntityId; shipClass: ShipClass }
-  | { type: "weaponFired"; tick: number; turretId: number; shipId: number; targetId: number; projectileId: number }
+  | { type: "weaponFired"; tick: number; turretId: number; shipId: number; targetId: number; projectileId: number; weaponTypeId: WeaponTypeId }
   | { type: "hit"; tick: number; projectileId: number; targetId: number; damage: number }
+  | { type: "projectileDetonated"; tick: number; projectileId: number; weaponTypeId: WeaponTypeId; x: number; z: number }
   | { type: "destroyed"; tick: number; entityId: number }
   | { type: "victory"; tick: number; winnerTeamId: TeamId };
 
@@ -407,6 +425,7 @@ export interface PlayerViewStructureState {
   buildProgress: number;
   resourceNodeId: EntityId | null;
   productionQueue: ProductionQueueItem[];
+  repeatProduction: boolean;
   rallyPoint: Vec2 | null;
 }
 

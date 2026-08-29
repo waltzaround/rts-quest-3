@@ -96,6 +96,7 @@ export function projectPlayerView(state: SimulationState, playerId: PlayerId): P
         productionQueue: sharesPrivateState
           ? structure.productionQueue.map((item) => ({ ...item }))
           : [],
+        repeatProduction: sharesPrivateState && structure.repeatProduction,
         rallyPoint: sharesPrivateState ? { ...structure.rallyPoint } : null,
       };
     });

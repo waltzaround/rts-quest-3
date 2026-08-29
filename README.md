@@ -1,4 +1,4 @@
-# Voidfront — playable deterministic multiplayer RTS
+# Command Prompt — playable deterministic multiplayer RTS
 
 This repository implements the deterministic foundation, fleet controls, multi-turret combat, continuous-flow economy, sensor-based fog of war, and authoritative 2–8 player multiplayer foundation from the Space RTS brief. It supports local skirmishes plus team or free-for-all matches hosted by a Cloudflare Durable Object.
 
@@ -17,7 +17,7 @@ Drag-select the blue fleet, right-click or right-drag to move in formation, pres
 
 Asteroids are authoritative Box3D colliders rather than scenery. Fleets steer laterally around them, blocked formation goals move to reachable positions, capital ships cannot penetrate asteroid or station bodies, and asteroids intercept projectiles. The minimap and tactical view retain their silhouettes; enable `COLLIDERS` and `AVOIDANCE` in Sim Telemetry to inspect exact shapes and steering vectors.
 
-Ships and completed structures provide sensor coverage. Allies share live contacts and discovered resource deposits, while hostile ships, structures, projectiles, targeting data, and effects disappear when they leave sensor coverage. The minimap shades unexplored space and shows only permitted contacts; enable `SENSOR RANGES` in Sim Telemetry to inspect the current allied coverage.
+Ships and completed structures provide sensor coverage. Allies share live contacts and discovered resource deposits, while hostile ships, structures, projectiles, targeting data, and effects disappear when they leave sensor coverage. The minimap shades unexplored space and shows only permitted contacts.
 
 The host can issue a single-claim **Team View** token from the lobby. A live observer sees exactly that team's fog-limited tactical picture, receives reconnect credentials, and cannot issue orders or change the lobby. Omniscient viewing remains unavailable while a match is active. After victory, choose **Post-match Replay** with the lobby code to download the deterministic archive, verify its manifest and checksummed checkpoints, then review the whole battle with play/pause, single-step, 0.5–4× speed, and timeline seeking.
 

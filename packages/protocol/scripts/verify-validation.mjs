@@ -31,6 +31,19 @@ assert.equal(parseClientMessage(JSON.stringify({
   }],
 }))?.type, "commands", "Fabricator vessels should pass protocol validation");
 
+for (const command of [
+  { type: "setProductionRepeat", structureId: 12, enabled: true },
+  { type: "clearProductionQueue", structureId: 12 },
+]) {
+  assert.equal(parseClientMessage(JSON.stringify({
+    type: "commands",
+    clientTick: 0,
+    commands: [{
+      ...command, playerId: "pilot-blue", sequence: 1, requestedTick: 1,
+    }],
+  }))?.type, "commands", `${command.type} should pass protocol validation`);
+}
+
 for (const structureType of ["commandCore", "advancedShipyard", "unknown"]) {
   assert.equal(parseClientMessage(buildCommand(structureType)), null, `${structureType} should fail protocol validation`);
 }

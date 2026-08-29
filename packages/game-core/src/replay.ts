@@ -636,6 +636,10 @@ function isGameCommandShape(value: unknown): value is GameCommand {
   if (value.type === "cancelProduction") {
     return isPositiveInteger(value.structureId) && isPositiveInteger(value.queueItemId);
   }
+  if (value.type === "setProductionRepeat") {
+    return isPositiveInteger(value.structureId) && typeof value.enabled === "boolean";
+  }
+  if (value.type === "clearProductionQueue") return isPositiveInteger(value.structureId);
   return value.type === "setRallyPoint" && isPositiveInteger(value.structureId) && isVec2(value.position);
 }
 

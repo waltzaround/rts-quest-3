@@ -41,6 +41,8 @@ describe("horizontal infrastructure progression", () => {
     expect(simulation.getAvailableStructureTypes("pilot-blue")).not.toContain("advancedFabrication");
     expect(simulation.getAvailableStructureTypes("pilot-blue")).not.toContain("fusionReactor");
     expect(simulation.getAvailableStructureTypes("pilot-blue")).not.toContain("capitalInfrastructure");
+    expect(simulation.getAvailableStructureTypes("pilot-blue")).toContain("radarArray");
+    expect(STRUCTURES.radarArray.sensorRange).toBeGreaterThan(STRUCTURES.commandCore.sensorRange);
   });
 
   it("binds each role to a physical yard while preserving light-unit production", () => {
@@ -107,21 +109,30 @@ describe("horizontal infrastructure progression", () => {
     const simulation = createCombatScenario({ enemyCommander: false });
     expect(simulation.getAvailableStructureTypes("pilot-blue")).not.toContain("fusionReactor");
     expect(simulation.getAvailableStructureTypes("pilot-blue")).not.toContain("deepCoreExtractor");
+    expect(simulation.getAvailableStructureTypes("pilot-blue")).not.toContain("alloyRefinery");
     expect(simulation.getAvailableStructureTypes("pilot-blue")).not.toContain("antimatterReactor");
 
     addCompletedStructure(simulation, "fleetShipyard");
     expect(simulation.getAvailableStructureTypes("pilot-blue")).toContain("fusionReactor");
     expect(simulation.getAvailableStructureTypes("pilot-blue")).toContain("deepCoreExtractor");
+    expect(simulation.getAvailableStructureTypes("pilot-blue")).not.toContain("alloyRefinery");
     expect(simulation.getAvailableStructureTypes("pilot-blue")).not.toContain("antimatterReactor");
 
+    addCompletedStructure(simulation, "fusionReactor");
+    expect(simulation.getAvailableStructureTypes("pilot-blue")).toContain("alloyRefinery");
+    expect(simulation.getAvailableStructureTypes("pilot-blue")).not.toContain("matterForge");
+
     addCompletedStructure(simulation, "capitalShipyard");
+    addCompletedStructure(simulation, "antimatterReactor");
     expect(simulation.getAvailableStructureTypes("pilot-blue")).toEqual(expect.arrayContaining([
-      "antimatterReactor", "singularityHarvester", "quantumStorage",
+      "antimatterReactor", "singularityHarvester", "matterForge", "quantumStorage",
     ]));
     expect(STRUCTURES.fusionReactor.energyIncome).toBeGreaterThan(STRUCTURES.solarArray.energyIncome);
     expect(STRUCTURES.deepCoreExtractor.alloyIncome).toBeGreaterThan(STRUCTURES.extractor.alloyIncome);
     expect(STRUCTURES.antimatterReactor.energyIncome).toBeGreaterThan(STRUCTURES.fusionReactor.energyIncome);
     expect(STRUCTURES.singularityHarvester.alloyIncome).toBeGreaterThan(STRUCTURES.deepCoreExtractor.alloyIncome);
+    expect(STRUCTURES.alloyRefinery.alloyIncome).toBeLessThan(STRUCTURES.deepCoreExtractor.alloyIncome);
+    expect(STRUCTURES.matterForge.alloyIncome).toBeGreaterThan(STRUCTURES.alloyRefinery.alloyIncome);
     expect(STRUCTURES.quantumStorage.energyStorage).toBeGreaterThan(STRUCTURES.storage.energyStorage);
   });
 
@@ -271,5 +282,98 @@ describe("horizontal infrastructure progression", () => {
     expect(simulation.state.commandQueue.some((command) =>
       command.type === "buildStructure" && command.position.x === queuedSite.x,
     )).toBe(false);
+  });
+
+  it("places direct alloy generators away from resource nodes", () => {
+    const simulation = createCombatScenario({ enemyCommander: false });
+    simulation.state.obstacles = [];
+    addCompletedStructure(simulation, "fleetShipyard");
+    addCompletedStructure(simulation, "fusionReactor");
+    const core = simulation.state.structures.find(
+      (structure) => structure.ownerPlayerId === "pilot-blue" && structure.type === "commandCore",
+    )!;
+    const site = { x: core.x, z: core.z + 250 };
+    expect(simulation.canPlaceStructure("pilot-blue", "alloyRefinery", site)).toBe(true);
+    expect(simulation.canPlaceStructure("pilot-blue", "alloyRefinery", site, simulation.state.resourceNodes[0]!.id)).toBe(false);
+  });
+
+  it("uses authoritative resource-node coordinates for mobile extractor orders", () => {
+    const simulation = createCombatScenario({ enemyCommander: false, startingFleet: true });
+    const player = simulation.state.players.find((candidate) => candidate.id === "pilot-blue")!;
+    const fabricator = simulation.state.ships.find((ship) => ship.ownerPlayerId === player.id)!;
+    fabricator.class = "fabricator";
+    const visibility = simulation.state.visibility.find((entry) => entry.teamId === player.teamId)!;
+    const node = simulation.state.resourceNodes.find(
+      (candidate) => candidate.claimedByStructureId === null
+        && visibility.discoveredResourceNodeIds.includes(candidate.id),
+    )!;
+    expect(fabricator).toBeDefined();
+    expect(node).toBeDefined();
+
+    const interpolatedCursorPosition = { x: node.x + 30, z: node.z - 30 };
+    expect(simulation.submitCommand({
+      type: "buildStructure", playerId: player.id, sequence: 1, requestedTick: 1,
+      structureType: "extractor", position: interpolatedCursorPosition,
+      resourceNodeId: node.id, builderUnitIds: [fabricator.id], queued: false,
+    }).accepted).toBe(true);
+    simulation.step();
+
+    expect(simulation.state.commandQueue.some((command) =>
+      command.type === "buildStructure"
+        && command.resourceNodeId === node.id
+        && command.builderUnitIds?.includes(fabricator.id),
+    ) || simulation.state.structures.some((structure) =>
+      structure.type === "extractor" && structure.resourceNodeId === node.id,
+    )).toBe(true);
+  });
+
+  it("awards a contested resource node to the first mobile builder to arrive", () => {
+    const simulation = createCombatScenario({ startingFleet: true });
+    simulation.state.obstacles = [];
+    const blue = simulation.state.players.find((player) => player.id === "pilot-blue")!;
+    const red = simulation.state.players.find((player) => player.id === "pilot-red")!;
+    const blueBuilder = simulation.state.ships.find((ship) => ship.ownerPlayerId === blue.id)!;
+    const redBuilder = simulation.state.ships.find((ship) => ship.ownerPlayerId === red.id)!;
+    blueBuilder.class = "fabricator";
+    redBuilder.class = "fabricator";
+    blueBuilder.orders = [];
+    redBuilder.orders = [];
+    const node = simulation.state.resourceNodes.find((candidate) => candidate.claimedByStructureId === null)!;
+    for (const visibility of simulation.state.visibility) {
+      if (!visibility.discoveredResourceNodeIds.includes(node.id)) {
+        visibility.discoveredResourceNodeIds.push(node.id);
+      }
+    }
+    blueBuilder.x = node.x - 220;
+    blueBuilder.z = node.z;
+    redBuilder.x = node.x + 650;
+    redBuilder.z = node.z;
+
+    expect(simulation.submitCommand({
+      type: "buildStructure", playerId: blue.id, sequence: 1, requestedTick: 1,
+      structureType: "extractor", position: node, resourceNodeId: node.id,
+      builderUnitIds: [blueBuilder.id], queued: false,
+    }).accepted).toBe(true);
+    expect(simulation.submitCommand({
+      type: "buildStructure", playerId: red.id, sequence: 1, requestedTick: 1,
+      structureType: "extractor", position: node, resourceNodeId: node.id,
+      builderUnitIds: [redBuilder.id], queued: false,
+    }).accepted).toBe(true);
+
+    let extractor: StructureState | undefined;
+    for (let tick = 0; tick < 400; tick += 1) {
+      simulation.step();
+      extractor = simulation.state.structures.find((structure) =>
+        structure.resourceNodeId === node.id && structure.type === "extractor",
+      );
+      if (extractor) break;
+    }
+
+    expect(extractor?.ownerPlayerId).toBe(blue.id);
+    expect(node.claimedByStructureId).toBe(extractor?.id);
+    expect(simulation.state.commandQueue.some((command) =>
+      command.type === "buildStructure" && command.resourceNodeId === node.id,
+    )).toBe(false);
+    expect(redBuilder.orders).toHaveLength(0);
   });
 });

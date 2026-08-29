@@ -18,10 +18,13 @@ const PROTOCOL_SHIP_CLASSES = {
 } satisfies Record<ShipClass, true>;
 const PROTOCOL_BUILDABLE_STRUCTURE_TYPES = {
   extractor: true, deepCoreExtractor: true, singularityHarvester: true,
+  alloyRefinery: true, matterForge: true,
   solarArray: true, storage: true, quantumStorage: true, fabricator: true, shipyard: true,
   advancedFabrication: true, fusionReactor: true, fleetShipyard: true,
   antimatterReactor: true, capitalInfrastructure: true, capitalShipyard: true,
+  radarArray: true,
   pointDefenseBattery: true, missileBattery: true, railBattery: true,
+  plasmaBattery: true, beamBattery: true,
 } satisfies Record<Exclude<StructureType, "commandCore">, true>;
 
 const hasOwn = (record: object, key: unknown): key is string =>
@@ -38,8 +41,14 @@ export type MatchPhase = "lobby" | "playing" | "finished";
 export type MatchMode = "ffa" | "teams";
 export type SpectatorMode = "team" | "replay";
 export type ProjectedViewState = PlayerViewState | TeamViewState;
-export type MapPreset = "orbital-ring" | "crossfire" | "open-expanse";
-export type MapSize = "small" | "medium" | "large";
+export type MapPreset =
+  | "orbital-ring"
+  | "crossfire"
+  | "open-expanse"
+  | "asteroid-belt"
+  | "spiral-arms"
+  | "shattered-core";
+export type MapSize = "small" | "medium" | "large" | "huge" | "colossal";
 export type StartingResources = "low" | "standard" | "high";
 export type ResourceDensity = "scarce" | "standard" | "rich";
 export type TeamSpawnMode = "together" | "interleaved" | "random";
@@ -168,8 +177,8 @@ function isLobbyPlayerSlot(value: unknown): value is LobbyPlayerSlot {
 
 function isLobbySettings(value: unknown): value is LobbySettings {
   return isRecord(value)
-    && ["orbital-ring", "crossfire", "open-expanse"].includes(String(value.mapPreset))
-    && ["small", "medium", "large"].includes(String(value.mapSize))
+    && ["orbital-ring", "crossfire", "open-expanse", "asteroid-belt", "spiral-arms", "shattered-core"].includes(String(value.mapPreset))
+    && ["small", "medium", "large", "huge", "colossal"].includes(String(value.mapSize))
     && ["low", "standard", "high"].includes(String(value.startingResources))
     && ["scarce", "standard", "rich"].includes(String(value.resourceDensity))
     && ["together", "interleaved", "random"].includes(String(value.teamSpawnMode));
@@ -279,6 +288,12 @@ function isGameCommand(value: unknown): value is GameCommand {
   if (value.type === "cancelProduction") {
     return isInteger(value.structureId) && value.structureId > 0
       && isInteger(value.queueItemId) && value.queueItemId > 0;
+  }
+  if (value.type === "setProductionRepeat") {
+    return isInteger(value.structureId) && value.structureId > 0 && typeof value.enabled === "boolean";
+  }
+  if (value.type === "clearProductionQueue") {
+    return isInteger(value.structureId) && value.structureId > 0;
   }
   if (value.type === "setRallyPoint") {
     return isInteger(value.structureId) && value.structureId > 0 && isVec2(value.position);

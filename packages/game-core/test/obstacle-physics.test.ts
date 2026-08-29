@@ -40,8 +40,10 @@ describe("authoritative asteroid physics", () => {
       });
       expect(simulation.state.obstacles).toHaveLength(playerCount);
       for (const obstacle of simulation.state.obstacles) {
-        expect(Math.hypot(obstacle.x, obstacle.z)).toBeCloseTo(2_400 * 0.32, 4);
-        expect(obstacle.radius).toBe(32);
+        expect(Math.hypot(obstacle.x, obstacle.z)).toBeGreaterThanOrEqual(2_400 * 0.26);
+        expect(Math.hypot(obstacle.x, obstacle.z)).toBeLessThanOrEqual(2_400 * 0.34);
+        expect(obstacle.radius).toBeGreaterThanOrEqual(21.6);
+        expect(obstacle.radius).toBeLessThanOrEqual(39);
       }
       for (const ship of simulation.state.ships) {
         for (const obstacle of simulation.state.obstacles) {
@@ -93,9 +95,36 @@ describe("authoritative asteroid physics", () => {
       damage: 42,
       lifetimeTicks: 32,
     });
-    simulation.stepMany(12);
+    const events = [];
+    for (let tick = 0; tick < 12; tick += 1) events.push(...simulation.step().events);
     expect(simulation.state.projectiles).toHaveLength(0);
     expect(target.health).toBe(startingHealth);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "projectileDetonated", weaponTypeId: "heavyRail",
+    }));
+  });
+
+  it("only emits missed-shot detonations for non-fighter owners", () => {
+    const simulation = createCombatScenario({ seed: 0x51a7, enemyCommander: false });
+    const owner = simulation.state.ships.find((ship) => ship.ownerPlayerId === "pilot-blue")!;
+    simulation.state.ships = [owner];
+    simulation.state.obstacles = [];
+    owner.turrets = [];
+    owner.class = "fighter";
+    const addExpiringProjectile = (id: number) => simulation.state.projectiles.push({
+      id, ownerShipId: owner.id, ownerTeamId: owner.teamId, weaponTypeId: "plasma",
+      targetEntityId: 999_999, x: 0, z: 0, previousX: 0, previousZ: 0,
+      vx: 0, vz: 0, radius: 1, damage: 1, lifetimeTicks: 1,
+    });
+
+    addExpiringProjectile(simulation.state.nextEntityId++);
+    expect(simulation.step().events.some((event) => event.type === "projectileDetonated")).toBe(false);
+
+    owner.class = "destroyer";
+    addExpiringProjectile(simulation.state.nextEntityId++);
+    expect(simulation.step().events).toContainEqual(expect.objectContaining({
+      type: "projectileDetonated", weaponTypeId: "plasma", x: 0, z: 0,
+    }));
   });
 
   it.each(["fighter", "bomber"] as const)("lets a %s fly through a capital ship", async (shipClass) => {

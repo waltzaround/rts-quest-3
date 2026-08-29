@@ -265,6 +265,61 @@ describe("continuous economy and production", () => {
     expect(shipyard.productionQueue).toHaveLength(0);
   });
 
+  it("cycles the full production queue while infinite production is enabled", () => {
+    const simulation = createCombatScenario({ enemyCommander: false });
+    const shipyard = simulation.state.structures.find(
+      (structure) => structure.ownerPlayerId === "pilot-blue" && structure.type === "shipyard",
+    )!;
+    const player = simulation.state.players.find((candidate) => candidate.id === "pilot-blue")!;
+    player.economy.alloy = 2_000;
+    player.economy.energy = 2_000;
+    expect(simulation.submitCommand({
+      type: "queueUnit", playerId: player.id, sequence: 1, requestedTick: 1,
+      structureId: shipyard.id, shipClass: "fighter", count: 1,
+    }).accepted).toBe(true);
+    expect(simulation.submitCommand({
+      type: "queueUnit", playerId: player.id, sequence: 2, requestedTick: 1,
+      structureId: shipyard.id, shipClass: "frigate", count: 1,
+    }).accepted).toBe(true);
+    expect(simulation.submitCommand({
+      type: "setProductionRepeat", playerId: player.id, sequence: 3, requestedTick: 1,
+      structureId: shipyard.id, enabled: true,
+    }).accepted).toBe(true);
+
+    simulation.stepMany(180);
+    expect(shipyard.repeatProduction).toBe(true);
+    expect(shipyard.productionQueue.map((item) => item.shipClass)).toEqual(["frigate", "fighter"]);
+    simulation.stepMany(190);
+    expect(shipyard.productionQueue.map((item) => item.shipClass)).toEqual(["fighter", "frigate"]);
+    expect(simulation.state.ships.filter((ship) => ship.ownerPlayerId === player.id)).toHaveLength(6);
+  });
+
+  it("stops every queued item and disables infinite production authoritatively", () => {
+    const simulation = createCombatScenario({ enemyCommander: false });
+    const shipyard = simulation.state.structures.find(
+      (structure) => structure.ownerPlayerId === "pilot-blue" && structure.type === "shipyard",
+    )!;
+    simulation.submitCommand({
+      type: "queueUnit", playerId: "pilot-blue", sequence: 1, requestedTick: 1,
+      structureId: shipyard.id, shipClass: "fighter", count: 3,
+    });
+    simulation.submitCommand({
+      type: "setProductionRepeat", playerId: "pilot-blue", sequence: 2, requestedTick: 1,
+      structureId: shipyard.id, enabled: true,
+    });
+    simulation.step();
+    expect(shipyard.productionQueue).toHaveLength(3);
+    expect(shipyard.repeatProduction).toBe(true);
+
+    expect(simulation.submitCommand({
+      type: "clearProductionQueue", playerId: "pilot-blue", sequence: 3, requestedTick: 2,
+      structureId: shipyard.id,
+    }).accepted).toBe(true);
+    simulation.step();
+    expect(shipyard.productionQueue).toHaveLength(0);
+    expect(shipyard.repeatProduction).toBe(false);
+  });
+
   it("runs the enemy commander deterministically and reinforces its fleet", () => {
     const first = createCombatScenario({ seed: 77 });
     const second = createCombatScenario({ seed: 77 });

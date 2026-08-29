@@ -122,18 +122,18 @@ const CUE_GAIN: Readonly<Record<CueKind, number>> = {
 };
 
 const CUE_TONE: Readonly<Record<CueKind, { highpass: number; presence: number; boost: number }>> = {
-  pointDefense: { highpass: 390, presence: 2_450, boost: 3.5 },
-  autocannon: { highpass: 180, presence: 1_600, boost: 3 },
-  torpedo: { highpass: 62, presence: 720, boost: 3.5 },
-  plasma: { highpass: 125, presence: 1_400, boost: 3.5 },
-  heavyRail: { highpass: 48, presence: 1_350, boost: 4 },
-  beam: { highpass: 145, presence: 1_750, boost: 3.5 },
-  impact: { highpass: 90, presence: 1_150, boost: 2.5 },
-  explosion: { highpass: 38, presence: 620, boost: 3 },
-  command: { highpass: 150, presence: 1_050, boost: 2 },
-  construction: { highpass: 110, presence: 920, boost: 2 },
-  launch: { highpass: 72, presence: 880, boost: 3 },
-  victory: { highpass: 52, presence: 720, boost: 2.5 },
+  pointDefense: { highpass: 280, presence: 1_900, boost: 1.5 },
+  autocannon: { highpass: 155, presence: 1_250, boost: 1.8 },
+  torpedo: { highpass: 92, presence: 680, boost: 1.7 },
+  plasma: { highpass: 120, presence: 1_050, boost: 1.6 },
+  heavyRail: { highpass: 68, presence: 760, boost: 2.2 },
+  beam: { highpass: 90, presence: 1_100, boost: 1.2 },
+  impact: { highpass: 105, presence: 980, boost: 2.1 },
+  explosion: { highpass: 62, presence: 560, boost: 2.2 },
+  command: { highpass: 210, presence: 1_250, boost: 0.8 },
+  construction: { highpass: 90, presence: 620, boost: 1 },
+  launch: { highpass: 82, presence: 690, boost: 1.7 },
+  victory: { highpass: 68, presence: 520, boost: 1.7 },
 };
 
 const SHIP_ENGINE_WEIGHT: Readonly<Record<ShipState["class"], number>> = {
@@ -210,96 +210,80 @@ function makeBuffer(
 function createCueBuffers(context: AudioContext): Record<CueKind, AudioBuffer> {
   const noise = (random: () => number) => random() * 2 - 1;
   return {
-    pointDefense: makeBuffer(context, 0.048, (time, random) => {
-      const snap = noise(random) * Math.exp(-time * 155);
-      const fizz = noise(random) * Math.exp(-time * 62);
-      const needle = Math.sin(time * Math.PI * 2 * 2_850) * Math.exp(-time * 92);
-      return snap * 0.72 + fizz * 0.25 + needle * 0.38;
+    pointDefense: makeBuffer(context, 0.065, (time, random) => {
+      const breech = noise(random) * Math.exp(-time * 180);
+      const gas = noise(random) * Math.exp(-time * 52);
+      const mechanism = Math.sin(Math.PI * 2 * 1_380 * time) * Math.exp(-time * 120);
+      return breech * 0.82 + gas * 0.22 + mechanism * 0.14;
     }, 0x01de_fade),
-    autocannon: makeBuffer(context, 0.15, (time, random) => {
-      const crack = noise(random) * Math.exp(-time * 118);
-      const envelope = Math.exp(-time * 29);
-      const body = Math.sin(Math.PI * 2 * (430 * time - 520 * time * time));
-      const mechanism = Math.sin(Math.PI * 2 * 1_180 * time) * Math.exp(-time * 48);
-      return crack * 0.62 + body * envelope * 0.68 + mechanism * 0.16;
+    autocannon: makeBuffer(context, 0.14, (time, random) => {
+      const muzzle = noise(random) * Math.exp(-time * 145);
+      const pressure = Math.sin(Math.PI * 2 * (310 * time - 80 * time * time)) * Math.exp(-time * 38);
+      const bolt = Math.sin(Math.PI * 2 * 760 * time) * Math.exp(-time * 68);
+      return muzzle * 0.72 + pressure * 0.74 + bolt * 0.12;
     }, 0xac01_ca77),
-    torpedo: makeBuffer(context, 0.48, (time, random) => {
-      const attack = Math.min(1, time * 62);
-      const envelope = attack * Math.exp(-time * 5.5);
-      const launch = Math.sin(Math.PI * 2 * (155 * time - 72 * time * time));
-      const turbine = Math.sin(Math.PI * 2 * (330 * time + Math.sin(time * 15) * 0.6));
-      const ignition = noise(random) * Math.exp(-time * 105);
-      const exhaust = noise(random) * attack * Math.exp(-time * 8.5);
-      return ignition * 0.5 + (launch * 0.48 + turbine * 0.23 + exhaust * 0.28) * envelope;
+    torpedo: makeBuffer(context, 0.42, (time, random) => {
+      const latch = noise(random) * Math.exp(-time * 150);
+      const tube = Math.sin(Math.PI * 2 * (165 * time - 18 * time * time)) * Math.exp(-time * 13);
+      const compressedGas = noise(random) * Math.min(1, time * 70) * Math.exp(-time * 13);
+      const ignition = Math.sin(Math.PI * 2 * 238 * time) * Math.exp(-time * 18);
+      return latch * 0.58 + tube * 0.62 + compressedGas * 0.34 + ignition * 0.12;
     }, 0x70a9_ed01),
-    plasma: makeBuffer(context, 0.285, (time, random) => {
-      const attack = Math.sin(Math.min(1, time * 95) * Math.PI / 2);
-      const envelope = attack * Math.exp(-time * 8.5);
-      const sweep = Math.sin(Math.PI * 2 * (1_500 * time - 2_150 * time * time));
-      const harmonic = Math.sin(Math.PI * 2 * (2_850 * time - 3_200 * time * time));
-      const tear = noise(random) * Math.exp(-time * 16);
-      return (sweep * 0.62 + harmonic * 0.22 + tear * 0.26) * envelope;
+    plasma: makeBuffer(context, 0.32, (time, random) => {
+      const discharge = noise(random) * Math.exp(-time * 22) * (0.75 + Math.sin(time * 740) * 0.25);
+      const transformer = Math.sin(Math.PI * 2 * 176 * time) * Math.exp(-time * 11);
+      const arc = Math.sin(Math.PI * 2 * 690 * time) * Math.exp(-time * 34);
+      return discharge * 0.62 + transformer * 0.55 + arc * 0.13;
     }, 0x0b1a_5a11),
-    heavyRail: makeBuffer(context, 0.42, (time, random) => {
-      const crack = noise(random) * Math.exp(-time * 145);
-      const body = Math.sin(Math.PI * 2 * (118 * time - 38 * time * time)) * Math.exp(-time * 6.5);
-      const ring = Math.sin(Math.PI * 2 * 880 * time) * Math.exp(-time * 14);
-      const sparkle = Math.sin(Math.PI * 2 * 2_200 * time) * Math.exp(-time * 30);
-      return crack * 0.78 + body * 0.62 + ring * 0.27 + sparkle * 0.1;
+    heavyRail: makeBuffer(context, 0.43, (time, random) => {
+      const shock = noise(random) * Math.exp(-time * 175);
+      const recoil = Math.sin(Math.PI * 2 * (112 * time - 10 * time * time)) * Math.exp(-time * 9.5);
+      const structure = Math.sin(Math.PI * 2 * 390 * time) * Math.exp(-time * 20);
+      const rails = noise(random) * Math.exp(-time * 17) * (0.6 + Math.sin(time * 390) * 0.4);
+      return shock * 0.9 + recoil * 0.5 + structure * 0.25 + rails * 0.22;
     }, 0x7a11_5eed),
-    beam: makeBuffer(context, 0.34, (time, random) => {
-      const attack = Math.min(1, time * 130);
-      const envelope = attack * Math.exp(-time * 10.5);
-      const charge = Math.sin(Math.PI * 2 * (1_150 * time + 1_900 * time * time));
-      const carrier = Math.sin(Math.PI * 2 * 2_400 * time) * (0.72 + Math.sin(time * 95) * 0.18);
-      const ionNoise = (random() * 2 - 1) * Math.exp(-time * 17);
-      return (charge * 0.46 + carrier * 0.34 + ionNoise * 0.23) * envelope;
+    beam: makeBuffer(context, 0.39, (time, random) => {
+      const breaker = noise(random) * Math.exp(-time * 130);
+      const power = noise(random) * Math.min(1, time * 110) * Math.exp(-time * 12);
+      const bus = Math.sin(Math.PI * 2 * 310 * time) * Math.exp(-time * 14) * (0.7 + Math.sin(time * 83) * 0.3);
+      return breaker * 0.55 + power * 0.58 + bus * 0.3;
     }, 0xbea7_0001),
-    impact: makeBuffer(context, 0.19, (time, random) => {
-      const crack = noise(random) * Math.exp(-time * 92);
-      const debris = noise(random) * Math.exp(-time * 24);
-      const plate = Math.sin(Math.PI * 2 * 520 * time) * Math.exp(-time * 27);
-      const shieldRing = Math.sin(Math.PI * 2 * 2_100 * time) * Math.exp(-time * 38);
-      return crack * 0.58 + debris * 0.34 + plate * 0.42 + shieldRing * 0.17;
+    impact: makeBuffer(context, 0.21, (time, random) => {
+      const strike = noise(random) * Math.exp(-time * 125);
+      const fracture = noise(random) * Math.exp(-time * 20);
+      const hull = Math.sin(Math.PI * 2 * (355 * time - 42 * time * time)) * Math.exp(-time * 25);
+      return strike * 0.78 + fracture * 0.4 + hull * 0.42;
     }, 0x1a9a_c701),
-    explosion: makeBuffer(context, 0.92, (time, random) => {
-      const attack = Math.min(1, time * 72);
-      const envelope = attack * Math.exp(-time * 3.9);
-      const crack = noise(random) * Math.exp(-time * 105);
-      const debris = noise(random) * Math.exp(-time * 7.2);
-      const body = Math.sin(Math.PI * 2 * (128 * time - 38 * time * time));
-      const flare = Math.sin(Math.PI * 2 * 760 * time) * Math.exp(-time * 13);
-      return crack * 0.72 + (debris * 0.46 + body * 0.42) * envelope + flare * 0.2;
+    explosion: makeBuffer(context, 0.72, (time, random) => {
+      const detonation = noise(random) * Math.exp(-time * 135);
+      const pressure = Math.sin(Math.PI * 2 * (128 * time - 14 * time * time)) * Math.exp(-time * 7.2);
+      const breakup = noise(random) * Math.min(1, time * 55) * Math.exp(-time * 8.2);
+      const secondary = time > 0.14 ? noise(random) * Math.exp(-(time - 0.14) * 28) : 0;
+      return detonation * 0.9 + pressure * 0.48 + breakup * 0.5 + secondary * 0.25;
     }, 0xe7a1_0510),
-    command: makeBuffer(context, 0.22, (time, random) => {
-      const strike = noise(random) * Math.exp(-time * 95);
-      const envelope = Math.min(1, time * 55) * Math.exp(-time * 15);
-      const acknowledgement = Math.sin(Math.PI * 2 * 185 * time)
-        + Math.sin(Math.PI * 2 * 277.5 * time) * 0.32;
-      return strike * 0.18 + acknowledgement * envelope * 0.56;
+    command: makeBuffer(context, 0.16, (time, random) => {
+      const relay = noise(random) * Math.exp(-time * 165);
+      const squelch = noise(random) * (time > 0.025 ? 1 : 0) * Math.exp(-time * 42);
+      const terminal = Math.sin(Math.PI * 2 * 620 * time) * Math.exp(-time * 54);
+      return relay * 0.42 + squelch * 0.18 + terminal * 0.14;
     }, 0xc011_a11d),
-    construction: makeBuffer(context, 0.72, (time, random) => {
-      const envelope = Math.sin(Math.min(1, time * 14) * Math.PI / 2) * Math.exp(-time * 4.1);
-      const confirmation = Math.sin(Math.PI * 2 * 165 * time) + Math.sin(Math.PI * 2 * 247.5 * time) * 0.42;
-      const machinery = noise(random) * Math.exp(-time * 10) * 0.12;
-      return confirmation * envelope * 0.48 + machinery;
+    construction: makeBuffer(context, 0.62, (time, random) => {
+      const clamp = noise(random) * Math.exp(-time * 95);
+      const machinery = noise(random) * Math.min(1, time * 35) * Math.exp(-time * 7.5);
+      const chassis = Math.sin(Math.PI * 2 * 142 * time) * Math.exp(-time * 7);
+      return clamp * 0.36 + machinery * 0.26 + chassis * 0.32;
     }, 0xc057_0001),
-    launch: makeBuffer(context, 0.68, (time, random) => {
-      const attack = Math.min(1, time * 24);
-      const envelope = attack * Math.exp(-time * 3.7);
-      const rise = Math.sin(Math.PI * 2 * (105 * time + 235 * time * time));
-      const air = noise(random) * attack * Math.exp(-time * 6.4);
-      const latch = noise(random) * Math.exp(-time * 95);
-      return latch * 0.35 + (rise * 0.52 + air * 0.3) * envelope;
+    launch: makeBuffer(context, 0.56, (time, random) => {
+      const clamp = noise(random) * Math.exp(-time * 130);
+      const thruster = noise(random) * Math.min(1, time * 28) * Math.exp(-time * 5.6);
+      const deck = Math.sin(Math.PI * 2 * 148 * time) * Math.exp(-time * 9.2);
+      return clamp * 0.44 + thruster * 0.46 + deck * 0.34;
     }, 0x1a0c_0001),
-    victory: makeBuffer(context, 2.1, (time) => {
-      const attack = Math.min(1, time * 8);
-      const envelope = attack * Math.exp(-time * 0.82);
-      const chord = Math.sin(Math.PI * 2 * 110 * time)
-        + Math.sin(Math.PI * 2 * 164.81 * time) * 0.68
-        + Math.sin(Math.PI * 2 * 220 * time) * 0.42
-        + Math.sin(Math.PI * 2 * 329.63 * time) * 0.16;
-      return chord * envelope * 0.3;
+    victory: makeBuffer(context, 1.25, (time, random) => {
+      const strike = noise(random) * Math.exp(-time * 70);
+      const lowDrum = Math.sin(Math.PI * 2 * (96 * time - 5 * time * time)) * Math.exp(-time * 3.2);
+      const distantMetal = Math.sin(Math.PI * 2 * 193 * time) * Math.exp(-time * 3.7);
+      return strike * 0.36 + lowDrum * 0.48 + distantMetal * 0.18;
     }, 0x71c7_0001),
   };
 }
@@ -307,20 +291,21 @@ function createCueBuffers(context: AudioContext): Record<CueKind, AudioBuffer> {
 function createEngineBuffer(context: AudioContext): AudioBuffer {
   return makeBuffer(context, 2.4, (time, random) => {
     const noise = random() * 2 - 1;
-    const body = Math.sin(Math.PI * 2 * 46 * time) * 0.23
-      + Math.sin(Math.PI * 2 * 73 * time) * 0.16;
-    const turbine = Math.sin(Math.PI * 2 * (172 * time + Math.sin(time * 1.7) * 0.7)) * 0.15
-      + Math.sin(Math.PI * 2 * 286 * time) * 0.06;
-    const pulse = 0.84 + Math.sin(Math.PI * 2 * 1.35 * time) * 0.07;
-    return (noise * 0.13 + body + turbine) * pulse;
+    const body = Math.sin(Math.PI * 2 * 58 * time) * 0.14
+      + Math.sin(Math.PI * 2 * 91 * time) * 0.1;
+    const turbine = Math.sin(Math.PI * 2 * (137 * time + Math.sin(time * 1.3) * 0.8)) * 0.1
+      + Math.sin(Math.PI * 2 * 229 * time) * 0.045;
+    const vibration = 0.86 + Math.sin(Math.PI * 2 * 0.83 * time) * 0.045
+      + Math.sin(Math.PI * 2 * 2.7 * time) * 0.025;
+    return (noise * 0.22 + body + turbine) * vibration;
   }, 0xe09e_1a11);
 }
 
 function createReverbImpulse(context: AudioContext): AudioBuffer {
-  return makeBuffer(context, 1.65, (time, random) => {
-    const earlyReflection = time > 0.045 && time < 0.052 ? (random() * 2 - 1) * 0.4 : 0;
-    const tail = (random() * 2 - 1) * Math.exp(-time * 3.1) * Math.min(1, time * 45);
-    return earlyReflection + tail * 0.34;
+  return makeBuffer(context, 0.72, (time, random) => {
+    const earlyReflection = time > 0.028 && time < 0.034 ? (random() * 2 - 1) * 0.3 : 0;
+    const tail = (random() * 2 - 1) * Math.exp(-time * 7.2) * Math.min(1, time * 65);
+    return earlyReflection + tail * 0.2;
   }, 0x5aace_001);
 }
 
@@ -443,7 +428,7 @@ export class ScalableBattleAudio {
       let selected = false;
       if (event.type === "weaponFired") {
         const ship = this.shipsById.get(event.shipId);
-        kind = ship?.turrets.find((turret) => turret.id === event.turretId)?.weaponTypeId ?? "autocannon";
+        kind = event.weaponTypeId;
         entityId = event.shipId;
         selected = selectedShipIds.has(event.shipId);
       } else if (event.type === "hit") {
@@ -562,14 +547,14 @@ export class ScalableBattleAudio {
     const context = new Context({ latencyHint: "interactive" });
     this.context = context;
     const compressor = context.createDynamicsCompressor();
-    compressor.threshold.value = -10;
-    compressor.knee.value = 14;
-    compressor.ratio.value = 3;
-    compressor.attack.value = 0.018;
-    compressor.release.value = 0.24;
+    compressor.threshold.value = -13;
+    compressor.knee.value = 8;
+    compressor.ratio.value = 4;
+    compressor.attack.value = 0.008;
+    compressor.release.value = 0.18;
     const masterHighpass = context.createBiquadFilter();
     masterHighpass.type = "highpass";
-    masterHighpass.frequency.value = 34;
+    masterHighpass.frequency.value = 48;
     masterHighpass.Q.value = 0.65;
     const master = context.createGain();
     master.gain.value = MASTER_LEVEL;
@@ -579,18 +564,18 @@ export class ScalableBattleAudio {
     transientBus.gain.value = 0.9;
     const transientShelf = context.createBiquadFilter();
     transientShelf.type = "highshelf";
-    transientShelf.frequency.value = 2_200;
-    transientShelf.gain.value = -2.5;
+    transientShelf.frequency.value = 2_400;
+    transientShelf.gain.value = -1.5;
     transientBus.connect(transientShelf).connect(master);
     const reverbSend = context.createGain();
-    reverbSend.gain.value = 0.16;
+    reverbSend.gain.value = 0.07;
     const reverb = context.createConvolver();
     reverb.buffer = createReverbImpulse(context);
     const reverbTone = context.createBiquadFilter();
     reverbTone.type = "lowpass";
-    reverbTone.frequency.value = 1_850;
+    reverbTone.frequency.value = 1_250;
     const reverbReturn = context.createGain();
-    reverbReturn.gain.value = 0.22;
+    reverbReturn.gain.value = 0.12;
     transientBus.connect(reverbSend).connect(reverb).connect(reverbTone).connect(reverbReturn).connect(master);
     this.transientBus = transientBus;
     const engineBus = context.createGain();
@@ -690,8 +675,8 @@ export class ScalableBattleAudio {
     }
     const source = context.createBufferSource();
     source.buffer = this.cueBuffers[cue.kind];
-    const densityPitch = 1 + Math.min(0.07, Math.log2(cue.count + 1) * 0.014);
-    source.playbackRate.value = densityPitch * (0.96 + Math.random() * 0.08);
+    const densityWeight = 1 - Math.min(0.045, Math.log2(cue.count + 1) * 0.009);
+    source.playbackRate.value = densityWeight * (0.985 + Math.random() * 0.03);
     const gain = CUE_GAIN[cue.kind] * Math.min(2.1, 1 + Math.log2(cue.count + 1) * 0.24);
     const tone = CUE_TONE[cue.kind];
     setParam(voice.highpass.frequency, tone.highpass, context.currentTime, 0.003);

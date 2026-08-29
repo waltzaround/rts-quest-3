@@ -2,13 +2,28 @@ import { networkInterfaces } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+const clientRoot = resolve(root, "apps/client");
+const workerRoot = resolve(root, "apps/worker");
+const viteEntrypoint = resolve(clientRoot, "node_modules/vite/bin/vite.js");
+const wranglerEntrypoint = resolve(workerRoot, "node_modules/wrangler/bin/wrangler.js");
 const clientPort = Number(process.env.VOIDFRONT_CLIENT_PORT ?? 5173);
 const authorityPort = Number(process.env.VOIDFRONT_AUTHORITY_PORT ?? 8787);
 const children = new Set();
 let stopping = false;
+
+const missingDependencies = [
+  ["Vite", viteEntrypoint],
+  ["Wrangler", wranglerEntrypoint],
+].filter(([, entrypoint]) => !existsSync(entrypoint));
+if (missingDependencies.length > 0) {
+  console.error("\nLAN lobby dependencies are missing.");
+  console.error(`  Missing: ${missingDependencies.map(([name]) => name).join(", ")}`);
+  console.error("  Run: pnpm install\n");
+  process.exit(1);
+}
 
 function localIpv4Addresses() {
   return Object.values(networkInterfaces())
@@ -17,14 +32,12 @@ function localIpv4Addresses() {
     .map((entry) => entry.address);
 }
 
-function start(label, args) {
-  const child = spawn(pnpm, args, {
-    cwd: root,
+function start(label, cwd, entrypoint, args) {
+  const child = spawn(process.execPath, [entrypoint, ...args], {
+    cwd,
     stdio: "inherit",
     detached: process.platform !== "win32",
-    // Windows cannot execute pnpm.cmd directly without a command shell.
-    // Without this, Node 22 throws spawn EINVAL before either service starts.
-    shell: process.platform === "win32",
+    shell: false,
     env: {
       ...process.env,
       VOIDFRONT_AUTHORITY_ORIGIN: `http://127.0.0.1:${authorityPort}`,
@@ -72,16 +85,15 @@ function shutdown(code = 0) {
 process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));
 
-console.log("\nVOIDFRONT LAN LOBBY");
+console.log("\nCOMMAND PROMPT LAN LOBBY");
 console.log(`  This computer: http://127.0.0.1:${clientPort}`);
 for (const address of localIpv4Addresses()) console.log(`  Other computers: http://${address}:${clientPort}`);
 console.log(`  Only port ${clientPort} needs to be reachable on your local network.\n`);
 
-start("Lobby authority", [
-  "--filter", "@space-rts/worker", "exec", "wrangler", "dev",
+start("Lobby authority", workerRoot, wranglerEntrypoint, [
+  "dev",
   "--ip", "127.0.0.1", "--port", String(authorityPort), "--show-interactive-dev-session", "false",
 ]);
-start("Game client", [
-  "--filter", "@space-rts/client", "exec", "vite",
+start("Game client", clientRoot, viteEntrypoint, [
   "--host", "0.0.0.0", "--port", String(clientPort), "--strictPort",
 ]);

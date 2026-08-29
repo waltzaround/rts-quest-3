@@ -71,6 +71,36 @@ describe("authoritative sensor visibility", () => {
     expect(isEntityVisibleToTeam(simulation.state, 1, contact.id)).toBe(false);
   });
 
+  it("uses completed radar arrays as long-range vision sources", () => {
+    const simulation = createCombatScenario({ enemyCommander: false });
+    parkTeamSourcesFarAway(simulation.state, 1);
+    const template = simulation.state.structures.find((structure) => structure.teamId === 1)!;
+    const radar = {
+      ...template,
+      id: simulation.state.nextEntityId++,
+      type: "radarArray" as const,
+      x: 0,
+      z: 0,
+      health: 1_250,
+      shields: 420,
+      buildProgress: 1,
+      resourceNodeId: null,
+      productionQueue: [],
+    };
+    simulation.state.structures.push(radar);
+    const contact = simulation.state.ships.find((ship) => ship.teamId === 2)!;
+    contact.x = 1_050;
+    contact.z = 0;
+    contact.orders = [];
+
+    simulation.step();
+    expect(isEntityVisibleToTeam(simulation.state, 1, contact.id)).toBe(true);
+
+    contact.x = 1_050.01;
+    simulation.step();
+    expect(isEntityVisibleToTeam(simulation.state, 1, contact.id)).toBe(false);
+  });
+
   it("shares current contacts and discoveries across allied teams", () => {
     const simulation = createCombatScenario({
       enemyCommander: false,
@@ -326,12 +356,14 @@ describe("secure player view projection", () => {
     expect(projectPlayerView(simulation.state, "unknown-player")).toBeNull();
   });
 
-  it("keeps public obstacle layout and visual seeds independent of the private simulation seed", () => {
+  it("publishes seeded obstacle layouts without exposing the private simulation seed", () => {
     const first = createCombatScenario({ seed: 111, enemyCommander: false });
     const second = createCombatScenario({ seed: 999_999, enemyCommander: false });
-    expect(first.state.obstacles).toEqual(second.state.obstacles);
-    expect(first.playerView("pilot-blue")!.obstacles).toEqual(second.playerView("pilot-blue")!.obstacles);
-    expect(first.playerView("pilot-blue")!.checksum).toBe(second.playerView("pilot-blue")!.checksum);
+    const repeated = createCombatScenario({ seed: 111, enemyCommander: false });
+    expect(first.state.obstacles).not.toEqual(second.state.obstacles);
+    expect(first.playerView("pilot-blue")!.obstacles).toEqual(first.state.obstacles);
+    expect(repeated.state.obstacles).toEqual(first.state.obstacles);
+    expect("seed" in first.playerView("pilot-blue")!).toBe(false);
   });
 
   it("projects a team spectator view without impersonating a player", () => {

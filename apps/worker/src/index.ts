@@ -65,6 +65,10 @@ interface PersistedMatch {
 const PLAYER_COLORS = [0x59a7ff, 0xff5576, 0x62e6a7, 0xf3b65b, 0xb886ff, 0x55e1e8, 0xff8b55, 0xd8e65b];
 const PHYSICS_BACKEND = "box3d-wasm-precompiled";
 const VIEW_INTERVAL_TICKS = 2;
+const LARGE_BATTLE_VIEW_INTERVAL_TICKS = 5;
+const LARGE_BATTLE_VIEW_SHIP_COUNT = 384;
+const VERY_LARGE_BATTLE_VIEW_INTERVAL_TICKS = 6;
+const VERY_LARGE_BATTLE_VIEW_SHIP_COUNT = 640;
 const CHECKSUM_INTERVAL_TICKS = 5;
 const SNAPSHOT_INTERVAL_TICKS = SIMULATION_HZ * 5;
 const PERSIST_INTERVAL_TICKS = SIMULATION_HZ;
@@ -745,11 +749,19 @@ export class Match implements DurableObject {
   private tick(): void {
     if (!this.simulation || this.lobby.phase !== "playing") return;
     const debug = this.replayRecorder ? this.replayRecorder.step() : this.simulation.step();
-    if (debug.tick % VIEW_INTERVAL_TICKS === 0) this.broadcastPlayerViews("view");
+    const finished = this.simulation.state.status === "finished";
+    // A match may end between regular view intervals. Always deliver the terminal state
+    // before stopping the authority so clients can show victory/defeat instead of appearing frozen.
+    const viewIntervalTicks = this.simulation.state.ships.length >= VERY_LARGE_BATTLE_VIEW_SHIP_COUNT
+      ? VERY_LARGE_BATTLE_VIEW_INTERVAL_TICKS
+      : this.simulation.state.ships.length >= LARGE_BATTLE_VIEW_SHIP_COUNT
+        ? LARGE_BATTLE_VIEW_INTERVAL_TICKS
+        : VIEW_INTERVAL_TICKS;
+    if (finished || debug.tick % viewIntervalTicks === 0) this.broadcastPlayerViews("view");
     if (debug.tick % CHECKSUM_INTERVAL_TICKS === 0) this.broadcastPlayerChecksums();
     if (debug.tick % SNAPSHOT_INTERVAL_TICKS === 0) this.broadcastSnapshot("periodic");
     if (debug.tick % PERSIST_INTERVAL_TICKS === 0) this.ctx.waitUntil(this.persist());
-    if (this.simulation.state.status === "finished") {
+    if (finished) {
       this.lobby.phase = "finished";
       if (this.replayRecorder) {
         this.replay = this.replayRecorder.finalize();
@@ -915,7 +927,7 @@ export class Match implements DurableObject {
   }
 
   private playerCapacityForSize(mapSize: LobbySettings["mapSize"]): number {
-    return { small: 4, medium: 6, large: 8 }[mapSize];
+    return { small: 4, medium: 6, large: 8, huge: 8, colossal: 8 }[mapSize];
   }
 
   private createReconnectToken(): string {

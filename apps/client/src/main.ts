@@ -30,6 +30,7 @@ import {
   type FormationAssignment,
   type GameCommand,
   type ObstacleState,
+  type PlayerId,
   type ProjectileState,
   type CommandResult,
   type ResourceNodeState,
@@ -40,6 +41,7 @@ import {
   type SimulationEvent,
   type StructureState,
   type StructureType,
+  type WeaponTypeId,
 } from "@space-rts/game-core";
 import {
   MAX_REPLAY_BYTES,
@@ -121,14 +123,16 @@ const gpuFrameTimer = new GpuFrameTimer(renderer);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x020509);
 scene.fog = new THREE.FogExp2(0x03070d, 0.00022);
-const camera = new THREE.PerspectiveCamera(48, innerWidth / innerHeight, 1, 20_000);
+const camera = new THREE.PerspectiveCamera(48, innerWidth / innerHeight, 1, 80_000);
 const STRATEGIC_ZOOM_DISTANCE = 1_100;
+const MIN_CAMERA_DISTANCE = 220;
+const MAX_CAMERA_DISTANCE = 28_000;
 
-scene.add(new THREE.HemisphereLight(0x8bb9d7, 0x061019, 1.15));
+scene.add(new THREE.HemisphereLight(0xb9dcf0, 0x102532, 1.42));
 const keyLight = new THREE.DirectionalLight(0xb9e5ff, 2.3);
 keyLight.position.set(-280, 450, -190);
 scene.add(keyLight);
-const rimLight = new THREE.DirectionalLight(0xff4d85, 1.2);
+const rimLight = new THREE.DirectionalLight(0xff6f9e, 1.55);
 rimLight.position.set(350, 130, 320);
 scene.add(rimLight);
 
@@ -144,6 +148,8 @@ interface StructureVisual {
   hitTarget: THREE.Mesh;
   materials: THREE.Material[];
   factory: FactoryAnimationVisual | null;
+  turret: THREE.Group | null;
+  turretYaw: number;
 }
 
 interface FactoryAnimationVisual {
@@ -185,13 +191,18 @@ const STRUCTURE_BUTTON_IDS: Readonly<Record<BuildableStructureType, string>> = {
   fleetShipyard: "build-fleet-yard",
   fusionReactor: "build-fusion",
   deepCoreExtractor: "build-deep-extractor",
+  alloyRefinery: "build-alloy-refinery",
   capitalShipyard: "build-capital-yard",
   antimatterReactor: "build-antimatter",
   singularityHarvester: "build-singularity",
+  matterForge: "build-matter-forge",
   quantumStorage: "build-quantum-storage",
+  radarArray: "build-radar-array",
   pointDefenseBattery: "build-pd-battery",
   missileBattery: "build-missile-battery",
   railBattery: "build-rail-battery",
+  plasmaBattery: "build-plasma-battery",
+  beamBattery: "build-beam-battery",
 };
 const SHIP_BUTTON_IDS: Readonly<Record<ShipClass, string>> = {
   fighter: "queue-fighter",
@@ -258,6 +269,8 @@ const STRUCTURE_LABELS: Readonly<Record<StructureType, string>> = {
   extractor: "EXTRACTOR",
   deepCoreExtractor: "DEEP-CORE EXTRACTOR",
   singularityHarvester: "SINGULARITY HARVESTER",
+  alloyRefinery: "ALLOY REFINERY",
+  matterForge: "MATTER FORGE",
   solarArray: "SOLAR ARRAY",
   storage: "STORAGE",
   quantumStorage: "QUANTUM VAULT",
@@ -269,15 +282,20 @@ const STRUCTURE_LABELS: Readonly<Record<StructureType, string>> = {
   fleetShipyard: "MEDIUM SHIPYARD",
   capitalInfrastructure: "CAPITAL INFRASTRUCTURE",
   capitalShipyard: "LARGE SHIPYARD",
-  pointDefenseBattery: "POINT DEFENSE BATTERY",
-  missileBattery: "MISSILE BATTERY",
-  railBattery: "RAIL BATTERY",
+  radarArray: "RADAR ARRAY",
+  pointDefenseBattery: "T1 FLAK BASTION",
+  missileBattery: "T1 TORPEDO CITADEL",
+  railBattery: "T2 RAIL FORTRESS",
+  plasmaBattery: "T2 PLASMA FORTRESS",
+  beamBattery: "T3 BEAM CITADEL",
 };
 const STRUCTURE_ICONS: Readonly<Record<StructureType, string>> = {
   commandCore: "⬡",
   extractor: "◆",
   deepCoreExtractor: "⬟",
   singularityHarvester: "◈",
+  alloyRefinery: "⬢",
+  matterForge: "⬣",
   solarArray: "✦",
   storage: "▦",
   quantumStorage: "▩",
@@ -289,13 +307,23 @@ const STRUCTURE_ICONS: Readonly<Record<StructureType, string>> = {
   fleetShipyard: "▱",
   capitalInfrastructure: "◉",
   capitalShipyard: "▰",
+  radarArray: "⌁",
   pointDefenseBattery: "✣",
   missileBattery: "▲",
   railBattery: "⇈",
+  plasmaBattery: "◉",
+  beamBattery: "⌁",
 };
 
 function isDefensiveStructureType(type: StructureType): type is (typeof DEFENSIVE_STRUCTURE_TYPES)[number] {
   return DEFENSIVE_STRUCTURE_TYPES.includes(type as (typeof DEFENSIVE_STRUCTURE_TYPES)[number]);
+}
+
+function fortressLoadoutSummary(type: (typeof DEFENSIVE_STRUCTURE_TYPES)[number]): string {
+  const hardpoints = STRUCTURES[type].hardpoints ?? [];
+  const counts = new Map<WeaponTypeId, number>();
+  for (const hardpoint of hardpoints) counts.set(hardpoint.weaponTypeId, (counts.get(hardpoint.weaponTypeId) ?? 0) + 1);
+  return [...counts].map(([weapon, count]) => `${count}× ${weapon.toUpperCase()}`).join(" · ");
 }
 
 function isResourceExtractorType(type: StructureType): type is (typeof RESOURCE_EXTRACTOR_TYPES)[number] {
@@ -322,6 +350,7 @@ function resourceExtractorUpgradeSourceInView(
 }
 
 const structureVisuals = new Map<number, StructureVisual>();
+const defensiveAimYaw = new Map<number, number>();
 const resourceVisuals = new Map<number, ResourceVisual>();
 const obstacleVisuals = new Map<number, ObstacleVisual>();
 const previousTransforms = new Map<number, RenderTransform>();
@@ -361,12 +390,11 @@ const projectileLines = createDynamicLines(0xc5edff, 0.52);
 const commandLines = createDynamicLines(0x62dcff, 0.82);
 const colliderLines = createDynamicLines(0x8bc7de, 0.5);
 const avoidanceLines = createDynamicLines(0xffbd59, 0.82);
-const sensorLines = createDynamicLines(0x69e6b0, 0.38);
 const formationPreviewLine = createDynamicLines(0x62dcff, 0.9);
 const rallyLines = createDynamicLines(0x69e6b0, 0.78);
 scene.add(
   velocityLines, targetLines, turretArcLines, projectileLines, commandLines,
-  colliderLines, avoidanceLines, sensorLines, formationPreviewLine, rallyLines,
+  colliderLines, avoidanceLines, formationPreviewLine, rallyLines,
 );
 
 let localPlayerId = "pilot-blue";
@@ -407,11 +435,13 @@ let demoMode = false;
 let menuBattleMode = false;
 let networkView: ProjectedViewState | null = null;
 let networkViewReceivedAt = 0;
+let networkViewInterpolationMs = 100;
 let networkLobby: LobbyState | null = null;
 let networkMatchId = "";
 let networkPilotName = "Commander";
 let serverTick = 0;
 let networkLatency = 0;
+const pendingNetworkBuilds = new Map<number, Extract<EconomyCommand, { type: "buildStructure" }>>();
 let reconnectTimer = 0;
 let pingTimer = 0;
 let manuallyClosed = false;
@@ -433,12 +463,135 @@ let replayPlaying = false;
 let replaySpeed = 1;
 const REPLAY_SPEEDS = [0.5, 1, 2, 4] as const;
 
-const MAP_PLAYER_CAPACITY: Readonly<Record<LobbySettings["mapSize"], number>> = { small: 4, medium: 6, large: 8 };
+const MAP_PLAYER_CAPACITY: Readonly<Record<LobbySettings["mapSize"], number>> = {
+  small: 4, medium: 6, large: 8, huge: 8, colossal: 8,
+};
 const MAP_DESCRIPTIONS: Readonly<Record<LobbySettings["mapPreset"], string>> = {
   "orbital-ring": "Balanced resource ring with a valuable contested center.",
   crossfire: "Split inner and outer resource lanes around a denser asteroid crossfire.",
   "open-expanse": "Widely dispersed resources with fewer navigation hazards.",
+  "asteroid-belt": "A dense seeded asteroid belt divides the field into risky crossings and flanking routes.",
+  "spiral-arms": "Twin resource spirals pull fleets through curved expansion lanes toward the outer sectors.",
+  "shattered-core": "Broken central clusters create short sightlines, ambush pockets, and fragmented riches.",
 };
+
+function renderMapPreview(settings: LobbySettings, playerCount: number): void {
+  const canvas = element<HTMLCanvasElement>("map-preview-canvas");
+  const context = canvas.getContext("2d");
+  if (!context) return;
+  const width = canvas.width;
+  const height = canvas.height;
+  context.clearRect(0, 0, width, height);
+  let hash = 2_166_136_261;
+  const sampleKey = `${settings.mapPreset}:${settings.mapSize}:${settings.resourceDensity}:${Math.max(2, playerCount)}`;
+  for (let index = 0; index < sampleKey.length; index += 1) hash = Math.imul(hash ^ sampleKey.charCodeAt(index), 16_777_619) >>> 0;
+  const random = mulberry32(hash);
+  const toX = (value: number) => width * (0.5 + value * 0.43);
+  const toY = (value: number) => height * (0.5 + value * 0.43);
+  const rotation = random() * Math.PI * 2;
+
+  const glow = context.createRadialGradient(width / 2, height / 2, 0, width / 2, height / 2, width * 0.48);
+  glow.addColorStop(0, "rgba(30,104,112,.2)");
+  glow.addColorStop(0.55, "rgba(7,30,40,.12)");
+  glow.addColorStop(1, "rgba(1,5,9,.75)");
+  context.fillStyle = glow;
+  context.fillRect(0, 0, width, height);
+
+  const obstacleCount = settings.mapPreset === "open-expanse" ? 4
+    : settings.mapPreset === "asteroid-belt" ? 18
+      : settings.mapPreset === "shattered-core" ? 15
+        : settings.mapPreset === "crossfire" ? 12 : 8;
+  for (let index = 0; index < obstacleCount; index += 1) {
+    let x = Number.NaN;
+    let y = Number.NaN;
+    if (settings.mapPreset === "asteroid-belt") {
+      const along = index / Math.max(1, obstacleCount - 1) * 1.7 - 0.85;
+      const across = (random() - 0.5) * 0.18;
+      x = along * Math.cos(rotation) - across * Math.sin(rotation);
+      y = along * Math.sin(rotation) + across * Math.cos(rotation);
+    } else if (settings.mapPreset === "crossfire") {
+      const along = (Math.floor(index / 2) / Math.max(1, Math.ceil(obstacleCount / 2) - 1) - 0.5) * 1.35;
+      const across = (index % 2 ? -1 : 1) * along + (random() - 0.5) * 0.08;
+      x = along * Math.cos(rotation) - across * Math.sin(rotation);
+      y = along * Math.sin(rotation) + across * Math.cos(rotation);
+    } else {
+      let angle = rotation + index / obstacleCount * Math.PI * 2 + (random() - 0.5) * 0.35;
+      let radius = settings.mapPreset === "shattered-core" ? 0.1 + random() * 0.32 : 0.28 + random() * 0.3;
+      if (settings.mapPreset === "spiral-arms") {
+        angle = rotation + (index % 2) * Math.PI + index / obstacleCount * Math.PI * 1.8;
+        radius = 0.16 + index / obstacleCount * 0.48;
+      }
+      x = Math.sin(angle) * radius;
+      y = Math.cos(angle) * radius;
+    }
+    const size = 4 + random() * 6;
+    context.fillStyle = "rgba(98,111,119,.72)";
+    context.strokeStyle = "rgba(157,181,190,.42)";
+    context.lineWidth = 1;
+    context.beginPath();
+    context.arc(toX(x), toY(y), size, 0, Math.PI * 2);
+    context.fill();
+    context.stroke();
+  }
+
+  const densityScale = settings.resourceDensity === "scarce" ? 0.7 : settings.resourceDensity === "rich" ? 1.35 : 1;
+  const resourceCount = Math.round(13 * densityScale);
+  for (let index = 0; index < resourceCount; index += 1) {
+    const progress = index / resourceCount;
+    let angle = rotation + progress * Math.PI * 2;
+    let radius = 0.48 + (random() - 0.5) * 0.1;
+    let x = Number.NaN;
+    let y = Number.NaN;
+    if (settings.mapPreset === "open-expanse") {
+      angle = random() * Math.PI * 2;
+      radius = 0.22 + random() * 0.52;
+    } else if (settings.mapPreset === "spiral-arms") {
+      const armProgress = Math.floor(index / 2) / Math.max(1, Math.ceil(resourceCount / 2) - 1);
+      angle = rotation + (index % 2) * Math.PI + armProgress * Math.PI * 1.65;
+      radius = 0.14 + armProgress * 0.55;
+    } else if (settings.mapPreset === "shattered-core") {
+      angle = rotation + index % 3 * Math.PI * 2 / 3 + (random() - 0.5) * 0.4;
+      radius = 0.28 + Math.floor(index / 3) / Math.max(1, Math.ceil(resourceCount / 3)) * 0.38;
+    } else if (settings.mapPreset === "asteroid-belt") {
+      const along = (progress - 0.5) * 1.35;
+      const across = (index % 2 ? -1 : 1) * (0.18 + random() * 0.08);
+      x = along * Math.cos(rotation) - across * Math.sin(rotation);
+      y = along * Math.sin(rotation) + across * Math.cos(rotation);
+      angle = 0;
+      radius = 0;
+    }
+    if (Number.isNaN(x)) x = Math.sin(angle) * radius;
+    if (Number.isNaN(y)) y = Math.cos(angle) * radius;
+    context.save();
+    context.translate(toX(x), toY(y));
+    context.rotate(Math.PI / 4);
+    context.fillStyle = "rgba(45,170,154,.88)";
+    context.shadowColor = "#59e0cb";
+    context.shadowBlur = 8;
+    context.fillRect(-3.5, -3.5, 7, 7);
+    context.restore();
+  }
+
+  const commanders = Math.max(2, playerCount);
+  for (let index = 0; index < commanders; index += 1) {
+    const angle = Math.PI + index / commanders * Math.PI * 2;
+    const x = toX(Math.sin(angle) * 0.88);
+    const y = toY(Math.cos(angle) * 0.88);
+    context.fillStyle = `hsl(${195 + index * 137.5},85%,64%)`;
+    context.shadowColor = context.fillStyle;
+    context.shadowBlur = 10;
+    context.beginPath();
+    context.moveTo(x, y - 7);
+    context.lineTo(x + 6, y + 5);
+    context.lineTo(x - 6, y + 5);
+    context.closePath();
+    context.fill();
+  }
+  context.shadowBlur = 0;
+  context.fillStyle = "rgba(133,205,210,.68)";
+  context.font = '12px "JetBrains Mono"';
+  context.fillText(settings.mapPreset.replaceAll("-", " ").toUpperCase(), 12, 19);
+}
 
 const raycaster = new THREE.Raycaster();
 const battlefieldPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -483,8 +636,21 @@ const tacticalIconScale = new THREE.Vector3();
 const tacticalIconColor = new THREE.Color();
 const tacticalIconRotation = new THREE.Quaternion();
 
+const LOCAL_MAP_PRESETS: readonly LobbySettings["mapPreset"][] = [
+  "orbital-ring", "crossfire", "open-expanse", "asteroid-belt", "spiral-arms", "shattered-core",
+];
+
 function createPlayableScenario(): ReturnType<typeof createCombatScenario> {
-  const scenario = createCombatScenario();
+  const seed = crypto.getRandomValues(new Uint32Array(1))[0] ?? Date.now();
+  const mapPreset = LOCAL_MAP_PRESETS[seed % LOCAL_MAP_PRESETS.length]!;
+  const scenario = createCombatScenario({
+    seed,
+    mapPreset,
+    players: [
+      { id: "pilot-blue", name: "Aster Vanguard", teamId: 1, color: 0x59a7ff },
+      { id: "pilot-red", name: "Crimson Relay", teamId: 2, color: 0xff5576, ai: true },
+    ],
+  });
   if (scenario.state.ships.length !== 0) throw new Error("Playable matches must begin without free ships");
   return scenario;
 }
@@ -659,6 +825,7 @@ function buildClientVisibilityView(): ClientVisibilityView {
     const ships = state.ships as readonly ShipState[];
     const structures: readonly StructureState[] = state.structures.map((structure) => ({
       ...structure,
+      repeatProduction: structure.repeatProduction ?? false,
       rallyPoint: structure.rallyPoint ?? { x: structure.x, z: structure.z },
     }));
     const projectiles: readonly ProjectileState[] = state.projectiles.map((projectile) => ({
@@ -719,6 +886,9 @@ function localSensorDiscs(): Array<{ x: number; z: number; range: number }> {
 
 const FOG_TEXTURE_SIZE = 384;
 const FOG_UPDATE_INTERVAL_MS = 160;
+const FOG_UNEXPLORED_ALPHA = 0.985;
+const FOG_EXPLORED_REVEAL = 0.38;
+const FOG_VISIBLE_REVEAL = 0.985;
 const fogExploredCanvas = document.createElement("canvas");
 const fogVisibleCanvas = document.createElement("canvas");
 const fogCompositeCanvas = document.createElement("canvas");
@@ -833,9 +1003,9 @@ function paintSensorDisc(
   context.beginPath();
   context.arc(x, y, radius, 0, Math.PI * 2);
   if (softEdge) {
-    const gradient = context.createRadialGradient(x, y, radius * 0.68, x, y, radius);
+    const gradient = context.createRadialGradient(x, y, radius * 0.82, x, y, radius);
     gradient.addColorStop(0, "rgba(255,255,255,1)");
-    gradient.addColorStop(0.78, "rgba(255,255,255,.97)");
+    gradient.addColorStop(0.9, "rgba(255,255,255,.98)");
     gradient.addColorStop(1, "rgba(255,255,255,0)");
     context.fillStyle = gradient;
   } else {
@@ -879,21 +1049,21 @@ function updateFogOfWar(now: number, force = false): void {
   fogCompositeContext.globalAlpha = 1;
   fogCompositeContext.filter = "none";
   fogCompositeContext.clearRect(0, 0, FOG_TEXTURE_SIZE, FOG_TEXTURE_SIZE);
-  fogCompositeContext.fillStyle = "rgba(1, 5, 12, .955)";
+  fogCompositeContext.fillStyle = `rgba(1, 4, 10, ${FOG_UNEXPLORED_ALPHA})`;
   fogCompositeContext.fillRect(0, 0, FOG_TEXTURE_SIZE, FOG_TEXTURE_SIZE);
   const noisePattern = fogCompositeContext.createPattern(fogNoiseCanvas, "repeat");
   if (noisePattern) {
     fogCompositeContext.fillStyle = noisePattern;
-    fogCompositeContext.globalAlpha = 0.72;
+    fogCompositeContext.globalAlpha = 0.9;
     fogCompositeContext.fillRect(0, 0, FOG_TEXTURE_SIZE, FOG_TEXTURE_SIZE);
   }
 
-  // Remembered territory remains readable but desaturated; live sensor coverage is almost fully clear.
+  // Keep explored territory visibly dimmed while current sensor coverage cuts almost completely clear.
   fogCompositeContext.globalCompositeOperation = "destination-out";
-  fogCompositeContext.globalAlpha = 0.53;
-  fogCompositeContext.filter = "blur(3px)";
+  fogCompositeContext.globalAlpha = FOG_EXPLORED_REVEAL;
+  fogCompositeContext.filter = "blur(2px)";
   fogCompositeContext.drawImage(fogExploredCanvas, 0, 0);
-  fogCompositeContext.globalAlpha = 0.95;
+  fogCompositeContext.globalAlpha = FOG_VISIBLE_REVEAL;
   fogCompositeContext.filter = "none";
   fogCompositeContext.drawImage(fogVisibleCanvas, 0, 0);
 
@@ -1237,6 +1407,7 @@ function connectToMatch(matchId: string, pilotName: string, role: RequestedNetwo
   window.clearTimeout(reconnectTimer);
   demoMode = false;
   menuBattleMode = false;
+  if (role === "player") setClientViewMode("player");
   networkMatchId = normalizedMatchId;
   networkPilotName = normalizedName;
   requestedNetworkRole = role;
@@ -1374,9 +1545,9 @@ function handleServerMessage(message: ServerMessage): void {
     case "command_results":
       serverTick = Math.max(serverTick, message.tick);
       for (const outcome of message.outcomes) {
+        if (!outcome.result.accepted) pendingNetworkBuilds.delete(outcome.sequence);
         if (outcome.result.accepted) continue;
         showToast(`ORDER REJECTED // ${outcome.result.reason.toUpperCase()}`);
-        sendNetworkMessage({ type: "request_snapshot", reason: "checksum" });
       }
       return;
     case "checksum": {
@@ -1418,15 +1589,45 @@ function handleServerMessage(message: ServerMessage): void {
 
 function adoptAuthoritativeView(view: ProjectedViewState, notice?: string): void {
   const firstView = networkView === null;
+  const before = clientView;
+  if (!firstView) {
+    rememberEffectOrigins(before);
+    battleAudio.captureWorld(before.ships, before.structures);
+  }
   const previousProjectilePositions = new Map(firstView ? [] : clientView.projectiles.map((projectile) => [
     projectile.id, { x: projectile.x, z: projectile.z },
   ] as const));
   previousTransforms.clear();
   for (const ship of clientView.ships) previousTransforms.set(ship.id, captureTransform(ship));
   networkView = view;
-  networkViewReceivedAt = performance.now();
+  const receivedAt = performance.now();
+  if (networkViewReceivedAt > 0) {
+    const arrivalInterval = receivedAt - networkViewReceivedAt;
+    networkViewInterpolationMs = THREE.MathUtils.clamp(
+      networkViewInterpolationMs * 0.7 + arrivalInterval * 0.3,
+      80,
+      320,
+    );
+  }
+  networkViewReceivedAt = receivedAt;
   serverTick = Math.max(serverTick, view.tick);
   clientView = buildClientVisibilityView();
+  for (const [sequence, command] of pendingNetworkBuilds) {
+    const materialized = clientView.structures.some((structure) =>
+      structure.ownerPlayerId === localPlayerId
+        && structure.type === command.structureType
+        && (command.resourceNodeId !== undefined
+          ? structure.resourceNodeId === command.resourceNodeId
+          : Math.hypot(structure.x - command.position.x, structure.z - command.position.z) < 1),
+    );
+    const resourceNodeClaimed = command.resourceNodeId !== undefined
+      && clientView.resourceNodes.some((node) =>
+        node.id === command.resourceNodeId && node.claimedByStructureId !== null,
+      );
+    if (materialized || resourceNodeClaimed || view.tick > command.requestedTick + 2_400) {
+      pendingNetworkBuilds.delete(sequence);
+    }
+  }
   for (const projectile of clientView.projectiles) {
     const previous = previousProjectilePositions.get(projectile.id);
     if (previous) {
@@ -1450,6 +1651,14 @@ function adoptAuthoritativeView(view: ProjectedViewState, notice?: string): void
     tick: view.tick, checksum: view.checksum, activeTargetingTurrets: 0,
     shotsFired: 0, hits: 0, physicsBodyCount: 0, avoidance: [], events: [],
   };
+  if (!firstView) {
+    const inferredEvents = inferNetworkCombatEvents(before, clientView, view.tick);
+    lastDebug.events = inferredEvents;
+    lastDebug.shotsFired = inferredEvents.filter((event) => event.type === "weaponFired").length;
+    lastDebug.hits = inferredEvents.filter((event) => event.type === "hit").length;
+    battleAudio.ingestEvents(inferredEvents, clientView.ships, selectedShipIds);
+    processEvents(inferredEvents);
+  }
   if (firstView) {
     stressScenario.configure(0);
     element<HTMLSelectElement>("stress-count").value = "0";
@@ -1478,9 +1687,107 @@ function adoptAuthoritativeView(view: ProjectedViewState, notice?: string): void
   updateSelectionHud();
 }
 
+function inferNetworkCombatEvents(
+  before: ClientVisibilityView,
+  after: ClientVisibilityView,
+  tick: number,
+): SimulationEvent[] {
+  const events: SimulationEvent[] = [];
+  const beforeShips = new Map(before.ships.map((ship) => [ship.id, ship]));
+  const newProjectiles = after.projectiles.filter((projectile) => !before.visibleProjectileIds.has(projectile.id));
+  const representedProjectiles = new Set<number>();
+  const newProjectilesByShot = new Map<string, ProjectileState[]>();
+  const newProjectileCursorByShot = new Map<string, number>();
+  const beforeProjectileByTarget = new Map<number, ProjectileState>();
+  const newProjectileByTarget = new Map<number, ProjectileState>();
+  for (const projectile of before.projectiles) {
+    if (projectile.targetEntityId !== null && !beforeProjectileByTarget.has(projectile.targetEntityId)) {
+      beforeProjectileByTarget.set(projectile.targetEntityId, projectile);
+    }
+  }
+  for (const projectile of newProjectiles) {
+    if (projectile.targetEntityId === null || projectile.ownerShipId === null) continue;
+    const key = `${projectile.ownerShipId}:${projectile.weaponTypeId}:${projectile.targetEntityId}`;
+    const shots = newProjectilesByShot.get(key);
+    if (shots) shots.push(projectile);
+    else newProjectilesByShot.set(key, [projectile]);
+    if (!newProjectileByTarget.has(projectile.targetEntityId)) {
+      newProjectileByTarget.set(projectile.targetEntityId, projectile);
+    }
+  }
+
+  for (const ship of after.ships) {
+    const previousShip = beforeShips.get(ship.id);
+    if (!previousShip) continue;
+    const previousTurrets = new Map(previousShip.turrets.map((turret) => [turret.id, turret]));
+    for (const turret of ship.turrets) {
+      const previousTurret = previousTurrets.get(turret.id);
+      if (!previousTurret || turret.fireSequence <= previousTurret.fireSequence || turret.targetEntityId === null) continue;
+      const shotKey = `${ship.id}:${turret.weaponTypeId}:${turret.targetEntityId}`;
+      const matchingProjectiles = newProjectilesByShot.get(shotKey);
+      const projectileCursor = newProjectileCursorByShot.get(shotKey) ?? 0;
+      const projectile = matchingProjectiles?.[projectileCursor];
+      if (projectile) newProjectileCursorByShot.set(shotKey, projectileCursor + 1);
+      events.push({
+        type: "weaponFired",
+        tick,
+        turretId: turret.id,
+        shipId: ship.id,
+        targetId: turret.targetEntityId,
+        projectileId: projectile?.id ?? -turret.id,
+        weaponTypeId: turret.weaponTypeId,
+      });
+      if (projectile) representedProjectiles.add(projectile.id);
+    }
+  }
+  for (const projectile of newProjectiles) {
+    if (representedProjectiles.has(projectile.id)
+      || projectile.ownerShipId === null || projectile.targetEntityId === null) continue;
+    events.push({
+      type: "weaponFired",
+      tick,
+      turretId: -projectile.ownerShipId,
+      shipId: projectile.ownerShipId,
+      targetId: projectile.targetEntityId,
+      projectileId: projectile.id,
+      weaponTypeId: projectile.weaponTypeId,
+    });
+  }
+
+  const previousTargets = new Map<number, ShipState | StructureState>();
+  const hitProjectileIds = new Set<number>();
+  for (const ship of before.ships) previousTargets.set(ship.id, ship);
+  for (const structure of before.structures) previousTargets.set(structure.id, structure);
+  for (const target of [...after.ships, ...after.structures]) {
+    const previous = previousTargets.get(target.id);
+    if (!previous) continue;
+    const damage = previous.health + previous.shields - target.health - target.shields;
+    if (damage <= 0) continue;
+    const projectile = beforeProjectileByTarget.get(target.id) ?? newProjectileByTarget.get(target.id);
+    const projectileId = projectile?.id ?? -target.id;
+    events.push({ type: "hit", tick, projectileId, targetId: target.id, damage });
+    if (projectile) hitProjectileIds.add(projectile.id);
+  }
+  const afterProjectileIds = new Set(after.projectiles.map((projectile) => projectile.id));
+  const elapsedTicks = Math.max(1, after.state.tick - before.state.tick);
+  for (const projectile of before.projectiles) {
+    if (afterProjectileIds.has(projectile.id) || hitProjectileIds.has(projectile.id) || projectile.ownerShipId === null) continue;
+    const owner = beforeShips.get(projectile.ownerShipId);
+    if (owner?.class === "fighter") continue;
+    const targetStillVisible = projectile.targetEntityId !== null && after.visibleEntityIds.has(projectile.targetEntityId);
+    if (!targetStillVisible && projectile.lifetimeTicks > elapsedTicks + 2) continue;
+    events.push({
+      type: "projectileDetonated", tick, projectileId: projectile.id,
+      weaponTypeId: projectile.weaponTypeId, x: projectile.x, z: projectile.z,
+    });
+  }
+  return events;
+}
+
 function clearWorldVisuals(): void {
   for (const visual of structureVisuals.values()) worldRoot.remove(visual.group);
   structureVisuals.clear();
+  defensiveAimYaw.clear();
   for (const visual of resourceVisuals.values()) worldRoot.remove(visual.group);
   resourceVisuals.clear();
   for (const visual of obstacleVisuals.values()) worldRoot.remove(visual.group);
@@ -1492,8 +1799,10 @@ function clearWorldVisuals(): void {
 }
 
 function updateNetworkLobby(lobby: LobbyState): void {
+  const needsTerminalSnapshot = lobby.phase === "finished" && networkView?.status !== "finished";
   networkLobby = lobby;
   renderLobby();
+  if (needsTerminalSnapshot) sendNetworkMessage({ type: "request_snapshot", reason: "manual" });
 }
 
 function renderLobby(): void {
@@ -1559,19 +1868,19 @@ function renderLobby(): void {
     : "";
   element("map-description").textContent = `${MAP_DESCRIPTIONS[networkLobby.settings.mapPreset]} ${networkLobby.settings.mapSize.toUpperCase()} sectors support up to ${mapCapacity} commanders; ${networkLobby.settings.startingResources.toUpperCase()} starting reserves and ${networkLobby.settings.resourceDensity.toUpperCase()} deposits.${deploymentDescription}`;
   element("map-preview").className = `map-preview map-${networkLobby.settings.mapPreset}`;
+  renderMapPreview(networkLobby.settings, networkLobby.slots.length);
   element<HTMLButtonElement>("add-ai").disabled = !localSlot?.isHost || networkLobby.slots.length >= Math.min(networkLobby.maxPlayers, mapCapacity);
   element<HTMLButtonElement>("authorize-spectator").disabled = !localSlot?.isHost || networkLobby.phase === "finished";
   element<HTMLSelectElement>("spectator-team-select").disabled = !localSlot?.isHost || networkLobby.phase === "finished";
-  element<HTMLButtonElement>("start-match").disabled = !localSlot?.isHost || networkLobby.slots.length < 2 || exceedsMapCapacity;
+  const startMatch = element<HTMLButtonElement>("start-match");
+  startMatch.disabled = !localSlot?.isHost || networkLobby.slots.length < 2 || exceedsMapCapacity;
+  startMatch.classList.toggle("hidden", !localSlot?.isHost);
   element("host-controls").classList.toggle("hidden", !localSlot?.isHost);
-  document.querySelector(".lobby-loadout")?.classList.toggle("hidden", observing);
+  document.querySelector(".lobby-final-actions")?.classList.toggle("hidden", observing);
   const ready = element<HTMLButtonElement>("ready-toggle");
   ready.textContent = localSlot?.ready ? "STAND DOWN" : "MARK READY";
   ready.classList.toggle("active", Boolean(localSlot?.ready));
   ready.disabled = !localSlot || networkLobby.phase !== "lobby";
-  const team = element<HTMLSelectElement>("team-select");
-  team.value = String(localSlot?.teamId ?? 1);
-  team.disabled = !localSlot || networkLobby.mode === "ffa" || networkLobby.phase !== "lobby";
 }
 
 function selectedLobbySettings(): LobbySettings {
@@ -1627,6 +1936,7 @@ function leaveNetworkMatch(): void {
   networkView = null;
   networkLobby = null;
   networkMatchId = "";
+  pendingNetworkBuilds.clear();
   requestedNetworkRole = "player";
   spectatorTeamId = null;
   spectatorToken = "";
@@ -1652,6 +1962,7 @@ function showStartScreen(resetBattle = false): void {
   networkMode = false;
   networkView = null;
   networkLobby = null;
+  pendingNetworkBuilds.clear();
   landingLobbyActive = true;
   element("network-overlay").classList.add("visible", "start-screen-active");
   element("app").classList.add("start-screen-active");
@@ -1689,6 +2000,7 @@ function showMultiplayerJoinScreen(openedFromGame = false): void {
 }
 
 function startLocalSkirmish(): void {
+  pendingNetworkBuilds.clear();
   resetReplaySession();
   requestedNetworkRole = "player";
   demoMode = false;
@@ -1716,6 +2028,7 @@ function startDemoShowcase(): void {
   networkMode = false;
   networkView = null;
   networkLobby = null;
+  pendingNetworkBuilds.clear();
   demoMode = true;
   menuBattleMode = true;
   landingLobbyActive = false;
@@ -1797,6 +2110,10 @@ function colorForTeam(teamId: number): number {
   return currentState().players.find((player) => player.teamId === teamId)?.color
     ?? [0x59a7ff, 0xff5576, 0x62e6a7, 0xf3b65b, 0xb886ff, 0x55e1e8, 0xff8b55, 0xd8e65b][(teamId - 1) % 8]
     ?? 0x9cb4c5;
+}
+
+function colorForPlayer(playerId: PlayerId, teamId: number): number {
+  return currentState().players.find((player) => player.id === playerId)?.color ?? colorForTeam(teamId);
 }
 
 function createResourceVisual(node: ResourceNodeState): ResourceVisual {
@@ -1955,16 +2272,23 @@ function getFactoryGeometryTemplates(): FactoryGeometryTemplates {
 }
 
 function createStructureVisual(structure: StructureState): StructureVisual {
-  const teamColor = colorForTeam(structure.teamId);
+  const teamColor = colorForPlayer(structure.ownerPlayerId, structure.teamId);
   const definition = STRUCTURES[structure.type];
   const group = new THREE.Group();
-  const hull = new THREE.MeshStandardMaterial({ color: 0x17242e, metalness: 0.75, roughness: 0.42, transparent: true });
-  const dark = new THREE.MeshStandardMaterial({ color: 0x071018, metalness: 0.62, roughness: 0.5, transparent: true });
+  const hull = new THREE.MeshStandardMaterial({
+    color: 0x3e5664, emissive: 0x102936, emissiveIntensity: 0.62,
+    metalness: 0.66, roughness: 0.46, transparent: true,
+  });
+  const dark = new THREE.MeshStandardMaterial({
+    color: 0x192d39, emissive: 0x091923, emissiveIntensity: 0.55,
+    metalness: 0.56, roughness: 0.54, transparent: true,
+  });
   const accent = new THREE.MeshStandardMaterial({
-    color: teamColor, emissive: teamColor, emissiveIntensity: 1.5, metalness: 0.25, roughness: 0.38, transparent: true,
+    color: teamColor, emissive: teamColor, emissiveIntensity: 2.15, metalness: 0.2, roughness: 0.42, transparent: true,
   });
   const materials: THREE.Material[] = [hull, dark, accent];
   let factory: FactoryAnimationVisual | null = null;
+  let turret: THREE.Group | null = null;
 
   if (structure.type === "commandCore") {
     const base = new THREE.Mesh(new THREE.CylinderGeometry(27, 33, 9, 8), hull);
@@ -2028,6 +2352,28 @@ function createStructureVisual(structure: StructureState): StructureVisual {
       spar.position.set(side * 9, 8, 0);
       group.add(spar);
     }
+  } else if (structure.type === "alloyRefinery" || structure.type === "matterForge") {
+    const forgeScale = structure.type === "matterForge" ? 1.38 : 1;
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(18 * forgeScale, 23 * forgeScale, 7, 10), dark);
+    base.position.y = 3.5;
+    group.add(base);
+    const crucible = new THREE.Mesh(new THREE.CylinderGeometry(8 * forgeScale, 11 * forgeScale, 15 * forgeScale, 8), hull);
+    crucible.position.y = 12 * forgeScale;
+    group.add(crucible);
+    const core = new THREE.Mesh(new THREE.IcosahedronGeometry(5.5 * forgeScale, 1), accent);
+    core.position.y = 15 * forgeScale;
+    group.add(core);
+    const stackCount = structure.type === "matterForge" ? 4 : 3;
+    for (let index = 0; index < stackCount; index += 1) {
+      const angle = index / stackCount * Math.PI * 2;
+      const stack = new THREE.Mesh(new THREE.CylinderGeometry(2.2 * forgeScale, 3.5 * forgeScale, 18 * forgeScale, 6), hull);
+      stack.position.set(Math.sin(angle) * 15 * forgeScale, 12 * forgeScale, Math.cos(angle) * 15 * forgeScale);
+      group.add(stack);
+      const vent = new THREE.Mesh(new THREE.TorusGeometry(3.3 * forgeScale, 0.7, 5, 12), accent);
+      vent.rotation.x = Math.PI / 2;
+      vent.position.set(stack.position.x, 21 * forgeScale, stack.position.z);
+      group.add(vent);
+    }
   } else if (structure.type === "storage" || structure.type === "quantumStorage") {
     const storageScale = structure.type === "quantumStorage" ? 1.45 : 1;
     const base = new THREE.Mesh(new THREE.CylinderGeometry(16 * storageScale, 18 * storageScale, 4 * storageScale, 8), dark);
@@ -2064,53 +2410,146 @@ function createStructureVisual(structure: StructureState): StructureVisual {
       arm.add(emitter);
       group.add(arm);
     }
+  } else if (structure.type === "radarArray") {
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(13, 17, 6, 8), hull);
+    base.position.y = 3;
+    group.add(base);
+    const mast = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 4.2, 25, 7), dark);
+    mast.position.y = 17;
+    group.add(mast);
+    const dish = new THREE.Mesh(new THREE.SphereGeometry(13, 16, 8, 0, Math.PI * 2, 0, Math.PI * 0.34), accent);
+    dish.scale.y = 0.42;
+    dish.rotation.x = Math.PI * 0.28;
+    dish.position.set(0, 31, 2);
+    group.add(dish);
+    const receiver = new THREE.Mesh(new THREE.OctahedronGeometry(2.5, 0), accent);
+    receiver.position.set(0, 37, -1);
+    group.add(receiver);
+    const sweepRing = new THREE.Mesh(new THREE.TorusGeometry(16, 0.75, 5, 28), accent);
+    sweepRing.rotation.x = Math.PI / 2;
+    sweepRing.position.y = 8;
+    group.add(sweepRing);
   } else if (isDefensiveStructureType(structure.type)) {
     const base = new THREE.Mesh(new THREE.CylinderGeometry(
       definition.radius * 0.72, definition.radius * 0.9, 6, 8,
     ), hull);
     base.position.y = 3;
     group.add(base);
+    const armoredDeck = new THREE.Mesh(new THREE.CylinderGeometry(
+      definition.radius * 0.68, definition.radius * 0.76, 4, 10,
+    ), dark);
+    armoredDeck.position.y = 7;
+    group.add(armoredDeck);
+    const perimeter = new THREE.Mesh(new THREE.TorusGeometry(
+      definition.radius * 0.76, 1.4, 5, 24,
+    ), accent);
+    perimeter.rotation.x = Math.PI / 2;
+    perimeter.position.y = 7.5;
+    group.add(perimeter);
+
+    for (const hardpoint of definition.hardpoints ?? []) {
+      const mount = new THREE.Group();
+      mount.position.set(hardpoint.localX, 9, hardpoint.localZ);
+      mount.rotation.y = Math.atan2(hardpoint.localX, hardpoint.localZ);
+      group.add(mount);
+      const mountScale = hardpoint.weaponTypeId === "beam" || hardpoint.weaponTypeId === "heavyRail" ? 1.3
+        : hardpoint.weaponTypeId === "torpedo" || hardpoint.weaponTypeId === "plasma" ? 1.1 : 0.78;
+      const cupola = new THREE.Mesh(new THREE.CylinderGeometry(
+        3.2 * mountScale, 4.1 * mountScale, 3.2 * mountScale, 7,
+      ), hull);
+      mount.add(cupola);
+      if (hardpoint.weaponTypeId === "torpedo") {
+        const rack = new THREE.Mesh(new THREE.BoxGeometry(6.5 * mountScale, 4, 8 * mountScale), dark);
+        rack.position.set(0, 2.8, 2.5);
+        mount.add(rack);
+      } else {
+        const barrelLength = hardpoint.weaponTypeId === "heavyRail" || hardpoint.weaponTypeId === "beam" ? 15 : 10;
+        const barrelWidth = hardpoint.weaponTypeId === "pointDefense" ? 0.85 : 1.7;
+        for (const side of hardpoint.weaponTypeId === "pointDefense" ? [-1, 1] : [0]) {
+          const barrel = new THREE.Mesh(new THREE.BoxGeometry(
+            barrelWidth * mountScale, 1.4 * mountScale, barrelLength * mountScale,
+          ), hardpoint.weaponTypeId === "plasma" || hardpoint.weaponTypeId === "beam" ? accent : dark);
+          barrel.position.set(side * 1.2, 3.2, barrelLength * mountScale * 0.38);
+          barrel.rotation.x = -0.08;
+          mount.add(barrel);
+        }
+      }
+    }
+
+    turret = new THREE.Group();
+    group.add(turret);
     const turntable = new THREE.Mesh(new THREE.CylinderGeometry(
       definition.radius * 0.42, definition.radius * 0.54, 5, 8,
     ), accent);
     turntable.position.y = 8;
-    group.add(turntable);
+    turret.add(turntable);
     if (structure.type === "pointDefenseBattery") {
       for (const side of [-1, 1]) {
         const barrel = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 16), dark);
         barrel.position.set(side * 3.3, 12, 5);
         barrel.rotation.x = -0.12;
-        group.add(barrel);
+        turret.add(barrel);
       }
       const sensor = new THREE.Mesh(new THREE.OctahedronGeometry(3.2, 0), accent);
       sensor.position.set(0, 16, -3);
-      group.add(sensor);
+      turret.add(sensor);
     } else if (structure.type === "missileBattery") {
       for (const side of [-1, 1]) {
         const rack = new THREE.Mesh(new THREE.BoxGeometry(7, 6, 14), dark);
         rack.position.set(side * 5, 13, 2);
         rack.rotation.x = -0.28;
-        group.add(rack);
+        turret.add(rack);
         for (const xOffset of [-2, 2]) {
           const missile = new THREE.Mesh(new THREE.ConeGeometry(1.15, 7, 5), accent);
           missile.rotation.x = Math.PI / 2 - 0.28;
           missile.position.set(side * 5 + xOffset, 15, 6);
-          group.add(missile);
+          turret.add(missile);
         }
       }
-    } else {
+    } else if (structure.type === "railBattery") {
       const spine = new THREE.Mesh(new THREE.BoxGeometry(7, 6, 25), dark);
       spine.position.set(0, 13, 7);
       spine.rotation.x = -0.08;
-      group.add(spine);
+      turret.add(spine);
       const rail = new THREE.Mesh(new THREE.BoxGeometry(2.5, 2.5, 31), accent);
       rail.position.set(0, 15, 10);
       rail.rotation.x = -0.08;
-      group.add(rail);
+      turret.add(rail);
       for (const side of [-1, 1]) {
         const brace = new THREE.Mesh(new THREE.BoxGeometry(3, 8, 10), hull);
         brace.position.set(side * 6, 11, -1);
-        group.add(brace);
+        turret.add(brace);
+      }
+    } else if (structure.type === "plasmaBattery") {
+      const cradle = new THREE.Mesh(new THREE.BoxGeometry(18, 9, 18), dark);
+      cradle.position.set(0, 13, 0);
+      turret.add(cradle);
+      for (const side of [-1, 1]) {
+        const emitter = new THREE.Mesh(new THREE.CylinderGeometry(3.2, 4.5, 18, 8), hull);
+        emitter.rotation.x = Math.PI / 2;
+        emitter.position.set(side * 6, 16, 9);
+        turret.add(emitter);
+        const plasmaCore = new THREE.Mesh(new THREE.IcosahedronGeometry(3.5, 1), accent);
+        plasmaCore.position.set(side * 6, 16, 19);
+        turret.add(plasmaCore);
+      }
+    } else {
+      const beamMount = new THREE.Mesh(new THREE.BoxGeometry(20, 11, 22), dark);
+      beamMount.position.set(0, 15, 2);
+      turret.add(beamMount);
+      const emitter = new THREE.Mesh(new THREE.CylinderGeometry(4, 6, 30, 10), hull);
+      emitter.rotation.x = Math.PI / 2;
+      emitter.position.set(0, 18, 14);
+      turret.add(emitter);
+      const lens = new THREE.Mesh(new THREE.CylinderGeometry(5.2, 5.2, 2.5, 12), accent);
+      lens.rotation.x = Math.PI / 2;
+      lens.position.set(0, 18, 30);
+      turret.add(lens);
+      for (const side of [-1, 1]) {
+        const coil = new THREE.Mesh(new THREE.TorusGeometry(5.5, 1.2, 6, 18), accent);
+        coil.rotation.y = Math.PI / 2;
+        coil.position.set(side * 8, 17, 8);
+        turret.add(coil);
       }
     }
   } else if (structure.type === "advancedFabrication") {
@@ -2278,7 +2717,7 @@ function createStructureVisual(structure: StructureState): StructureVisual {
   group.position.set(structure.x, 0, structure.z);
   group.rotation.y = structure.yaw;
   worldRoot.add(group);
-  return { group, shield, progress, marker, hitTarget, materials, factory };
+  return { group, shield, progress, marker, hitTarget, materials, factory, turret, turretYaw: 0 };
 }
 
 function createDynamicLines(color: number, opacity: number): THREE.LineSegments {
@@ -2342,8 +2781,11 @@ function updateVisuals(alpha: number, now: number): void {
   batchedShipRenderer.update(
     renderState,
     now,
+    camera,
+    innerHeight,
     Math.max(1, cameraRig.distance / STRATEGIC_ZOOM_DISTANCE),
     visualTick,
+    !landingLobbyActive && !benchmarkActive,
   );
   const projectiles = benchmarkActive ? stressScenario.projectiles : clientView.projectiles;
   const tacticalRatio = renderState.shipCount > 0 ? renderState.metrics.lod[3] / renderState.shipCount : 0;
@@ -2507,6 +2949,7 @@ function updateStaticWorldVisuals(now: number): void {
     if (liveStructureIds.has(id)) continue;
     worldRoot.remove(visual.group);
     structureVisuals.delete(id);
+    defensiveAimYaw.delete(id);
     selectedStructureIds.delete(id);
     if (primaryStructureId === id) primaryStructureId = null;
   }
@@ -2520,6 +2963,18 @@ function updateStaticWorldVisuals(now: number): void {
     const reveal = 0.24 + structure.buildProgress * 0.76;
     for (const material of visual.materials) material.opacity = reveal;
     if (visual.factory) updateFactoryAnimation(visual.factory, structure, now, reveal);
+    if (visual.turret) {
+      const desiredWorldYaw = defensiveAimYaw.get(structure.id);
+      if (desiredWorldYaw !== undefined) {
+        const desiredLocalYaw = desiredWorldYaw - structure.yaw;
+        const yawDelta = Math.atan2(
+          Math.sin(desiredLocalYaw - visual.turretYaw),
+          Math.cos(desiredLocalYaw - visual.turretYaw),
+        );
+        visual.turretYaw += yawDelta * 0.18;
+        visual.turret.rotation.y = visual.turretYaw;
+      }
+    }
     visual.group.scale.y = 0.72 + structure.buildProgress * 0.28;
     visual.progress.visible = structure.buildProgress < 1;
     visual.progress.scale.x = Math.max(0.01, structure.buildProgress);
@@ -2541,6 +2996,7 @@ function updateTacticalWorldMarkers(visible: boolean): void {
     return;
   }
   const strategicScale = Math.max(1, cameraRig.distance / STRATEGIC_ZOOM_DISTANCE);
+  const distantStructureScale = Math.pow(strategicScale, 0.72);
   let obstacleCount = 0;
   const obstacleLimit = Math.min(1_024, clientView.state.obstacles.length);
   for (let index = 0; index < obstacleLimit; index += 1) {
@@ -2559,14 +3015,18 @@ function updateTacticalWorldMarkers(visible: boolean): void {
   const structureLimit = Math.min(1_024, clientView.structures.length);
   for (let index = 0; index < structureLimit; index += 1) {
     const structure = clientView.structures[index]!;
-    const radius = STRUCTURES[structure.type].radius
-      * (selectedStructureIds.has(structure.id) ? 1.25 : 0.82)
-      * strategicScale;
+    const baseIconRadius = THREE.MathUtils.clamp(STRUCTURES[structure.type].radius * 0.58, 10, 23);
+    const radius = baseIconRadius
+      * (selectedStructureIds.has(structure.id) ? 1.18 : 1)
+      * distantStructureScale;
     tacticalIconPosition.set(structure.x, 1.5, structure.z);
     tacticalIconScale.setScalar(radius);
     tacticalIconMatrix.compose(tacticalIconPosition, tacticalIconRotation, tacticalIconScale);
     tacticalStructureIcons.setMatrixAt(structureCount, tacticalIconMatrix);
-    tacticalStructureIcons.setColorAt(structureCount, tacticalIconColor.setHex(colorForTeam(structure.teamId)));
+    tacticalStructureIcons.setColorAt(
+      structureCount,
+      tacticalIconColor.setHex(colorForPlayer(structure.ownerPlayerId, structure.teamId)),
+    );
     structureCount += 1;
   }
   tacticalStructureIcons.count = structureCount;
@@ -2598,7 +3058,6 @@ function updateDebugVisuals(benchmarkActive: boolean): void {
     updateDynamicLines(projectileLines, []);
     updateDynamicLines(colliderLines, []);
     updateDynamicLines(avoidanceLines, []);
-    updateDynamicLines(sensorLines, []);
     return;
   }
   const velocityPoints: THREE.Vector3[] = [];
@@ -2608,14 +3067,12 @@ function updateDebugVisuals(benchmarkActive: boolean): void {
   const pathPoints: THREE.Vector3[] = [];
   const colliderPoints: THREE.Vector3[] = [];
   const avoidancePoints: THREE.Vector3[] = [];
-  const sensorPoints: THREE.Vector3[] = [];
   const showVelocity = element<HTMLInputElement>("show-velocity").checked;
   const showTargets = element<HTMLInputElement>("show-targets").checked;
   const showArcs = element<HTMLInputElement>("show-arcs").checked;
   const showPaths = element<HTMLInputElement>("show-paths").checked;
   const showColliders = element<HTMLInputElement>("show-colliders").checked;
   const showAvoidance = element<HTMLInputElement>("show-avoidance").checked;
-  const showSensors = element<HTMLInputElement>("show-sensors").checked;
   if (showColliders) {
     for (const obstacle of clientView.state.obstacles) {
       appendDebugCircle(colliderPoints, obstacle.x, obstacle.z, obstacle.radius, 0.8, 32);
@@ -2639,17 +3096,6 @@ function updateDebugVisuals(benchmarkActive: boolean): void {
   if (showTargets) {
     for (const ship of clientView.ships) byId.set(ship.id, ship);
     for (const structure of clientView.structures) byId.set(structure.id, structure);
-  }
-  if (showSensors) {
-    for (const ship of clientView.ships) {
-      if (isAlliedToLocalPlayer(ship.teamId)) appendDebugCircle(sensorPoints, ship.x, ship.z, SHIPS[ship.class].sensorRange, 0.55, 48);
-    }
-    for (const structure of clientView.structures) {
-      const range = structureSensorRange(structure);
-      if (isAlliedToLocalPlayer(structure.teamId) && structure.buildProgress >= 1 && range > 0) {
-        appendDebugCircle(sensorPoints, structure.x, structure.z, range, 0.5, 48);
-      }
-    }
   }
   for (const ship of clientView.ships) {
     if (selectedShipIds.has(ship.id)) {
@@ -2707,8 +3153,6 @@ function updateDebugVisuals(benchmarkActive: boolean): void {
   colliderLines.visible = showColliders;
   updateDynamicLines(avoidanceLines, avoidancePoints);
   avoidanceLines.visible = showAvoidance;
-  updateDynamicLines(sensorLines, sensorPoints);
-  sensorLines.visible = showSensors;
 }
 
 function appendDebugCircle(
@@ -2804,7 +3248,8 @@ function rememberEffectOrigins(view: ClientVisibilityView): void {
       x: 0, y: 0, z: 0, radius: 0, color: 0, isShip: false, vx: 0, vz: 0, shields: 0,
     };
     origin.x = structure.x; origin.y = 8; origin.z = structure.z;
-    origin.radius = STRUCTURES[structure.type].radius; origin.color = colorForTeam(structure.teamId);
+    origin.radius = STRUCTURES[structure.type].radius;
+    origin.color = colorForPlayer(structure.ownerPlayerId, structure.teamId);
     origin.isShip = false; origin.vx = 0; origin.vz = 0; origin.shields = structure.shields;
     effectOrigins.set(structure.id, origin);
   }
@@ -2833,6 +3278,7 @@ function isEventVisible(
   if (event.type === "unitProduced") return event.playerId === localPlayerId || entityVisible(event.shipId);
   if (event.type === "weaponFired") return entityVisible(event.shipId) || entityVisible(event.targetId);
   if (event.type === "hit") return entityVisible(event.targetId) || projectileVisible(event.projectileId);
+  if (event.type === "projectileDetonated") return projectileVisible(event.projectileId);
   return event.type === "destroyed" && entityVisible(event.entityId);
 }
 
@@ -2851,9 +3297,13 @@ function processEvents(events: SimulationEvent[]): void {
       const ship = clientView.ships.find((candidate) => candidate.id === event.shipId);
       const turret = ship?.turrets.find((candidate) => candidate.id === event.turretId);
       const defense = clientView.structures.find((candidate) => candidate.id === event.shipId);
-      const defenseWeaponType = defense ? STRUCTURES[defense.type].weaponTypeId : undefined;
+      const defenseWeaponType = defense ? event.weaponTypeId : undefined;
       if (((ship && turret) || (defense && defenseWeaponType)) && stressScenario.activeCount === 0) {
         const projectile = clientView.projectiles.find((candidate) => candidate.id === event.projectileId);
+        const target = effectOrigins.get(event.targetId);
+        if (defense && target) {
+          defensiveAimYaw.set(defense.id, Math.atan2(target.x - defense.x, target.z - defense.z));
+        }
         const muzzle = projectile
           ? { x: projectile.previousX, z: projectile.previousZ }
           : ship && turret ? getTurretMuzzleWorldPosition(
@@ -2861,7 +3311,13 @@ function processEvents(events: SimulationEvent[]): void {
             turret,
             Math.max(0, turret.fireSequence - 1),
             clientView.state.tick,
-          ) : { x: defense!.x, z: defense!.z };
+          ) : defense && target ? (() => {
+            const dx = target.x - defense.x;
+            const dz = target.z - defense.z;
+            const distance = Math.max(1, Math.hypot(dx, dz));
+            const muzzleOffset = STRUCTURES[defense.type].radius * 0.72;
+            return { x: defense.x + dx / distance * muzzleOffset, z: defense.z + dz / distance * muzzleOffset };
+          })() : { x: defense!.x, z: defense!.z };
         const weaponTypeId = turret?.weaponTypeId ?? defenseWeaponType!;
         const y = ship && turret
           ? ship.y + turretVisualHeight(ship.class, turret.localX, turret.localZ, turret.weaponTypeId) + 1.2
@@ -2875,7 +3331,6 @@ function processEvents(events: SimulationEvent[]): void {
               : 2.2;
         const now = performance.now();
         if (weaponTypeId === "beam") {
-          const target = effectOrigins.get(event.targetId);
           if (target && isEffectVisible(muzzle.x, y, muzzle.z, 1.4)) {
             combatEffects.spawnBeam(
               muzzle.x, y, muzzle.z, target.x, target.y, target.z,
@@ -2906,6 +3361,17 @@ function processEvents(events: SimulationEvent[]): void {
           );
           lastDamageEffectAt.set(event.targetId, now);
         }
+      }
+    } else if (event.type === "projectileDetonated") {
+      const style = {
+        autocannon: { y: 4.2, size: 0.55 }, pointDefense: { y: 6.8, size: 0.45 },
+        plasma: { y: 7.2, size: 1.7 }, torpedo: { y: 10, size: 3.2 },
+        heavyRail: { y: 10.2, size: 2.35 }, beam: { y: 8.5, size: 1.4 },
+      }[event.weaponTypeId];
+      if (stressScenario.activeCount === 0 && isEffectVisible(event.x, style.y, event.z)) {
+        combatEffects.spawnProjectileDetonation(
+          event.x, style.y, event.z, WEAPONS[event.weaponTypeId].color, style.size, performance.now(),
+        );
       }
     } else if (event.type === "destroyed") {
       eventLines.unshift(`<b>ALERT</b> contact ${event.entityId} destroyed`);
@@ -3077,7 +3543,7 @@ function drawMinimap(): void {
   for (const structure of clientView.structures) {
     const x = minimapCoordinate(structure.x, halfExtent, width);
     const y = minimapCoordinate(structure.z, halfExtent, width);
-    context.strokeStyle = `#${colorForTeam(structure.teamId).toString(16).padStart(6, "0")}`;
+    context.strokeStyle = `#${colorForPlayer(structure.ownerPlayerId, structure.teamId).toString(16).padStart(6, "0")}`;
     context.lineWidth = structure.type === "commandCore" ? 2 : 1;
     const size = structure.type === "commandCore"
       ? 7
@@ -3097,7 +3563,7 @@ function drawMinimap(): void {
   }
   context.shadowBlur = 0;
   context.strokeStyle = "rgba(141,221,255,.65)";
-  const viewSize = (cameraRig.distance / (halfExtent * 2)) * width * 0.65;
+  const viewSize = Math.min(width, (cameraRig.distance / (halfExtent * 2)) * width * 0.65);
   const viewX = minimapCoordinate(cameraRig.target.x, halfExtent, width);
   const viewY = minimapCoordinate(cameraRig.target.z, halfExtent, width);
   context.strokeRect(viewX - viewSize / 2, viewY - viewSize / 2, viewSize, viewSize);
@@ -3107,19 +3573,6 @@ function drawMinimapFog(context: CanvasRenderingContext2D, width: number, halfEx
   if (clientView.localTeamId === null) return;
   updateFogOfWar(performance.now());
   context.drawImage(fogCompositeCanvas, 0, 0, width, width);
-  context.save();
-  context.setLineDash([2, 3]);
-  context.lineWidth = 0.7;
-  context.strokeStyle = "rgba(100, 213, 242, .22)";
-  for (const sensor of localSensorDiscs()) {
-    const x = minimapCoordinate(sensor.x, halfExtent, width);
-    const y = minimapCoordinate(sensor.z, halfExtent, width);
-    const radius = sensor.range / (halfExtent * 2) * width;
-    context.beginPath();
-    context.arc(x, y, radius, 0, Math.PI * 2);
-    context.stroke();
-  }
-  context.restore();
 }
 
 function getSelectedShips(): ShipState[] {
@@ -3330,6 +3783,7 @@ function renderSelectionRoster(ships: readonly ShipState[]): void {
 }
 
 function updateSelectionHud(): void {
+  document.querySelector(".command-deck")?.classList.toggle("view-locked", !canIssuePlayerCommands());
   const ships = getSelectedShips();
   const structures = getSelectedStructures();
   const title = element("selection-title");
@@ -3407,11 +3861,13 @@ function updateSelectionHud(): void {
     title.textContent = structures.length === 1 ? structureLabel(primary.type) : `${structures.length} ${structureLabel(primary.type)}S`;
     summary.textContent = primary.buildProgress < 1
       ? `CONSTRUCTION ${Math.floor(primary.buildProgress * 100)}% · ${buildPower.toFixed(1)}× POWER · FRAME ${primary.id}`
+      : primary.type === "commandCore"
+        ? "FLEET HEADQUARTERS · BUILDS CORE INFRASTRUCTURE"
       : primary.type === "fabricator"
         ? `FRAME ${primary.id} · ASSISTING ${assistedConstructions.length} SITE${assistedConstructions.length === 1 ? "" : "S"}`
         : `FRAME ${primary.id} · ${Math.floor(primary.health)} HULL · ${Math.floor(primary.shields)} SHIELD`;
     icon.textContent = STRUCTURE_ICONS[primary.type];
-    bars.innerHTML = `<i style="flex:${Math.max(0.02, health / maxHealth)}" title="Hull"></i>${maxShields > 0 ? `<i class="shield" style="flex:${Math.max(0.02, shields / maxShields)}" title="Shields"></i>` : ""}`;
+    bars.innerHTML = selectionMetersHtml(health, maxHealth, shields, maxShields);
 
     if (primary.buildProgress < 1) {
       const player = currentState().players.find((candidate) => candidate.id === localPlayerId);
@@ -3440,10 +3896,14 @@ function updateSelectionHud(): void {
     } else {
       const passiveCopy = isResourceExtractorType(primary.type)
         ? { icon: "+A", text: `ALLOY UPLINK +${definition.alloyIncome}` }
+        : primary.type === "alloyRefinery" || primary.type === "matterForge"
+          ? { icon: "+A", text: `DIRECT ALLOY +${definition.alloyIncome}/S · −${definition.energyUpkeep}E/S` }
         : primary.type === "storage" || primary.type === "quantumStorage"
           ? { icon: "+CAP", text: `STORAGE +${definition.alloyStorage}A · +${definition.energyStorage}E` }
+        : primary.type === "radarArray"
+          ? { icon: "⌁", text: `LONG-RANGE SENSOR ${definition.sensorRange} · −${definition.energyUpkeep}E/S` }
         : isDefensiveStructureType(primary.type)
-          ? { icon: STRUCTURE_ICONS[primary.type], text: `${WEAPONS[definition.weaponTypeId!].range} RANGE · −${definition.energyUpkeep}E/S` }
+          ? { icon: STRUCTURE_ICONS[primary.type], text: `${fortressLoadoutSummary(primary.type)} · −${definition.energyUpkeep}E/S` }
           : { icon: "+E", text: `ENERGY GRID +${definition.energyIncome}` };
       empty.classList.remove("hidden");
       empty.innerHTML = `<span>${passiveCopy.icon}</span><p>${passiveCopy.text}</p>`;
@@ -3476,7 +3936,7 @@ function updateSelectionHud(): void {
         : ships[0]!.class === "cruiser" || ships[0]!.class === "destroyer" ? "⬢"
           : ships[0]!.class === "bomber" ? "◆" : "△"
     : "◈";
-  bars.innerHTML = `<i style="flex:${Math.max(0.02, health / maxHealth)}" title="Hull"></i><i class="shield" style="flex:${Math.max(0.02, shields / maxShields)}" title="Shields"></i>`;
+  bars.innerHTML = selectionMetersHtml(health, maxHealth, shields, maxShields);
   if (ships.length > 1) renderSelectionRoster(ships);
   const mobileBuilders = ships.filter((ship) => SHIPS[ship.class].buildPower > 0);
   if (mobileBuilders.length === ships.length) {
@@ -3490,6 +3950,16 @@ function updateSelectionHud(): void {
     element("command-context-title").textContent = "FLEET COMMANDS";
     element("command-context-subtitle").textContent = ships.length === 1 ? `VESSEL ${ships[0]!.id}` : `${ships.length} VESSELS LINKED`;
   }
+}
+
+function selectionMetersHtml(health: number, maxHealth: number, shields: number, maxShields: number): string {
+  const hullPercent = Math.round(THREE.MathUtils.clamp(health / Math.max(1, maxHealth), 0, 1) * 100);
+  const shieldPercent = Math.round(THREE.MathUtils.clamp(shields / Math.max(1, maxShields), 0, 1) * 100);
+  const hull = `<i style="--value:${hullPercent}%" data-label="H ${hullPercent}%" title="Hull ${Math.ceil(health)} / ${Math.ceil(maxHealth)}"></i>`;
+  const shield = maxShields > 0
+    ? `<i class="shield" style="--value:${shieldPercent}%" data-label="S ${shieldPercent}%" title="Shields ${Math.ceil(shields)} / ${Math.ceil(maxShields)}"></i>`
+    : "";
+  return hull + shield;
 }
 
 function renderSelectedProduction(): void {
@@ -3518,6 +3988,15 @@ function renderSelectedProduction(): void {
     : activeShipyards.reduce((sum, shipyard) => sum + (shipyard.productionQueue[0]?.progress ?? 0), 0) / Math.max(1, activeShipyards.length);
   element("production-progress").style.width = `${progress * 100}%`;
   element<HTMLButtonElement>("cancel-production").disabled = activeShipyards.length === 0;
+  const repeatingShipyards = shipyards.filter((shipyard) => shipyard.repeatProduction);
+  const allRepeating = repeatingShipyards.length === shipyards.length;
+  const mixedRepeating = repeatingShipyards.length > 0 && !allRepeating;
+  const infiniteButton = element<HTMLButtonElement>("toggle-infinite-production");
+  infiniteButton.classList.toggle("active", allRepeating);
+  infiniteButton.classList.toggle("mixed", mixedRepeating);
+  infiniteButton.setAttribute("aria-pressed", allRepeating ? "true" : "false");
+  element("infinite-production-state").textContent = allRepeating ? "ON" : mixedRepeating ? "MIXED" : "OFF";
+  element<HTMLButtonElement>("stop-production-all").disabled = totalQueued === 0 && repeatingShipyards.length === 0;
   element("queue-items").innerHTML = shipyards.map((shipyard, yardIndex) => {
     const label = shipyards.length > 1 ? `<span class="queue-lane-label">Y${shipyard.id}</span>` : "";
     const tokens = shipyard.productionQueue.map((item, itemIndex) => {
@@ -3604,12 +4083,8 @@ function setProgressionButtonState(button: HTMLButtonElement, unlocked: boolean,
 }
 
 function updateProductionRosterVisibility(): void {
-  const selectedYardTypes = new Set(getSelectedShipyards().map((yard) => yard.type));
   for (const shipClass of SHIP_CLASSES) {
-    element<HTMLButtonElement>(SHIP_BUTTON_IDS[shipClass]).classList.toggle(
-      "hidden",
-      !selectedYardTypes.has(SHIP_ECONOMY[shipClass].yardType),
-    );
+    element<HTMLButtonElement>(SHIP_BUTTON_IDS[shipClass]).classList.remove("hidden");
   }
 }
 
@@ -3655,6 +4130,15 @@ function updateProgressionControls(): void {
       selectedYards.some((yard) => canProduceShipInView(localPlayerId, shipClass, yard.id)),
       requirement,
     );
+  }
+}
+
+function setConstructionCategory(category: string): void {
+  for (const tab of document.querySelectorAll<HTMLButtonElement>("[data-construction-tab]")) {
+    tab.classList.toggle("active", tab.dataset.constructionTab === category);
+  }
+  for (const panel of document.querySelectorAll<HTMLElement>("[data-construction-category]")) {
+    panel.classList.toggle("active", panel.dataset.constructionCategory === category);
   }
 }
 
@@ -3719,13 +4203,22 @@ function canPlaceStructureInView(
   for (const obstacle of clientView.state.obstacles) {
     if (Math.hypot(obstacle.x - position.x, obstacle.z - position.z) < obstacle.radius + definition.radius + 8) return false;
   }
-  if (!networkMode) {
-    for (const command of simulation.state.commandQueue) {
+  const queuedBuilds = networkMode
+    ? pendingNetworkBuilds.values()
+    : simulation.state.commandQueue.filter((command): command is Extract<GameCommand, { type: "buildStructure" }> =>
+      command.type === "buildStructure",
+    );
+  for (const command of queuedBuilds) {
       if (command.type !== "buildStructure" || command.playerId !== localPlayerId) continue;
-      if (Math.hypot(command.position.x - position.x, command.position.z - position.z)
+      if (isResourceExtractorType(structureType)
+        && isResourceExtractorType(command.structureType)
+        && command.resourceNodeId === resourceNodeId) continue;
+      const commandNode = command.resourceNodeId === undefined
+        ? undefined
+        : clientView.resourceNodes.find((candidate) => candidate.id === command.resourceNodeId);
+      const reservedPosition = commandNode ?? command.position;
+      if (Math.hypot(reservedPosition.x - position.x, reservedPosition.z - position.z)
         < STRUCTURES[command.structureType].radius + definition.radius + 8) return false;
-      if (isResourceExtractorType(structureType) && command.resourceNodeId === resourceNodeId) return false;
-    }
   }
   if (!isResourceExtractorType(structureType)) return resourceNodeId === undefined;
   const node = clientView.resourceNodes.find((candidate) => candidate.id === resourceNodeId);
@@ -3792,6 +4285,7 @@ function issueBuildStructure(candidate: NonNullable<ReturnType<typeof getPlaceme
   };
   const result = submitPlayerCommand(command);
   if (result.accepted) {
+    if (networkMode) pendingNetworkBuilds.set(command.sequence, command);
     showCommandMarker(candidate.position);
     element("directive").textContent = `${structureLabel(pendingStructureType)} CONSTRUCTION QUEUED`;
     showToast("CONSTRUCTION ORDER");
@@ -3881,6 +4375,47 @@ function cancelProductionItem(structureId: number, queueItemId: number): void {
     requestedTick: nextCommandTick(), structureId, queueItemId,
   });
   if (result.accepted) showToast("PRODUCTION CANCELLED");
+}
+
+function toggleInfiniteProduction(): void {
+  const shipyards = getSelectedShipyards();
+  if (shipyards.length === 0) return;
+  const enabled = !shipyards.every((shipyard) => shipyard.repeatProduction);
+  let accepted = 0;
+  let rejection: string | null = null;
+  for (const shipyard of shipyards) {
+    commandSequence += 1;
+    const result = submitPlayerCommand({
+      type: "setProductionRepeat", playerId: localPlayerId, sequence: commandSequence,
+      requestedTick: nextCommandTick(), structureId: shipyard.id, enabled,
+    });
+    if (result.accepted) accepted += 1;
+    else rejection = result.reason.toUpperCase();
+  }
+  if (accepted > 0) {
+    element("directive").textContent = `INFINITE QUEUE // ${enabled ? "ENABLED" : "DISABLED"} // ${accepted} YARD${accepted === 1 ? "" : "S"}`;
+    showToast(`INFINITE QUEUE ${enabled ? "ON" : "OFF"}`);
+  } else if (rejection) showToast(`PRODUCTION CONTROL REJECTED // ${rejection}`);
+}
+
+function stopAllProduction(): void {
+  const shipyards = getSelectedShipyards();
+  if (shipyards.length === 0) return;
+  let accepted = 0;
+  let rejection: string | null = null;
+  for (const shipyard of shipyards) {
+    commandSequence += 1;
+    const result = submitPlayerCommand({
+      type: "clearProductionQueue", playerId: localPlayerId, sequence: commandSequence,
+      requestedTick: nextCommandTick(), structureId: shipyard.id,
+    });
+    if (result.accepted) accepted += 1;
+    else rejection = result.reason.toUpperCase();
+  }
+  if (accepted > 0) {
+    element("directive").textContent = `PRODUCTION HALTED // ${accepted} YARD${accepted === 1 ? "" : "S"}`;
+    showToast("ALL PRODUCTION STOPPED");
+  } else if (rejection) showToast(`STOP REJECTED // ${rejection}`);
 }
 
 function issueNavigationCommand(
@@ -4086,7 +4621,7 @@ function animate(now: number): void {
   const interpolationAlpha = clientViewMode === "post-match-omniscient"
     ? replayPlaying ? accumulator / FIXED_DT : 1
     : networkMode && networkView
-      ? Math.min(1, Math.max(0, (now - networkViewReceivedAt) / 100))
+      ? Math.min(1, Math.max(0, (now - networkViewReceivedAt) / networkViewInterpolationMs))
       : paused ? 1 : accumulator / FIXED_DT;
   updateVisuals(interpolationAlpha, now);
   renderPreparationMs = performance.now() - preparationStartedAt;
@@ -4161,9 +4696,9 @@ function resetSimulation(): void {
     ? menuBattleMode
       ? "<b>SIM</b> fighter-heavy local 1v1 // autonomous engagement"
       : "<b>SHOWCASE</b> 284 combat vessels // 16 autonomous shipyards"
-    : "<b>SYS</b> scenario reset with seed C0FFEE"];
+    : `<b>SYS</b> new ${simulation.state.obstacles.length}-hazard seeded battlefield generated`];
   updateSelectionHud();
-  showToast(demoMode ? menuBattleMode ? "LOCAL 1V1 RESTARTED" : "SHOWCASE RESTARTED" : "DETERMINISTIC SCENARIO RESET");
+  showToast(demoMode ? menuBattleMode ? "LOCAL 1V1 RESTARTED" : "SHOWCASE RESTARTED" : "NEW BATTLEFIELD GENERATED");
 }
 
 function focusBattle(): void {
@@ -4316,7 +4851,12 @@ addEventListener("pointerup", (event) => {
 });
 addEventListener("wheel", (event) => {
   if (element("app").classList.contains("start-screen-active")) return;
-  cameraRig.distance = THREE.MathUtils.clamp(cameraRig.distance + event.deltaY * 0.9, 220, 9_000);
+  const distanceScaledZoom = THREE.MathUtils.clamp(cameraRig.distance / 1_600, 0.9, 8);
+  cameraRig.distance = THREE.MathUtils.clamp(
+    cameraRig.distance + event.deltaY * distanceScaledZoom,
+    MIN_CAMERA_DISTANCE,
+    MAX_CAMERA_DISTANCE,
+  );
 }, { passive: true });
 
 canvas.addEventListener("pointerdown", (event) => {
@@ -4472,13 +5012,21 @@ element("build-shipyard").addEventListener("click", () => setStructureMode("ship
 element("build-fleet-yard").addEventListener("click", () => setStructureMode("fleetShipyard"));
 element("build-fusion").addEventListener("click", () => setStructureMode("fusionReactor"));
 element("build-deep-extractor").addEventListener("click", () => setStructureMode("deepCoreExtractor"));
+element("build-alloy-refinery").addEventListener("click", () => setStructureMode("alloyRefinery"));
 element("build-capital-yard").addEventListener("click", () => setStructureMode("capitalShipyard"));
 element("build-antimatter").addEventListener("click", () => setStructureMode("antimatterReactor"));
 element("build-singularity").addEventListener("click", () => setStructureMode("singularityHarvester"));
+element("build-matter-forge").addEventListener("click", () => setStructureMode("matterForge"));
 element("build-quantum-storage").addEventListener("click", () => setStructureMode("quantumStorage"));
+element("build-radar-array").addEventListener("click", () => setStructureMode("radarArray"));
 element("build-pd-battery").addEventListener("click", () => setStructureMode("pointDefenseBattery"));
 element("build-missile-battery").addEventListener("click", () => setStructureMode("missileBattery"));
 element("build-rail-battery").addEventListener("click", () => setStructureMode("railBattery"));
+element("build-plasma-battery").addEventListener("click", () => setStructureMode("plasmaBattery"));
+element("build-beam-battery").addEventListener("click", () => setStructureMode("beamBattery"));
+for (const tab of document.querySelectorAll<HTMLButtonElement>("[data-construction-tab]")) {
+  tab.addEventListener("click", () => setConstructionCategory(tab.dataset.constructionTab ?? "economy"));
+}
 element("queue-fighter").addEventListener("click", (event) => issueQueueUnit("fighter", event.shiftKey ? 5 : 1));
 element("queue-fabricator").addEventListener("click", (event) => issueQueueUnit("fabricator", event.shiftKey ? 5 : 1));
 element("queue-bomber").addEventListener("click", (event) => issueQueueUnit("bomber", event.shiftKey ? 5 : 1));
@@ -4491,6 +5039,8 @@ element("queue-carrier").addEventListener("click", (event) => issueQueueUnit("ca
 element("queue-battleship").addEventListener("click", (event) => issueQueueUnit("battleship", event.shiftKey ? 5 : 1));
 element("set-rally").addEventListener("click", () => setRallyPointMode(!pendingRallyPoint));
 element("cancel-production").addEventListener("click", cancelCurrentProduction);
+element("toggle-infinite-production").addEventListener("click", toggleInfiniteProduction);
+element("stop-production-all").addEventListener("click", stopAllProduction);
 element("queue-items").addEventListener("click", (event) => {
   const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>(".queue-token") : null;
   if (!button) return;
@@ -4624,9 +5174,6 @@ element("ready-toggle").addEventListener("click", () => {
   const slot = networkLobby?.slots.find((candidate) => candidate.playerId === localPlayerId);
   if (slot) sendNetworkMessage({ type: "set_ready", ready: !slot.ready });
 });
-element<HTMLSelectElement>("team-select").addEventListener("change", (event) => {
-  sendNetworkMessage({ type: "set_team", teamId: Number((event.currentTarget as HTMLSelectElement).value) });
-});
 element("mode-teams").addEventListener("click", () => sendNetworkMessage({ type: "set_mode", mode: "teams" }));
 element("mode-ffa").addEventListener("click", () => sendNetworkMessage({ type: "set_mode", mode: "ffa" }));
 for (const settingId of ["map-preset", "map-size", "starting-resources", "resource-density", "team-spawn-mode"]) {
@@ -4636,7 +5183,7 @@ for (const settingId of ["map-preset", "map-size", "starting-resources", "resour
 }
 element("add-ai").addEventListener("click", () => sendNetworkMessage({
   type: "add_ai",
-  teamId: Number(element<HTMLSelectElement>("team-select").value) === 1 ? 2 : 1,
+  teamId: (networkLobby?.slots.find((slot) => slot.playerId === localPlayerId)?.teamId ?? 1) === 1 ? 2 : 1,
   difficulty: element<HTMLSelectElement>("ai-difficulty").value as "easy" | "normal" | "hard",
   personality: element<HTMLSelectElement>("ai-personality").value as "balanced" | "aggressive" | "turtle" | "economic",
 }));
