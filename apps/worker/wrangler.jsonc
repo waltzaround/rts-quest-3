@@ -4,6 +4,9 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-08-23",
   "upload_source_maps": false,
+  "assets": {
+    "directory": "../client/dist"
+  },
   "durable_objects": {
     "bindings": [
       { "name": "MATCH", "class_name": "Match" }
