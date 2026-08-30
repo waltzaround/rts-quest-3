@@ -962,7 +962,7 @@ function createPlayableScenario(): ReturnType<typeof createCombatScenario> {
 
 let simulation = createPlayableScenario();
 let physicsWorld: PlanarCirclePhysicsWorld | null = null;
-let pendingLockstepState: { state: SimulationState; notice?: string } | null = null;
+let pendingLockstepState: { state: SimulationState; notice?: string; focusStartingBase: boolean } | null = null;
 let lockstepTargetTick = 0;
 let lockstepTargetChecksum = 0;
 let lockstepResyncPending = false;
@@ -1039,7 +1039,7 @@ loadPhysicsRuntime()
     if (pendingLockstepState) {
       const pending = pendingLockstepState;
       pendingLockstepState = null;
-      installLockstepState(pending.state, pending.notice);
+      installLockstepState(pending.state, pending.notice, pending.focusStartingBase);
     }
   })
   .catch((error: unknown) => {
@@ -1897,12 +1897,14 @@ function handleServerMessage(message: ServerMessage): void {
         pendingLockstepState = {
           state: message.state,
           notice: message.reason === "checksum" ? "LOCKSTEP RESYNCHRONIZED" : "LOCKSTEP SYNCHRONIZED",
+          focusStartingBase: message.reason === "start",
         };
         return;
       }
       installLockstepState(
         message.state,
         message.reason === "checksum" ? "LOCKSTEP RESYNCHRONIZED" : "LOCKSTEP SYNCHRONIZED",
+        message.reason === "start",
       );
       if (message.reason === "start") {
         networkLobby = networkLobby ? { ...networkLobby, phase: "playing" } : null;
@@ -1991,7 +1993,19 @@ function handleServerMessage(message: ServerMessage): void {
   }
 }
 
-function installLockstepState(state: SimulationState, notice?: string): void {
+function focusCameraOnLocalBase(): boolean {
+  const commandCore = clientView.structures.find(
+    (structure) => structure.type === "commandCore" && structure.ownerPlayerId === localPlayerId,
+  ) ?? clientView.structures.find(
+    (structure) => structure.type === "commandCore" && !isHostileToLocalPlayer(structure.teamId),
+  );
+  if (!commandCore) return false;
+  cameraRig.target.set(commandCore.x, 0, commandCore.z);
+  cameraRig.distance = 560;
+  return true;
+}
+
+function installLockstepState(state: SimulationState, notice?: string, focusStartingBase = false): void {
   simulation = restoreSimulation(state, physicsWorld ?? undefined);
   initializeSharedSimulationTrial(state);
   const localPlayer = state.players.find((player) => player.id === localPlayerId);
@@ -2011,6 +2025,7 @@ function installLockstepState(state: SimulationState, notice?: string): void {
   previousTransforms.clear();
   for (const ship of clientView.ships) previousTransforms.set(ship.id, captureTransform(ship));
   battleAudio.captureWorld(clientView.ships, clientView.structures);
+  if (focusStartingBase) focusCameraOnLocalBase();
   element("network-overlay").classList.remove("visible");
   element("directive").textContent = canIssuePlayerCommands()
     ? "DETERMINISTIC LOCKSTEP // COMMAND YOUR FLEET"
@@ -5563,6 +5578,7 @@ function resetSimulation(): void {
   cameraRig.target.set(0, 0, 0);
   cameraRig.distance = menuBattleMode ? 720 : demoMode ? 980 : 610;
   cameraRig.azimuth = demoMode ? 0.18 : 0;
+  if (!menuBattleMode && !demoMode) focusCameraOnLocalBase();
   eventLines = [demoMode
     ? menuBattleMode
       ? "<b>SIM</b> fighter-heavy local 1v1 // autonomous engagement"
@@ -6224,4 +6240,8 @@ updateAudioToggle();
 showStartScreen(true);
 if (invitedMatchId) showMultiplayerJoinScreen();
 updateHud();
+requestAnimationFrame(() => {
+  document.documentElement.classList.add("app-ready");
+  window.setTimeout(() => document.getElementById("boot-screen")?.remove(), 300);
+});
 requestAnimationFrame(animate);

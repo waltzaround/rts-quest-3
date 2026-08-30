@@ -4,9 +4,34 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#060a10" />
+    <style>
+      html,body{margin:0;min-height:100%;background:#02070b;color:#8eabbc;color-scheme:dark}
+      #app{visibility:hidden}
+      #boot-screen{position:fixed;z-index:9999;inset:0;display:grid;place-items:center;overflow:hidden;background:radial-gradient(circle at 50% 44%,#0b202b 0,#051017 34%,#02070b 72%);font-family:"JetBrains Mono",ui-monospace,monospace;transition:opacity .22s ease,visibility .22s ease}
+      #boot-screen::before{content:"";position:absolute;inset:0;opacity:.2;background-image:linear-gradient(rgba(86,203,235,.09) 1px,transparent 1px),linear-gradient(90deg,rgba(86,203,235,.07) 1px,transparent 1px);background-size:48px 48px;mask-image:radial-gradient(circle,#000 0,transparent 74%)}
+      .boot-card{position:relative;width:min(350px,calc(100vw - 48px));padding:28px 30px;border:1px solid #24485a;background:rgba(3,12,18,.84);box-shadow:0 22px 80px rgba(0,0,0,.55),inset 0 1px rgba(143,226,248,.05)}
+      .boot-brand{display:flex;align-items:center;gap:14px;color:#d9edf4;font-size:17px;letter-spacing:.12em}
+      .boot-mark{display:grid;place-items:center;width:42px;height:42px;border:1px solid #5ddaff;color:#5ddaff;box-shadow:inset 0 0 18px rgba(68,202,238,.08),0 0 18px rgba(68,202,238,.08);font-size:13px}
+      .boot-brand small{display:block;margin-top:5px;color:#557789;font-size:7px;letter-spacing:.2em}
+      .boot-status{display:flex;justify-content:space-between;margin-top:24px;color:#63879a;font-size:8px;letter-spacing:.13em}
+      .boot-status b{color:#64dfff;font-weight:400}
+      .boot-track{height:2px;margin-top:9px;overflow:hidden;background:#102b37}
+      .boot-track i{display:block;width:38%;height:100%;background:linear-gradient(90deg,transparent,#62ddff,transparent);animation:boot-scan 1.1s linear infinite}
+      .app-ready #app{visibility:visible}
+      .app-ready #boot-screen{opacity:0;visibility:hidden}
+      @keyframes boot-scan{from{transform:translateX(-110%)}to{transform:translateX(285%)}}
+      @media(prefers-reduced-motion:reduce){#boot-screen{transition:none}.boot-track i{animation:none;width:100%;opacity:.7}}
+    </style>
     <title>Command Prompt // Economy Warfare Test</title>
   </head>
   <body>
+    <div id="boot-screen" role="status" aria-live="polite">
+      <div class="boot-card">
+        <div class="boot-brand"><span class="boot-mark">CP</span><span>COMMAND PROMPT<small>INITIALIZING TACTICAL SYSTEMS</small></span></div>
+        <div class="boot-status"><span>LOCAL COMMAND CLIENT</span><b>BOOTING</b></div>
+        <div class="boot-track"><i></i></div>
+      </div>
+    </div>
     <div id="app">
       <canvas id="battlefield" aria-label="Space RTS combat simulation"></canvas>
       <div id="selection-box" aria-hidden="true"></div>
