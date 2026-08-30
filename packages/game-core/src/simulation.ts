@@ -36,6 +36,11 @@ const VISIBILITY_UPDATE_TICKS = 2;
 const LARGE_BATTLE_SHIP_COUNT = 128;
 const LARGE_BATTLE_TARGET_REEVALUATION_TICKS = 20;
 const LARGE_BATTLE_VISIBILITY_UPDATE_TICKS = 3;
+const STRATEGIC_BATTLE_SHIP_COUNT = 1_000;
+const STRATEGIC_NAVIGATION_UPDATE_TICKS = 4;
+const STRATEGIC_WEAPON_UPDATE_TICKS = 4;
+const STRATEGIC_VISIBILITY_UPDATE_TICKS = 10;
+const STRATEGIC_TARGET_REEVALUATION_TICKS = 30;
 const MAX_COMBAT_TARGET_RADIUS = Math.max(
   ...Object.values(SHIPS).map((definition) => definition.radius),
   ...Object.values(STRUCTURES).map((definition) => definition.radius),
@@ -63,6 +68,13 @@ const ALL_COLLISION_CATEGORIES = STATIC_COLLISION_CATEGORY
   | REGULAR_SHIP_COLLISION_CATEGORY
   | SMALL_CRAFT_COLLISION_CATEGORY
   | CAPITAL_SHIP_COLLISION_CATEGORY;
+
+function strategicWeaponUpdateTicks(shipCount: number): number {
+  if (shipCount >= 12_000) return 32;
+  if (shipCount >= 8_000) return 16;
+  if (shipCount >= 4_000) return 8;
+  return STRATEGIC_WEAPON_UPDATE_TICKS;
+}
 
 function shipsPhaseThroughStructure(type: StructureType): boolean {
   return SHIPYARD_TYPES.includes(type as ShipyardType)
@@ -221,16 +233,21 @@ export class GameSimulation {
     this.maxObstacleRadius = this.state.obstacles.reduce(
       (largest, obstacle) => obstacle.type === "asteroid" ? Math.max(largest, obstacle.radius) : largest, 0,
     );
-    this.navigationHash.rebuild(this.state.ships);
+    if (this.state.ships.length <= STRATEGIC_BATTLE_SHIP_COUNT
+      || this.state.tick % STRATEGIC_NAVIGATION_UPDATE_TICKS === 1) {
+      this.navigationHash.rebuild(this.state.ships);
+    }
     this.updateNavigation();
     this.integrateMovement();
     const combatTargets: CombatTargetState[] = [...this.state.ships, ...this.state.structures];
     this.spatialHash.rebuild(combatTargets);
     this.targetsById.clear();
     for (const target of combatTargets) this.targetsById.set(target.id, target);
-    const visibilityUpdateTicks = this.state.ships.length > LARGE_BATTLE_SHIP_COUNT
-      ? LARGE_BATTLE_VISIBILITY_UPDATE_TICKS
-      : VISIBILITY_UPDATE_TICKS;
+    const visibilityUpdateTicks = this.state.ships.length > STRATEGIC_BATTLE_SHIP_COUNT
+      ? STRATEGIC_VISIBILITY_UPDATE_TICKS
+      : this.state.ships.length > LARGE_BATTLE_SHIP_COUNT
+        ? LARGE_BATTLE_VISIBILITY_UPDATE_TICKS
+        : VISIBILITY_UPDATE_TICKS;
     if (this.state.tick === 1 || this.state.tick % visibilityUpdateTicks === 0) {
       updateTeamVisibility(this.state);
       this.refreshVisibilityCache();
@@ -320,6 +337,23 @@ export class GameSimulation {
         return { accepted: false, reason: "placement" };
       }
       normalizedCommand = { ...command, builderUnitIds };
+    } else if (command.type === "cancelConstruction") {
+      const structure = this.state.structures.find((candidate) => candidate.id === command.structureId);
+      if (!structure || structure.ownerPlayerId !== command.playerId || structure.buildProgress >= 1) {
+        return { accepted: false, reason: "structure" };
+      }
+    } else if (command.type === "cancelBuildOrder") {
+      const hasPendingOrder = this.state.commandQueue.some((candidate) =>
+        candidate.type === "buildStructure"
+        && candidate.playerId === command.playerId
+        && candidate.sequence === command.buildSequence,
+      );
+      const hasMaterializedSite = this.state.structures.some((structure) =>
+        structure.ownerPlayerId === command.playerId
+        && structure.buildProgress < 1
+        && structure.constructionSequence === command.buildSequence,
+      );
+      if (!hasPendingOrder && !hasMaterializedSite) return { accepted: false, reason: "queue" };
     } else if (command.type === "queueUnit" || command.type === "cancelProduction"
       || command.type === "setProductionRepeat" || command.type === "clearProductionQueue"
       || command.type === "setRallyPoint") {
@@ -480,6 +514,104 @@ export class GameSimulation {
         || Math.hypot(order.destination.x - position.x, order.destination.z - position.z) > siteOrderRadius,
     );
     builder.focusTargetEntityId = null;
+  }
+
+  private holdMobileBuilderAtConstruction(builder: ShipState, construction: StructureState): void {
+    this.removeMobileBuilderSiteOrder(builder, construction);
+    builder.orders = builder.orders.filter((order) => order.constructionId !== construction.id);
+    builder.orders.unshift({
+      type: "hold",
+      destination: { x: construction.x, z: construction.z },
+      facing: Math.atan2(construction.x - builder.x, construction.z - builder.z),
+      constructionId: construction.id,
+    });
+    builder.focusTargetEntityId = null;
+  }
+
+  private assignMobileBuilderToConstruction(
+    builder: ShipState,
+    construction: StructureState,
+    queued: boolean,
+  ): void {
+    const inRange = Math.hypot(builder.x - construction.x, builder.z - construction.z)
+      <= SHIPS[builder.class].buildRange;
+    if (inRange) {
+      this.holdMobileBuilderAtConstruction(builder, construction);
+      return;
+    }
+    this.sendMobileBuilderToSite(builder, construction, queued);
+    builder.orders = builder.orders.filter((order) => order.constructionId !== construction.id);
+    const siteOrderRadius = Math.max(1, SHIPS[builder.class].buildRange);
+    const siteOrderIndex = builder.orders.findIndex((order) =>
+      order.type === "move"
+      && Math.hypot(order.destination.x - construction.x, order.destination.z - construction.z) <= siteOrderRadius,
+    );
+    const holdOrder: NavigationOrder = {
+      type: "hold", destination: { x: construction.x, z: construction.z },
+      facing: Math.atan2(construction.x - builder.x, construction.z - builder.z),
+      constructionId: construction.id,
+    };
+    builder.orders.splice(siteOrderIndex < 0 ? 0 : siteOrderIndex + 1, 0, holdOrder);
+  }
+
+  private releaseMobileBuildersFromConstruction(structureId: EntityId): void {
+    for (const builder of this.state.ships) {
+      builder.orders = builder.orders.filter((order) => order.constructionId !== structureId);
+    }
+  }
+
+  private cancelConstructionSite(structure: StructureState): void {
+    this.releaseMobileBuildersFromConstruction(structure.id);
+    this.state.structures = this.state.structures.filter((candidate) => candidate.id !== structure.id);
+    if (structure.resourceNodeId === null) return;
+    const node = this.state.resourceNodes.find((candidate) => candidate.id === structure.resourceNodeId);
+    if (!node || node.claimedByStructureId !== structure.id) return;
+    if (!structure.upgradeSourceType) {
+      node.claimedByStructureId = null;
+      return;
+    }
+    const sourceDefinition = STRUCTURES[structure.upgradeSourceType];
+    const restoredSource: StructureState = {
+      id: this.state.nextEntityId++, ownerPlayerId: structure.ownerPlayerId, teamId: structure.teamId,
+      type: structure.upgradeSourceType, x: node.x, z: node.z,
+      yaw: wrapAngle(structure.upgradeSourceYaw ?? structure.yaw),
+      health: Math.min(sourceDefinition.maxHealth, structure.upgradeSourceHealth ?? sourceDefinition.maxHealth),
+      shields: Math.min(sourceDefinition.maxShield, structure.upgradeSourceShields ?? sourceDefinition.maxShield),
+      buildProgress: 1, resourceNodeId: node.id, productionQueue: [], repeatProduction: false,
+      rallyPoint: structure.upgradeSourceRallyPoint
+        ? { ...structure.upgradeSourceRallyPoint }
+        : this.defaultRallyPoint(structure.ownerPlayerId, node.x, node.z),
+    };
+    this.state.structures.push(restoredSource);
+    node.claimedByStructureId = restoredSource.id;
+  }
+
+  private cancelPendingBuildOrder(playerId: PlayerId, buildSequence: number): boolean {
+    const pending = this.state.commandQueue.find(
+      (command): command is Extract<GameCommand, { type: "buildStructure" }> =>
+        command.type === "buildStructure"
+        && command.playerId === playerId
+        && command.sequence === buildSequence,
+    );
+    if (pending) {
+      this.state.commandQueue = this.state.commandQueue.filter((command) => command !== pending);
+      const node = pending.resourceNodeId === undefined
+        ? undefined
+        : this.state.resourceNodes.find((candidate) => candidate.id === pending.resourceNodeId);
+      const position = node ?? pending.position;
+      for (const builder of this.getAssignedMobileBuilders(playerId, pending.builderUnitIds ?? [])) {
+        this.removeMobileBuilderSiteOrder(builder, position);
+      }
+      return true;
+    }
+    const construction = this.state.structures.find((structure) =>
+      structure.ownerPlayerId === playerId
+      && structure.buildProgress < 1
+      && structure.constructionSequence === buildSequence,
+    );
+    if (!construction) return false;
+    this.cancelConstructionSite(construction);
+    return true;
   }
 
   private cancelCompetingResourceExtractorOrders(
@@ -680,6 +812,14 @@ export class GameSimulation {
           command.playerId, command.structureType, command.resourceNodeId,
         );
         const mobileBuilders = this.getAssignedMobileBuilders(command.playerId, builderUnitIds);
+        const waitingForEarlierConstruction = command.queued && mobileBuilders.some((builder) =>
+          builder.orders.some((order) => order.constructionId !== undefined),
+        );
+        if (waitingForEarlierConstruction) {
+          command.requestedTick = this.state.tick + 1;
+          this.state.commandQueue.push(command);
+          continue;
+        }
         const mobileBuilderInRange = mobileBuilders.some((builder) =>
           Math.hypot(builder.x - constructionPosition.x, builder.z - constructionPosition.z)
             <= SHIPS[builder.class].buildRange,
@@ -698,12 +838,6 @@ export class GameSimulation {
           this.state.commandQueue.push(command);
           continue;
         }
-        for (const builder of mobileBuilders) {
-          const inRange = Math.hypot(builder.x - constructionPosition.x, builder.z - constructionPosition.z)
-            <= SHIPS[builder.class].buildRange;
-          if (inRange) this.removeMobileBuilderSiteOrder(builder, constructionPosition);
-          else this.sendMobileBuilderToSite(builder, constructionPosition, command.queued);
-        }
         const definition = STRUCTURES[command.structureType];
         const structure: StructureState = {
           id: this.state.nextEntityId++, ownerPlayerId: command.playerId,
@@ -713,6 +847,14 @@ export class GameSimulation {
           health: definition.maxHealth * 0.1, shields: 0, buildProgress: 0,
           resourceNodeId: node?.id ?? null, productionQueue: [], repeatProduction: false,
           rallyPoint: this.defaultRallyPoint(command.playerId, node?.x ?? command.position.x, node?.z ?? command.position.z),
+          constructionSequence: command.sequence,
+          ...(upgradeSource ? {
+            upgradeSourceType: upgradeSource.type,
+            upgradeSourceHealth: upgradeSource.health,
+            upgradeSourceShields: upgradeSource.shields,
+            upgradeSourceYaw: upgradeSource.yaw,
+            upgradeSourceRallyPoint: { ...upgradeSource.rallyPoint },
+          } : {}),
         };
         if (upgradeSource) {
           this.state.structures = this.state.structures.filter((candidate) => candidate.id !== upgradeSource.id);
@@ -722,7 +864,16 @@ export class GameSimulation {
           node.claimedByStructureId = structure.id;
           this.cancelCompetingResourceExtractorOrders(node.id, constructionPosition);
         }
+        for (const builder of mobileBuilders) {
+          this.assignMobileBuilderToConstruction(builder, structure, command.queued);
+        }
         this.events.push({ type: "constructionStarted", tick: this.state.tick, playerId: command.playerId, structureId: structure.id, structureType: structure.type });
+      } else if (command.type === "cancelConstruction") {
+        const structure = this.state.structures.find((candidate) => candidate.id === command.structureId);
+        if (!structure || structure.ownerPlayerId !== command.playerId || structure.buildProgress >= 1) continue;
+        this.cancelConstructionSite(structure);
+      } else if (command.type === "cancelBuildOrder") {
+        if (!this.cancelPendingBuildOrder(command.playerId, command.buildSequence)) continue;
       } else {
         const structure = this.state.structures.find((candidate) => candidate.id === command.structureId);
         if (!structure || structure.ownerPlayerId !== command.playerId) continue;
@@ -837,6 +988,13 @@ export class GameSimulation {
           structure.buildProgress = 1;
           structure.health = definition.maxHealth;
           structure.shields = definition.maxShield;
+          this.releaseMobileBuildersFromConstruction(structure.id);
+          delete structure.constructionSequence;
+          delete structure.upgradeSourceType;
+          delete structure.upgradeSourceHealth;
+          delete structure.upgradeSourceShields;
+          delete structure.upgradeSourceYaw;
+          delete structure.upgradeSourceRallyPoint;
           this.events.push({
             type: "constructionCompleted", tick: this.state.tick, playerId: player.id,
             structureId: structure.id, structureType: structure.type,
@@ -885,18 +1043,22 @@ export class GameSimulation {
 
   private updateNavigation(): void {
     const navigationStatics = buildNavigableStatics(this.state);
+    const staggerSlowUpdates = this.state.ships.length > STRATEGIC_BATTLE_SHIP_COUNT;
     for (const ship of this.state.ships) {
       const definition = SHIPS[ship.class];
       const order = ship.orders[0];
-      const combatVector = this.getSmallCraftCombatVector(ship, order);
-      if (combatVector) {
-        this.steerShip(ship, combatVector.x, combatVector.z, 1);
-        continue;
-      }
       if (!order || order.type === "hold") {
         ship.vx *= 0.72;
         ship.vz *= 0.72;
         if (Math.hypot(ship.vx, ship.vz) < 0.05) { ship.vx = 0; ship.vz = 0; }
+        continue;
+      }
+      if (staggerSlowUpdates && (this.state.tick + ship.id) % STRATEGIC_NAVIGATION_UPDATE_TICKS !== 0) {
+        continue;
+      }
+      const combatVector = this.getSmallCraftCombatVector(ship, order);
+      if (combatVector) {
+        this.steerShip(ship, combatVector.x, combatVector.z, 1);
         continue;
       }
       const navigableDestination = projectNavigableDestination(this.state, ship, order.destination, navigationStatics);
@@ -1187,10 +1349,16 @@ export class GameSimulation {
   }
 
   private updateTargetingAndTraverse(): void {
-    const targetReevaluationTicks = this.state.ships.length > LARGE_BATTLE_SHIP_COUNT
-      ? LARGE_BATTLE_TARGET_REEVALUATION_TICKS
-      : TARGET_REEVALUATION_TICKS;
+    const weaponUpdateTicks = this.state.ships.length > STRATEGIC_BATTLE_SHIP_COUNT
+      ? strategicWeaponUpdateTicks(this.state.ships.length)
+      : 1;
+    const targetReevaluationTicks = this.state.ships.length > STRATEGIC_BATTLE_SHIP_COUNT
+      ? STRATEGIC_TARGET_REEVALUATION_TICKS
+      : this.state.ships.length > LARGE_BATTLE_SHIP_COUNT
+        ? LARGE_BATTLE_TARGET_REEVALUATION_TICKS
+        : TARGET_REEVALUATION_TICKS;
     for (const ship of this.state.ships) {
+      if (weaponUpdateTicks > 1 && (this.state.tick + ship.id) % weaponUpdateTicks !== 0) continue;
       if (ship.focusTargetEntityId !== null
         && !this.isEntityVisible(ship.teamId, ship.focusTargetEntityId)) {
         ship.focusTargetEntityId = null;
@@ -1205,18 +1373,26 @@ export class GameSimulation {
         }
         const weapon = WEAPONS[turret.weaponTypeId];
         let target = turret.targetEntityId === null ? undefined : this.findTarget(turret.targetEntityId);
-        const mustReevaluate = (this.state.tick + turret.id) % targetReevaluationTicks === 0;
+        const mustReevaluate = (this.state.tick + turret.id) % targetReevaluationTicks < weaponUpdateTicks;
         if (!target || !this.isValidTarget(ship, turret, target) || mustReevaluate) {
           target = this.acquireTarget(ship, turret, targetLoad);
           turret.targetEntityId = target?.id ?? null;
         }
         if (target) {
           targetLoad.set(target.id, (targetLoad.get(target.id) ?? 0) + 1);
-          turret.currentYaw = moveTowardAngle(turret.currentYaw, getLocalBearing(ship, target.x, target.z), weapon.traverseRate * FIXED_DT);
+          turret.currentYaw = moveTowardAngle(
+            turret.currentYaw,
+            getLocalBearing(ship, target.x, target.z),
+            weapon.traverseRate * FIXED_DT * weaponUpdateTicks,
+          );
         } else {
-          turret.currentYaw = moveTowardAngle(turret.currentYaw, turret.yawCenter, weapon.traverseRate * FIXED_DT);
+          turret.currentYaw = moveTowardAngle(
+            turret.currentYaw,
+            turret.yawCenter,
+            weapon.traverseRate * FIXED_DT * weaponUpdateTicks,
+          );
         }
-        if (turret.cooldownRemaining > 0) turret.cooldownRemaining -= 1;
+        if (turret.cooldownRemaining > 0) turret.cooldownRemaining = Math.max(0, turret.cooldownRemaining - weaponUpdateTicks);
       }
     }
   }
@@ -1254,7 +1430,11 @@ export class GameSimulation {
   }
 
   private fireWeapons(): void {
+    const weaponUpdateTicks = this.state.ships.length > STRATEGIC_BATTLE_SHIP_COUNT
+      ? strategicWeaponUpdateTicks(this.state.ships.length)
+      : 1;
     for (const ship of this.state.ships) {
+      if (weaponUpdateTicks > 1 && (this.state.tick + ship.id) % weaponUpdateTicks !== 0) continue;
       const operationalTurretCount = getOperationalTurretCount(ship);
       for (let turretIndex = 0; turretIndex < operationalTurretCount; turretIndex += 1) {
         const turret = ship.turrets[turretIndex]!;
@@ -1268,6 +1448,14 @@ export class GameSimulation {
         const dx = target.x - muzzle.x;
         const dz = target.z - muzzle.z;
         const length = Math.hypot(dx, dz) || 1;
+        const weaponCycleTicks = Math.max(
+          1,
+          (weapon.burstSize - 1) * weapon.burstIntervalTicks + weapon.cooldownTicks,
+        );
+        const consolidatedDamageScale = Math.max(
+          1,
+          weaponUpdateTicks * weapon.burstSize / weaponCycleTicks,
+        );
         const projectileId = this.state.nextEntityId++;
         if (weapon.delivery === "projectile") {
           const projectile: ProjectileState = {
@@ -1275,7 +1463,9 @@ export class GameSimulation {
             weaponTypeId: turret.weaponTypeId, targetEntityId: target.id,
             x: muzzle.x, z: muzzle.z, previousX: muzzle.x, previousZ: muzzle.z,
             vx: dx / length * weapon.projectileSpeed, vz: dz / length * weapon.projectileSpeed,
-            radius: weapon.projectileRadius, damage: weapon.damage, lifetimeTicks: weapon.projectileLifetimeTicks,
+            radius: weapon.projectileRadius,
+            damage: weapon.damage * consolidatedDamageScale,
+            lifetimeTicks: weapon.projectileLifetimeTicks,
           };
           this.state.projectiles.push(projectile);
         }
@@ -1288,7 +1478,9 @@ export class GameSimulation {
           type: "weaponFired", tick: this.state.tick, turretId: turret.id,
           shipId: ship.id, targetId: target.id, projectileId, weaponTypeId: turret.weaponTypeId,
         });
-        if (weapon.delivery === "beam") this.applyDamage(target, weapon.damage, projectileId);
+        if (weapon.delivery === "beam") {
+          this.applyDamage(target, weapon.damage * consolidatedDamageScale, projectileId);
+        }
       }
     }
   }
@@ -1472,6 +1664,7 @@ export class GameSimulation {
       this.events.push({ type: "destroyed", tick: this.state.tick, entityId });
     }
     for (const structure of destroyedStructures) {
+      this.releaseMobileBuildersFromConstruction(structure.id);
       if (structure.resourceNodeId === null) continue;
       const node = this.state.resourceNodes.find((candidate) => candidate.id === structure.resourceNodeId);
       if (node?.claimedByStructureId === structure.id) node.claimedByStructureId = null;

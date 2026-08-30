@@ -67,4 +67,15 @@ export {
   restoreSimulation,
 } from "./simulation";
 export type { ScenarioOptions, ScenarioPlayerConfig } from "./simulation";
+export {
+  createSharedRenderBuffers,
+  SharedRenderReader,
+  SharedRenderWriter,
+  SHARED_RENDER_LAYOUT,
+} from "./shared-render-buffer";
+export type {
+  SharedRenderBuffers,
+  SharedRenderCapacity,
+  SharedRenderFrame,
+} from "./shared-render-buffer";
 export type * from "./types";

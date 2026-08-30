@@ -1,7 +1,37 @@
 import { describe, expect, it } from "vitest";
 import { DEFENSIVE_STRUCTURE_TYPES, SHIPS, STRUCTURES, createCombatScenario } from "../src";
 
-describe("mobile-fabricator defenses", () => {
+describe("defensive structures", () => {
+  it("gives the Command Core four short-range anti-rush mounts", () => {
+    expect(STRUCTURES.commandCore.hardpoints).toHaveLength(4);
+    expect(STRUCTURES.commandCore.hardpoints?.every(
+      (hardpoint) => hardpoint.weaponTypeId === "pointDefense",
+    )).toBe(true);
+
+    const simulation = createCombatScenario({ enemyCommander: false, startingFleet: true });
+    simulation.state.obstacles = [];
+    const core = simulation.state.structures.find(
+      (structure) => structure.ownerPlayerId === "pilot-blue" && structure.type === "commandCore",
+    )!;
+    const raider = simulation.state.ships.find(
+      (ship) => ship.ownerPlayerId === "pilot-red" && ship.class === "fighter",
+    )!;
+    raider.x = core.x;
+    raider.z = core.z + 120;
+    raider.vx = 0;
+    raider.vz = 0;
+    raider.orders = [{ type: "hold", destination: { x: raider.x, z: raider.z }, facing: Math.PI }];
+    simulation.state.ships = [raider];
+
+    const firingMounts = new Set<number>();
+    for (let tick = 0; tick < 30; tick += 1) {
+      for (const event of simulation.step().events) {
+        if (event.type === "weaponFired" && event.shipId === core.id) firingMounts.add(event.turretId);
+      }
+    }
+    expect(firingMounts.size).toBe(4);
+  });
+
   it("exposes distinct fleet-tech T2 and capital-tech T3 batteries", () => {
     expect(DEFENSIVE_STRUCTURE_TYPES).toContain("plasmaBattery");
     expect(DEFENSIVE_STRUCTURE_TYPES).toContain("beamBattery");

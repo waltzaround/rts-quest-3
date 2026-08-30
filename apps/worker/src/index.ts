@@ -1,9 +1,3 @@
-import box3dModule from "@space-rts/box3d-wasm/box3d.wasm";
-import {
-  createPlanarCirclePhysicsWorld,
-  type PlanarCirclePhysicsWorld,
-} from "@space-rts/box3d-wasm";
-import { loadPhysicsRuntimeFromModule } from "@space-rts/box3d-wasm/worker";
 import {
   calculateChecksum,
   createCombatScenario,
@@ -12,6 +6,7 @@ import {
   restoreSimulation,
   SHIPS,
   type GameCommand,
+  type CommandResult,
   type GameSimulation,
   type PlayerViewState,
   type ReplayFile,
@@ -64,11 +59,23 @@ interface PersistedMatch {
   replay?: ReplayFile | null;
   replayCompletedAt?: number | null;
   aiCounter: number;
+  relayTick?: number;
+  relayCommands?: GameCommand[];
+  relayPlayerStates?: RelayPlayerState[];
+}
+
+interface RelayPlayerState {
+  tick: number;
+  playerId: string;
+  state: "playing" | "disconnected";
 }
 
 interface PersistedCheckpointPayload {
   simulation: SimulationState | null;
   replay: ReplayFile | null;
+  relayTick?: number;
+  relayCommands?: GameCommand[];
+  relayPlayerStates?: RelayPlayerState[];
 }
 
 interface PersistedCheckpointManifest {
@@ -87,12 +94,17 @@ interface PersistedMatchMetadata {
   replayCompletedAt: number | null;
   aiCounter: number;
   checkpoint: PersistedCheckpointManifest | null;
+  relayTick?: number;
 }
 
 const PLAYER_COLORS = [0x59a7ff, 0xff5576, 0x62e6a7, 0xf3b65b, 0xb886ff, 0x55e1e8, 0xff8b55, 0xd8e65b];
-const PHYSICS_BACKEND = "box3d-wasm-precompiled";
-const PERSIST_INTERVAL_TICKS = SIMULATION_HZ * 10;
+const PHYSICS_BACKEND = "client-relay-lockstep";
+const PERSIST_INTERVAL_TICKS = SIMULATION_HZ * 300;
 const REPLAY_CHECKPOINT_INTERVAL_TICKS = SIMULATION_HZ * 5;
+// Keep Spring's lightweight NEWFRAME cadence for smooth interpolation. These
+// pulses contain no world data; the expensive traffic was resync snapshots.
+const RELAY_FRAME_BATCH_TICKS = 1;
+const RELAY_SYNC_INTERVAL_TICKS = SIMULATION_HZ;
 const MATCH_METADATA_KEY = "match:metadata:v2";
 const LEGACY_MATCH_KEY = "match";
 const CHECKPOINT_CHUNK_PREFIX = "match:checkpoint:v2:";
@@ -108,7 +120,7 @@ export default {
         ok: true,
         service: "voidfront-authority",
         physics: PHYSICS_BACKEND,
-        physicsModule: box3dModule instanceof WebAssembly.Module ? "ready" : "unavailable",
+        physicsModule: "client-owned",
         simulationHz: SIMULATION_HZ,
       });
     }
@@ -127,7 +139,6 @@ export default {
 
 export class Match implements DurableObject {
   private simulation: GameSimulation | null = null;
-  private physicsWorld: PlanarCirclePhysicsWorld | null = null;
   private timer: ReturnType<typeof setInterval> | undefined;
   private lobby: LobbyState;
   private seed = crypto.getRandomValues(new Uint32Array(1))[0] ?? 0xc0ffee;
@@ -142,22 +153,30 @@ export class Match implements DurableObject {
   private lockstepStateCache: {
     tick: number;
     checksum: number;
+    stateJson: string;
     messages: Map<Extract<ServerMessage, { type: "lockstep_state" }>["reason"], string>;
   } | null = null;
   private persistChain: Promise<void> = Promise.resolve();
   private checkpointManifest: PersistedCheckpointManifest | null = null;
+  private relayTick = 0;
+  private relayCommands: GameCommand[] = [];
+  private relayPlayerStates: RelayPlayerState[] = [];
+  private readonly relaySequences = new Map<string, number>();
+  private readonly syncReports = new Map<number, Map<string, number>>();
+  private readonly peerReportedTicks = new Map<string, number>();
+  private relayIntervalMs = 1000 / SIMULATION_HZ;
+  private relayClockAt = 0;
+  private relayClockAccumulatorMs = 0;
   private readonly soakUnitsPerPlayer: number;
 
   constructor(private readonly ctx: DurableObjectState, private readonly env: Env) {
     const requestedSoakUnits = Number(this.env.VOIDFRONT_SOAK_UNITS_PER_PLAYER ?? 0);
     this.soakUnitsPerPlayer = Number.isInteger(requestedSoakUnits)
-      && requestedSoakUnits >= 2 && requestedSoakUnits <= 1_000
+      && requestedSoakUnits >= 2 && requestedSoakUnits <= 2_000
       ? requestedSoakUnits
       : 0;
     this.lobby = this.createLobby("pending");
     this.ctx.blockConcurrencyWhile(async () => {
-      const physicsRuntime = await loadPhysicsRuntimeFromModule(box3dModule);
-      this.physicsWorld = createPlanarCirclePhysicsWorld(physicsRuntime);
       const persisted = await this.loadPersistedMatch();
       if (!persisted) return;
       const legacySeed = (persisted.lobby as LobbyState & { seed?: unknown }).seed;
@@ -181,8 +200,14 @@ export class Match implements DurableObject {
       this.replay = persisted.replay ?? null;
       this.replayCompletedAt = persisted.replayCompletedAt ?? null;
       this.aiCounter = persisted.aiCounter;
+      this.relayTick = persisted.relayTick ?? persisted.simulation?.tick ?? 0;
+      this.relayCommands = persisted.relayCommands ?? [];
+      this.relayPlayerStates = persisted.relayPlayerStates ?? [];
+      for (const command of this.relayCommands) {
+        this.relaySequences.set(command.playerId, Math.max(this.relaySequences.get(command.playerId) ?? 0, command.sequence));
+      }
       if (persisted.simulation) {
-        this.simulation = restoreSimulation(persisted.simulation, this.physicsWorld);
+        this.simulation = restoreSimulation(persisted.simulation);
         if (this.replay && !this.replay.finalized) {
           this.replayRecorder = ReplayRecorder.resume(this.simulation, this.replay, {
             checkpointIntervalTicks: REPLAY_CHECKPOINT_INTERVAL_TICKS,
@@ -354,12 +379,9 @@ export class Match implements DurableObject {
     }
 
     socket.serializeAttachment({ playerId: slot.playerId } satisfies SocketAttachment);
-    const simPlayer = this.simulation?.state.players.find((player) => player.id === slot.playerId);
-    if (simPlayer && simPlayer.state === "disconnected") {
-      if (this.replayRecorder) this.replayRecorder.setPlayerState(slot.playerId, "playing");
-      else simPlayer.state = "playing";
-      this.invalidatePlayerViews();
-      this.invalidateLockstepState();
+    const lastRelayState = [...this.relayPlayerStates].reverse().find((entry) => entry.playerId === slot.playerId)?.state;
+    if (this.simulation && lastRelayState === "disconnected") {
+      this.relayPlayerStates.push({ tick: this.relayTick, playerId: slot.playerId, state: "playing" });
       this.broadcastPlayerState(slot.playerId, "playing", socket);
     }
     this.sortSlots();
@@ -368,10 +390,11 @@ export class Match implements DurableObject {
       playerId: slot.playerId,
       reconnectToken: this.reconnectTokens[slot.playerId]!,
       lobby: this.publicLobby(),
-      tick: this.simulation?.state.tick ?? 0,
+      tick: this.relayTick,
     });
     if (this.simulation) {
       this.sendSnapshot(socket, reconnecting ? "reconnect" : "join");
+      this.sendRelayHistory(socket);
       this.ensureTicking();
     }
     this.broadcastLobby();
@@ -442,10 +465,11 @@ export class Match implements DurableObject {
       mode: "team",
       teamId: grant.teamId,
       lobby: this.publicLobby(),
-      tick: this.simulation?.state.tick ?? 0,
+      tick: this.relayTick,
     });
     if (this.simulation) {
       this.sendSnapshot(socket, reconnecting ? "reconnect" : "join");
+      this.sendRelayHistory(socket);
       this.ensureTicking();
     }
     this.ctx.waitUntil(this.persist());
@@ -461,7 +485,7 @@ export class Match implements DurableObject {
         type: "pong",
         clientTime: message.clientTime,
         serverTime: Date.now(),
-        tick: this.simulation?.state.tick ?? this.replay?.result.tick ?? 0,
+        tick: this.relayTick || this.replay?.result.tick || 0,
       });
       return;
     }
@@ -504,11 +528,14 @@ export class Match implements DurableObject {
           type: "pong",
           clientTime: message.clientTime,
           serverTime: Date.now(),
-          tick: this.simulation?.state.tick ?? 0,
+          tick: this.relayTick,
         });
         return;
       case "request_snapshot":
-        if (this.simulation) this.sendSnapshot(socket, message.reason);
+        if (this.simulation && message.reason !== "checksum") {
+          this.sendSnapshot(socket, message.reason);
+          this.sendRelayHistory(socket);
+        }
         return;
       case "set_ready":
         if (!this.requireLobby(socket)) return;
@@ -590,11 +617,15 @@ export class Match implements DurableObject {
         this.handleCommands(socket, playerId, message);
         return;
       case "checksum":
-        if (this.simulation) {
-          const view = this.playerView(playerId);
-          if (view && message.tick === view.tick && message.checksum !== view.checksum) {
-            this.sendSnapshot(socket, "checksum");
-          }
+        this.recordSyncReport(playerId, message.tick, message.checksum);
+        return;
+      case "match_finished":
+        if (this.lobby.phase === "playing" && message.tick <= this.relayTick) {
+          this.lobby.phase = "finished";
+          this.replayCompletedAt = Date.now();
+          this.stopTicking();
+          this.broadcastLobby();
+          this.ctx.waitUntil(this.persistCheckpoint());
         }
         return;
       case "request_replay_manifest":
@@ -705,12 +736,17 @@ export class Match implements DurableObject {
     if (this.soakUnitsPerPlayer === 0 && this.simulation.state.ships.length !== 0) {
       throw new Error("Authoritative matches must begin without free ships");
     }
-    if (this.physicsWorld) this.simulation.attachPhysicsWorld(this.physicsWorld);
-    this.replayRecorder = new ReplayRecorder(this.simulation, {
-      checkpointIntervalTicks: REPLAY_CHECKPOINT_INTERVAL_TICKS,
-    });
-    this.replay = this.replayRecorder.archive();
+    // Spring-style relay lockstep: this state is the immutable bootstrap. From
+    // here on clients simulate, while the Durable Object only sequences frames
+    // and commands. This deliberately trades server-side anti-cheat for scale.
+    this.replayRecorder = null;
+    this.replay = null;
     this.replayCompletedAt = null;
+    this.relayTick = this.simulation.state.tick;
+    this.relayCommands = [];
+    this.relayPlayerStates = [];
+    this.relaySequences.clear();
+    this.syncReports.clear();
     this.invalidatePlayerViews();
     this.lobby.phase = "playing";
     this.broadcastLockstepState("start");
@@ -806,20 +842,30 @@ export class Match implements DurableObject {
       // The command must have enough lead time not only to reach the authority,
       // but also to be rebroadcast to every lockstep mirror before execution.
       // Use the sender's observed tick lag as a conservative return-trip estimate.
-      const observedLagTicks = Math.max(0, this.simulation!.state.tick - message.clientTick);
+      const observedLagTicks = Math.max(0, this.relayTick - message.clientTick);
       const deliveryLeadTicks = Math.min(32, Math.max(4, observedLagTicks + 4));
       const requestedTick = Math.max(
         command.requestedTick,
-        this.simulation!.state.tick + deliveryLeadTicks,
+        this.relayTick + deliveryLeadTicks,
       );
       const authoritative = { ...command, playerId, requestedTick } as GameCommand;
-      const result = this.replayRecorder
-        ? this.replayRecorder.submitCommand(authoritative)
-        : this.simulation!.submitCommand(authoritative);
-      if (result.accepted) accepted.push(authoritative);
+      const player = this.simulation!.state.players.find((candidate) => candidate.id === playerId);
+      const lastSequence = this.relaySequences.get(playerId) ?? 0;
+      const result: CommandResult = !player
+        ? { accepted: false as const, reason: "unknownPlayer" }
+        : authoritative.sequence <= lastSequence
+          ? { accepted: false as const, reason: "duplicate" }
+          : requestedTick > this.relayTick + 40
+            ? { accepted: false as const, reason: "timing" }
+            : { accepted: true as const, scheduledTick: requestedTick };
+      if (result.accepted && player) {
+        this.relaySequences.set(playerId, authoritative.sequence);
+        accepted.push(authoritative);
+        this.relayCommands.push(structuredClone(authoritative));
+      }
       return { sequence: authoritative.sequence, commandType: authoritative.type, result };
     });
-    this.send(socket, { type: "command_results", tick: this.simulation.state.tick, outcomes });
+    this.send(socket, { type: "command_results", tick: this.relayTick, outcomes });
     if (accepted.length > 0) {
       this.broadcast({ type: "lockstep_commands", commands: accepted });
       this.invalidatePlayerViews();
@@ -857,12 +903,8 @@ export class Match implements DurableObject {
         successor.isHost = true;
       }
     }
-    const simPlayer = this.simulation?.state.players.find((player) => player.id === playerId);
-    if (simPlayer && simPlayer.state === "playing") {
-      if (this.replayRecorder) this.replayRecorder.setPlayerState(playerId, "disconnected");
-      else simPlayer.state = "disconnected";
-      this.invalidatePlayerViews();
-      this.invalidateLockstepState();
+    if (this.simulation && this.lobby.phase === "playing") {
+      this.relayPlayerStates.push({ tick: this.relayTick, playerId, state: "disconnected" });
       this.broadcastPlayerState(playerId, "disconnected");
     }
     this.broadcastLobby();
@@ -871,32 +913,81 @@ export class Match implements DurableObject {
 
   private tick(): void {
     if (!this.simulation || this.lobby.phase !== "playing") return;
-    const debug = this.replayRecorder ? this.replayRecorder.step() : this.simulation.step();
-    const finished = this.simulation.state.status === "finished";
-    // A match may end between regular view intervals. Always deliver the terminal state
-    // before stopping the authority so clients can show victory/defeat instead of appearing frozen.
-    this.broadcast({
-      type: "lockstep_frame",
-      tick: this.simulation.state.tick,
-      checksum: this.simulation.state.checksum,
-    });
-    if (debug.tick % PERSIST_INTERVAL_TICKS === 0) this.ctx.waitUntil(this.persistCheckpoint());
-    if (finished) {
-      this.lobby.phase = "finished";
-      if (this.replayRecorder) {
-        this.replay = this.replayRecorder.finalize();
-        this.replayRecorder = null;
-        this.replayCompletedAt = Date.now();
+    const now = Date.now();
+    if (this.relayClockAt === 0) this.relayClockAt = now;
+    this.relayClockAccumulatorMs += Math.min(1_000, Math.max(0, now - this.relayClockAt));
+    this.relayClockAt = now;
+    const ticksDue = Math.min(4, Math.floor(this.relayClockAccumulatorMs / this.relayIntervalMs));
+    if (ticksDue === 0) return;
+    this.relayClockAccumulatorMs -= ticksDue * this.relayIntervalMs;
+    for (let index = 0; index < ticksDue; index += 1) {
+      this.relayTick += 1;
+      if (this.relayTick % RELAY_FRAME_BATCH_TICKS === 0) {
+        this.broadcast({ type: "lockstep_frame", tick: this.relayTick, checksum: 0 });
       }
-      this.broadcastLobby();
-      this.ctx.waitUntil(this.persistCheckpoint());
-      this.stopTicking();
+      if (this.relayTick % PERSIST_INTERVAL_TICKS === 0) this.ctx.waitUntil(this.persistCheckpoint());
+    }
+  }
+
+  private sendRelayHistory(socket: WebSocket): void {
+    for (let offset = 0; offset < this.relayCommands.length; offset += 32) {
+      this.send(socket, { type: "lockstep_commands", commands: this.relayCommands.slice(offset, offset + 32) });
+    }
+    for (const transition of this.relayPlayerStates) {
+      this.send(socket, { type: "lockstep_player_state", ...transition });
+    }
+    if (this.simulation && this.relayTick > this.simulation.state.tick) {
+      this.send(socket, { type: "lockstep_frame", tick: this.relayTick, checksum: 0 });
+    }
+  }
+
+  private recordSyncReport(playerId: string, tick: number, checksum: number): void {
+    if (tick <= 0 || tick > this.relayTick || tick % RELAY_SYNC_INTERVAL_TICKS !== 0) return;
+    const reports = this.syncReports.get(tick) ?? new Map<string, number>();
+    reports.set(playerId, checksum);
+    this.peerReportedTicks.set(playerId, tick);
+    this.syncReports.set(tick, reports);
+    const connectedHumans = this.lobby.slots.filter((slot) => !slot.isAi && slot.connected);
+    if (connectedHumans.length > 1 && connectedHumans.every((slot) => reports.has(slot.playerId))) {
+      if (new Set(reports.values()).size > 1) {
+        for (const candidate of this.ctx.getWebSockets()) {
+          const id = this.attachment(candidate).playerId;
+          if (id && reports.has(id)) {
+            this.fail(candidate, "lockstep_desync", `Simulation mismatch detected at tick ${tick}`);
+          }
+        }
+      }
+    }
+    for (const reportTick of this.syncReports.keys()) {
+      if (reportTick < this.relayTick - RELAY_SYNC_INTERVAL_TICKS * 4) this.syncReports.delete(reportTick);
+    }
+    this.adjustRelayPacing();
+  }
+
+  private adjustRelayPacing(): void {
+    const connected = this.lobby.slots.filter((slot) => !slot.isAi && slot.connected);
+    if (connected.length === 0) return;
+    const worstLag = connected.reduce((largest, slot) => {
+      const reported = this.peerReportedTicks.get(slot.playerId) ?? this.relayTick;
+      return Math.max(largest, this.relayTick - reported);
+    }, 0);
+    const intervalMs = worstLag > SIMULATION_HZ ? 100
+      : worstLag > 8 ? 1000 / 15
+      : 1000 / SIMULATION_HZ;
+    if (Math.abs(intervalMs - this.relayIntervalMs) < 1) return;
+    this.relayIntervalMs = intervalMs;
+    if (this.timer !== undefined) {
+      clearInterval(this.timer);
+      this.relayClockAt = Date.now();
+      this.timer = setInterval(() => this.tick(), this.relayIntervalMs);
     }
   }
 
   private ensureTicking(): void {
     if (this.timer !== undefined || !this.simulation || this.lobby.phase !== "playing") return;
-    this.timer = setInterval(() => this.tick(), 1000 / SIMULATION_HZ);
+    this.relayClockAt = Date.now();
+    this.relayClockAccumulatorMs = 0;
+    this.timer = setInterval(() => this.tick(), this.relayIntervalMs);
   }
 
   private stopTicking(): void {
@@ -973,7 +1064,7 @@ export class Match implements DurableObject {
     if (!this.simulation) return;
     const message: ServerMessage = {
       type: "lockstep_player_state",
-      tick: this.simulation.state.tick,
+      tick: this.relayTick,
       playerId,
       state,
     };
@@ -991,17 +1082,16 @@ export class Match implements DurableObject {
     if (!this.lockstepStateCache
       || this.lockstepStateCache.tick !== tick
       || this.lockstepStateCache.checksum !== checksum) {
-      this.lockstepStateCache = { tick, checksum, messages: new Map() };
+      this.lockstepStateCache = {
+        tick,
+        checksum,
+        stateJson: JSON.stringify(this.simulation.snapshot()),
+        messages: new Map(),
+      };
     }
     const cached = this.lockstepStateCache.messages.get(reason);
     if (cached) return cached;
-    const serialized = JSON.stringify({
-      type: "lockstep_state",
-      tick,
-      checksum,
-      state: this.simulation.snapshot(),
-      reason,
-    } satisfies ServerMessage);
+    const serialized = `{"type":"lockstep_state","tick":${tick},"checksum":${checksum},"state":${this.lockstepStateCache.stateJson},"reason":${JSON.stringify(reason)}}`;
     this.lockstepStateCache.messages.set(reason, serialized);
     return serialized;
   }
@@ -1168,6 +1258,9 @@ export class Match implements DurableObject {
       replay: checkpoint?.replay ?? legacy?.replay ?? null,
       replayCompletedAt: metadata.replayCompletedAt,
       aiCounter: metadata.aiCounter,
+      relayTick: checkpoint?.relayTick ?? metadata.relayTick ?? legacy?.relayTick ?? 0,
+      relayCommands: checkpoint?.relayCommands ?? legacy?.relayCommands ?? [],
+      relayPlayerStates: checkpoint?.relayPlayerStates ?? legacy?.relayPlayerStates ?? [],
     };
   }
 
@@ -1231,6 +1324,7 @@ export class Match implements DurableObject {
       replayCompletedAt: this.replayCompletedAt,
       aiCounter: this.aiCounter,
       checkpoint,
+      relayTick: this.relayTick,
     };
   }
 
@@ -1239,6 +1333,9 @@ export class Match implements DurableObject {
     const payload: PersistedCheckpointPayload = {
       simulation: this.simulation?.snapshot() ?? null,
       replay: this.replay,
+      relayTick: this.relayTick,
+      relayCommands: this.relayCommands,
+      relayPlayerStates: this.relayPlayerStates,
     };
     const bytes = new TextEncoder().encode(JSON.stringify(payload));
     const chunkCount = Math.ceil(bytes.byteLength / CHECKPOINT_CHUNK_BYTES);
@@ -1246,7 +1343,7 @@ export class Match implements DurableObject {
       throw new Error(`Checkpoint requires ${chunkCount} chunks; maximum is ${MAX_CHECKPOINT_CHUNKS}`);
     }
 
-    const generation = `${this.simulation?.state.tick ?? 0}-${crypto.randomUUID()}`;
+    const generation = `${this.relayTick}-${crypto.randomUUID()}`;
     for (let startIndex = 0; startIndex < chunkCount; startIndex += CHECKPOINT_STORAGE_BATCH) {
       const entries: Record<string, Uint8Array> = {};
       for (let index = startIndex; index < Math.min(startIndex + CHECKPOINT_STORAGE_BATCH, chunkCount); index += 1) {
@@ -1287,7 +1384,8 @@ export class Match implements DurableObject {
   }
 
   private broadcast(message: ServerMessage): void {
-    for (const socket of this.ctx.getWebSockets()) this.send(socket, message);
+    const serialized = JSON.stringify(message);
+    for (const socket of this.ctx.getWebSockets()) this.sendRaw(socket, serialized);
   }
 
   private fail(socket: WebSocket, code: string, message: string): void {

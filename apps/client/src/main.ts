@@ -24,6 +24,8 @@ import {
   getTurretWorldPosition,
   parseReplay,
   restoreSimulation,
+  createSharedRenderBuffers,
+  SharedRenderReader,
   type DebugSnapshot,
   type CombatTargetState,
   type EconomyCommand,
@@ -40,6 +42,7 @@ import {
   type ShipState,
   type SimulationState,
   type SimulationEvent,
+  type SharedRenderBuffers,
   type StructureState,
   type StructureType,
   type WeaponTypeId,
@@ -321,6 +324,112 @@ const STRUCTURE_ICONS: Readonly<Record<StructureType, string>> = {
   plasmaBattery: "◉",
   beamBattery: "⌁",
 };
+
+const SHIP_COMMAND_DESCRIPTIONS: Readonly<Record<ShipClass, string>> = {
+  fighter: "Fast interceptor squadron. Excellent at screening bombers and overwhelming isolated targets, but vulnerable to flak.",
+  fabricator: "Mobile construction vessel for forward bases, expansion routes, and battlefield repairs.",
+  frigate: "Flexible escort with plasma batteries and point defence. Reliable protection for larger hulls.",
+  bomber: "Strike squadron carrying anti-capital torpedoes. Devastating against large ships when left uncontested.",
+  flakFrigate: "Dedicated anti-strike-craft escort. Its overlapping point-defence arcs punish fighters and bombers.",
+  torpedoFrigate: "Long-range anti-ship platform. Strong against capital hulls, but dependent on escorts at close range.",
+  destroyer: "Armoured line combatant with rail, plasma, and point-defence batteries for sustained fleet engagements.",
+  cruiser: "Heavy multirole warship with broad weapon coverage, durable shields, and strong fleet presence.",
+  carrier: "Command-scale support hull with extensive defensive coverage and exceptional sensor reach.",
+  battleship: "Fleet-breaking capital ship. Extremely durable and heavily armed, but slow to turn and expensive to replace.",
+};
+
+const FLEET_COMMAND_TOOLTIPS: Readonly<Record<string, string>> = {
+  "cmd-move": "Move the selected formation to a destination while preserving its current engagement posture.",
+  "cmd-attack": "Advance toward a destination and engage hostile contacts encountered along the route.",
+  "cmd-patrol": "Patrol repeatedly between the current position and a chosen destination.",
+  focus: "Concentrate the selected fleet's weapons on one hostile target.",
+  "cmd-stop": "Cancel current movement and combat orders immediately.",
+  "cmd-hold": "Hold position and engage targets without pursuing them.",
+  "set-rally": "Set the selected shipyard's launch destination and formation facing.",
+};
+
+function structureCommandDescription(type: StructureType): string {
+  const definition = STRUCTURES[type];
+  if ((definition.hardpoints?.length ?? 0) > 0) return `${fortressLoadoutSummary(type as (typeof DEFENSIVE_STRUCTURE_TYPES)[number])}. Fixed fortress providing layered control of the surrounding battlespace.`;
+  if (definition.alloyIncome > 0) return `Generates ${definition.alloyIncome} alloy per economy cycle${definition.energyUpkeep > 0 ? ` at ${definition.energyUpkeep} energy upkeep` : ""}.`;
+  if (definition.energyIncome > 0) return `Generates ${definition.energyIncome} energy per economy cycle with no external energy upkeep.`;
+  if (definition.alloyStorage > 0 || definition.energyStorage > 0) return `Expands reserves by ${definition.alloyStorage} alloy and ${definition.energyStorage} energy.`;
+  if (definition.buildPower > 0) return `Static fabrication hub with ${definition.buildPower.toFixed(1)}× build power and ${definition.assistRange} assist range.`;
+  if (type === "shipyard") return "Produces fighters, bombers, fabricators, and light escort ships.";
+  if (type === "fleetShipyard") return "Produces frigates, destroyers, and cruisers for sustained fleet combat.";
+  if (type === "capitalShipyard") return "Constructs carriers and battleships. The foundation of a late-game capital fleet.";
+  if (type === "radarArray" || type === "phasedRadarArray" || type === "deepSpaceRadarArray") return `Provides ${definition.sensorRange} units of radar coverage without energy upkeep.`;
+  return "Expands fleet infrastructure and unlocks additional construction options.";
+}
+
+function installCommandTooltips(): void {
+  const tooltip = element("command-tooltip");
+  const structureByButton = new Map(Object.entries(STRUCTURE_BUTTON_IDS).map(([type, id]) => [id, type as StructureType]));
+  const shipByButton = new Map(Object.entries(SHIP_BUTTON_IDS).map(([shipClass, id]) => [id, shipClass as ShipClass]));
+  let activeButton: HTMLButtonElement | null = null;
+
+  const hide = () => {
+    activeButton = null;
+    tooltip.classList.remove("visible");
+    tooltip.setAttribute("aria-hidden", "true");
+  };
+  const show = (button: HTMLButtonElement) => {
+    if (button.closest(".construction-tabs")) return;
+    const structureType = structureByButton.get(button.id);
+    const shipClass = shipByButton.get(button.id);
+    const commandDescription = FLEET_COMMAND_TOOLTIPS[button.id];
+    if (!structureType && !shipClass && !commandDescription) return;
+    activeButton = button;
+    const hotkey = button.querySelector("kbd")?.textContent?.trim();
+    const lockedReason = button.classList.contains("locked")
+      ? button.querySelector<HTMLElement>(".command-lock")?.textContent?.trim()
+      : "";
+    let title = button.querySelector("span")?.textContent?.trim() ?? "COMMAND";
+    let description = commandDescription ?? "";
+    let cost = "";
+    const stats: string[] = [];
+    if (structureType) {
+      const definition = STRUCTURES[structureType];
+      title = STRUCTURE_LABELS[structureType];
+      description = structureCommandDescription(structureType);
+      cost = `${definition.alloyCost} ALLOY · ${definition.energyCost} ENERGY · ${(definition.buildTicks / 20).toFixed(1)}s BUILD`;
+      stats.push(`${definition.maxHealth} HULL`, `${definition.maxShield} SHIELD`);
+      if (definition.sensorRange > 0) stats.push(`${definition.sensorRange} SENSOR`);
+    } else if (shipClass) {
+      const ship = SHIPS[shipClass];
+      const economy = SHIP_ECONOMY[shipClass];
+      title = SHIP_LABELS[shipClass];
+      description = SHIP_COMMAND_DESCRIPTIONS[shipClass];
+      cost = `${economy.alloyCost} ALLOY · ${economy.energyCost} ENERGY · ${(economy.buildTicks / 20).toFixed(1)}s BUILD${economy.batchSize > 1 ? ` · ×${economy.batchSize}` : ""}`;
+      stats.push(`${ship.maxHealth} HULL`, `${ship.maxShield} SHIELD`, `${ship.speed} SPEED`, `${ship.hardpoints.length} WEAPONS`);
+    }
+    tooltip.innerHTML = `<h3>${escapeHtml(title)}${hotkey ? `<span class="tooltip-hotkey">[${escapeHtml(hotkey)}]</span>` : ""}</h3>${cost ? `<div class="tooltip-cost">${escapeHtml(cost)}</div>` : ""}<p class="tooltip-description">${escapeHtml(description)}</p>${stats.length > 0 ? `<div class="tooltip-stats">${stats.map((stat) => `<span>${escapeHtml(stat)}</span>`).join("")}</div>` : ""}${lockedReason ? `<div class="tooltip-requirement">${escapeHtml(lockedReason)}</div>` : ""}`;
+    tooltip.setAttribute("aria-hidden", "false");
+    tooltip.classList.add("visible");
+    const buttonRect = button.getBoundingClientRect();
+    const tooltipRect = tooltip.getBoundingClientRect();
+    const left = Math.min(window.innerWidth - tooltipRect.width - 8, Math.max(8, buttonRect.right - tooltipRect.width));
+    let top = buttonRect.top - tooltipRect.height - 10;
+    if (top < 8) top = Math.min(window.innerHeight - tooltipRect.height - 8, buttonRect.bottom + 10);
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
+  };
+  document.addEventListener("pointerover", (event) => {
+    const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>(".command-grid button") : null;
+    if (button && button !== activeButton) show(button);
+  });
+  document.addEventListener("pointerout", (event) => {
+    if (!activeButton) return;
+    const destination = event.relatedTarget;
+    if (!(destination instanceof Node) || !activeButton.contains(destination)) hide();
+  });
+  document.addEventListener("focusin", (event) => {
+    if (event.target instanceof HTMLButtonElement && event.target.closest(".command-grid")) show(event.target);
+  });
+  document.addEventListener("focusout", (event) => {
+    if (event.target === activeButton) hide();
+  });
+}
 
 function isDefensiveStructureType(type: StructureType): type is (typeof DEFENSIVE_STRUCTURE_TYPES)[number] {
   return DEFENSIVE_STRUCTURE_TYPES.includes(type as (typeof DEFENSIVE_STRUCTURE_TYPES)[number]);
@@ -859,6 +968,34 @@ let lockstepTargetChecksum = 0;
 let lockstepResyncPending = false;
 let lockstepResyncCooldownUntil = 0;
 let lockstepChecksumGraceTick = 0;
+let lastLockstepSyncReportTick = -1;
+let lockstepResultReported = false;
+const sharedSimulationTrialEnabled = new URLSearchParams(location.search).get("shared-sim") === "1";
+let sharedSimulationWorker: Worker | null = null;
+let sharedRenderReader: SharedRenderReader | null = null;
+let sharedSimulationBuffers: SharedRenderBuffers | null = null;
+
+function initializeSharedSimulationTrial(state: SimulationState): void {
+  sharedSimulationWorker?.terminate();
+  sharedSimulationWorker = null;
+  sharedRenderReader = null;
+  sharedSimulationBuffers = null;
+  if (!sharedSimulationTrialEnabled || !crossOriginIsolated || typeof SharedArrayBuffer === "undefined") return;
+  const turretCount = state.ships.reduce((sum, ship) => sum + ship.turrets.length, 0);
+  const buffers = createSharedRenderBuffers({
+    ships: Math.max(4_096, Math.ceil(state.ships.length * 1.5)),
+    turrets: Math.max(16_384, Math.ceil(turretCount * 1.5)),
+    projectiles: Math.max(16_384, Math.ceil(state.projectiles.length * 2 + 4_096)),
+  });
+  const worker = new Worker(new URL("./simulation-render.worker.ts", import.meta.url), { type: "module" });
+  worker.addEventListener("message", (event: MessageEvent<{ type: string; message?: string }>) => {
+    if (event.data.type === "error") showNetworkError(event.data.message ?? "Shared simulation worker failed");
+  });
+  worker.postMessage({ type: "initialize", state, buffers });
+  sharedSimulationWorker = worker;
+  sharedSimulationBuffers = buffers;
+  sharedRenderReader = new SharedRenderReader(buffers);
+}
 let networkInterpolationStartedAt = performance.now();
 let lastDebug: DebugSnapshot = simulation.debugSnapshot();
 let accumulator = 0;
@@ -1774,6 +1911,7 @@ function handleServerMessage(message: ServerMessage): void {
       return;
     case "lockstep_commands":
       for (const command of message.commands) simulation.submitCommand(command);
+      sharedSimulationWorker?.postMessage({ type: "commands", commands: message.commands });
       return;
     case "lockstep_player_state": {
       serverTick = Math.max(serverTick, message.tick);
@@ -1781,6 +1919,9 @@ function handleServerMessage(message: ServerMessage): void {
       while (simulation.state.tick < message.tick) tickSimulation();
       const player = simulation.state.players.find((candidate) => candidate.id === message.playerId);
       if (player && player.state !== "defeated") player.state = message.state;
+      sharedSimulationWorker?.postMessage({
+        type: "player_state", playerId: message.playerId, state: message.state, tick: message.tick,
+      });
       return;
     }
     case "lockstep_frame":
@@ -1789,6 +1930,7 @@ function handleServerMessage(message: ServerMessage): void {
       if (message.tick >= lockstepTargetTick) {
         lockstepTargetTick = message.tick;
         lockstepTargetChecksum = message.checksum;
+        sharedSimulationWorker?.postMessage({ type: "advance", targetTick: message.tick });
       }
       return;
     case "match_started":
@@ -1851,12 +1993,15 @@ function handleServerMessage(message: ServerMessage): void {
 
 function installLockstepState(state: SimulationState, notice?: string): void {
   simulation = restoreSimulation(state, physicsWorld ?? undefined);
+  initializeSharedSimulationTrial(state);
   const localPlayer = state.players.find((player) => player.id === localPlayerId);
   if (localPlayer) commandSequence = Math.max(commandSequence, localPlayer.lastCommandSequence);
   lockstepTargetTick = state.tick;
   lockstepTargetChecksum = state.checksum;
   lockstepResyncPending = false;
   lockstepChecksumGraceTick = state.tick + 20;
+  lastLockstepSyncReportTick = state.tick;
+  lockstepResultReported = state.status === "finished";
   networkView = null;
   accumulator = 0;
   networkInterpolationStartedAt = performance.now();
@@ -1878,6 +2023,9 @@ function installLockstepState(state: SimulationState, notice?: string): void {
 }
 
 function verifyLockstepFrame(): void {
+  // A zero checksum is a Spring-style relay frame pulse. Authoritative hashes
+  // now come from sparse peer sync reports rather than a server-side simulation.
+  if (lockstepTargetChecksum === 0) return;
   if (simulation.state.tick !== lockstepTargetTick || simulation.state.tick < lockstepChecksumGraceTick) return;
   if (simulation.state.checksum === lockstepTargetChecksum) return;
   const now = performance.now();
@@ -2112,7 +2260,8 @@ function clearWorldVisuals(): void {
 }
 
 function updateNetworkLobby(lobby: LobbyState): void {
-  const needsTerminalSnapshot = lobby.phase === "finished" && networkView?.status !== "finished";
+  const needsTerminalSnapshot = lobby.phase === "finished"
+    && (networkView ? networkView.status !== "finished" : simulation.state.status !== "finished");
   networkLobby = lobby;
   renderLobby();
   if (needsTerminalSnapshot) sendNetworkMessage({ type: "request_snapshot", reason: "manual" });
@@ -2741,21 +2890,80 @@ function createStructureVisual(structure: StructureState): StructureVisual {
   let turret: THREE.Group | null = null;
 
   if (structure.type === "commandCore") {
-    const base = new THREE.Mesh(new THREE.CylinderGeometry(27, 33, 9, 8), hull);
-    base.position.y = 4.5;
-    group.add(base);
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(28, 2.5, 6, 24), dark);
-    ring.rotation.x = Math.PI / 2;
-    ring.position.y = 10;
-    group.add(ring);
-    const tower = new THREE.Mesh(new THREE.CylinderGeometry(8, 13, 24, 6), accent);
-    tower.position.y = 17;
-    group.add(tower);
+    const foundation = new THREE.Mesh(new THREE.CylinderGeometry(35, 38, 7, 8), dark);
+    foundation.position.y = 3.5;
+    group.add(foundation);
+    const armoredDeck = new THREE.Mesh(new THREE.CylinderGeometry(31, 35, 6, 8), hull);
+    armoredDeck.position.y = 8;
+    group.add(armoredDeck);
+    const perimeter = new THREE.Mesh(new THREE.TorusGeometry(33, 1.4, 5, 32), accent);
+    perimeter.rotation.x = Math.PI / 2;
+    perimeter.position.y = 9.5;
+    group.add(perimeter);
+
+    // A compact command keep makes the core read as a fortress, while the open
+    // radial gantries retain the visual language of a large construction hub.
+    const keep = new THREE.Mesh(new THREE.CylinderGeometry(9, 15, 25, 8), hull);
+    keep.position.y = 21;
+    group.add(keep);
+    const keepInset = new THREE.Mesh(new THREE.CylinderGeometry(6.5, 10.5, 21, 8), dark);
+    keepInset.position.y = 23;
+    group.add(keepInset);
+    const crown = new THREE.Mesh(new THREE.CylinderGeometry(10.5, 10.5, 3.2, 8), accent);
+    crown.position.y = 34.5;
+    group.add(crown);
+    const constructionCore = new THREE.Mesh(new THREE.OctahedronGeometry(4.4, 0), accent);
+    constructionCore.position.y = 38.5;
+    group.add(constructionCore);
+
     for (let index = 0; index < 4; index += 1) {
-      const arm = new THREE.Mesh(new THREE.BoxGeometry(7, 4, 28), dark);
-      arm.position.y = 7;
-      arm.rotation.y = index * Math.PI / 2;
-      group.add(arm);
+      const angle = index * Math.PI / 2;
+      const wallSection = new THREE.Group();
+      wallSection.rotation.y = angle;
+      const wall = new THREE.Mesh(new THREE.BoxGeometry(23, 7, 5.5), hull);
+      wall.position.set(0, 11.5, 27);
+      wallSection.add(wall);
+      const wallInset = new THREE.Mesh(new THREE.BoxGeometry(14, 2.2, 6.2), accent);
+      wallInset.position.set(0, 12.5, 27);
+      wallSection.add(wallInset);
+
+      const gantry = new THREE.Mesh(new THREE.BoxGeometry(4.5, 4, 26), dark);
+      gantry.position.set(0, 25, 11);
+      gantry.rotation.x = -0.08;
+      wallSection.add(gantry);
+      const gantryRail = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.2, 25), accent);
+      gantryRail.position.set(0, 27.2, 11);
+      gantryRail.rotation.x = -0.08;
+      wallSection.add(gantryRail);
+      const toolHead = new THREE.Mesh(new THREE.OctahedronGeometry(3.1, 0), accent);
+      toolHead.position.set(0, 22.2, 24.5);
+      wallSection.add(toolHead);
+      const bay = new THREE.Mesh(new THREE.BoxGeometry(13, 0.75, 9), accent);
+      bay.position.set(0, 12.1, 18.5);
+      wallSection.add(bay);
+      group.add(wallSection);
+    }
+
+    for (const hardpoint of definition.hardpoints ?? []) {
+      const mount = new THREE.Group();
+      mount.position.set(hardpoint.localX, 13.8, hardpoint.localZ);
+      mount.rotation.y = Math.atan2(hardpoint.localX, hardpoint.localZ);
+      group.add(mount);
+      const bastion = new THREE.Mesh(new THREE.CylinderGeometry(6.2, 7.6, 7.5, 8), hull);
+      bastion.position.y = -2.7;
+      mount.add(bastion);
+      const cupola = new THREE.Mesh(new THREE.CylinderGeometry(3.4, 4.3, 3.2, 8), dark);
+      cupola.position.y = 1.4;
+      mount.add(cupola);
+      for (const side of [-1, 1]) {
+        const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.85, 1.15, 8.5), dark);
+        barrel.position.set(side * 1.2, 3, 3.6);
+        barrel.rotation.x = -0.1;
+        mount.add(barrel);
+      }
+      const trackingNode = new THREE.Mesh(new THREE.OctahedronGeometry(1.35, 0), accent);
+      trackingNode.position.set(0, 4.3, -1.2);
+      mount.add(trackingNode);
     }
   } else if (isResourceExtractorType(structure.type)) {
     const extractorScale = structure.type === "singularityHarvester" ? 1.55
@@ -3716,6 +3924,20 @@ function tickSimulation(): void {
   battleAudio.captureWorld(before.ships, before.structures);
   for (const ship of before.ships) previousTransforms.set(ship.id, captureTransform(ship));
   lastDebug = simulation.step();
+  if (networkMode && !networkView && simulation.state.tick > 0
+    && simulation.state.tick % 20 === 0 && simulation.state.tick !== lastLockstepSyncReportTick) {
+    lastLockstepSyncReportTick = simulation.state.tick;
+    sendNetworkMessage({ type: "checksum", tick: simulation.state.tick, checksum: simulation.state.checksum });
+  }
+  if (networkMode && simulation.state.status === "finished" && !lockstepResultReported) {
+    lockstepResultReported = true;
+    sendNetworkMessage({
+      type: "match_finished",
+      tick: simulation.state.tick,
+      checksum: simulation.state.checksum,
+      winnerTeamId: simulation.state.winnerTeamId,
+    });
+  }
   clientView = buildClientVisibilityView();
   const visibleEvents = lastDebug.events.filter((event) => isEventVisible(event, before, clientView));
   if (!landingLobbyActive) {
@@ -4311,10 +4533,12 @@ function updateSelectionHud(): void {
   const empty = element("command-empty");
   const fleetControls = element("fleet-controls");
   const constructionControls = element("construction-controls");
+  const constructionSiteControls = element("construction-site-controls");
   const productionControls = element("production-controls");
   const queueConsole = element("selection-queue");
   fleetControls.classList.add("hidden");
   constructionControls.classList.add("hidden");
+  constructionSiteControls.classList.add("hidden");
   productionControls.classList.add("hidden");
   queueConsole.classList.add("hidden");
   if (!canIssuePlayerCommands() || structures.length > 0 || ships.length <= 1) clearSelectionRoster();
@@ -4392,8 +4616,12 @@ function updateSelectionHud(): void {
       const fabricatorLabel = assistingFabricatorIds.length > 0
         ? `${assistingFabricatorIds.length} FABRICATOR${assistingFabricatorIds.length === 1 ? "" : "S"} ASSISTING`
         : "BASE CONSTRUCTION CREW";
-      empty.classList.remove("hidden");
-      empty.innerHTML = `<span>${Math.floor(primary.buildProgress * 100)}%</span><p>${fabricatorLabel}<small class="${gridLimited ? "grid-limited" : ""}">${buildPower.toFixed(1)}× BUILD POWER${gridLimited ? ` · GRID ${Math.round((player?.economy?.efficiency ?? 1) * 100)}%` : ""}</small></p>`;
+      const progressPercent = Math.floor(primary.buildProgress * 100);
+      constructionSiteControls.classList.remove("hidden");
+      element("construction-site-label").textContent = `${fabricatorLabel} · ${buildPower.toFixed(1)}× POWER`;
+      element("construction-site-progress").textContent = `${progressPercent}%`;
+      element("construction-site-progress-bar").style.width = `${progressPercent}%`;
+      element<HTMLButtonElement>("cancel-construction").disabled = primary.ownerPlayerId !== localPlayerId;
       element("command-context-title").textContent = structureLabel(primary.type);
       element("command-context-subtitle").textContent = gridLimited ? "CONSTRUCTION GRID LIMITED" : "CONSTRUCTION ACTIVE";
     } else if (primary.type === "commandCore" || primary.type === "fabricator") {
@@ -4458,6 +4686,7 @@ function updateSelectionHud(): void {
   const mobileBuilders = ships.filter((ship) => SHIPS[ship.class].buildPower > 0);
   if (mobileBuilders.length === ships.length) {
     constructionControls.classList.remove("hidden");
+    renderSelectedConstructionQueue(mobileBuilders);
     element("command-context-title").textContent = "MOBILE CONSTRUCTION";
     element("command-context-subtitle").textContent = ships.length === 1
       ? `FABRICATOR ${ships[0]!.id} · ${SHIPS[ships[0]!.class].buildPower.toFixed(2)}× POWER`
@@ -4487,6 +4716,9 @@ function renderSelectedProduction(): void {
     return;
   }
   console.classList.remove("hidden");
+  console.classList.remove("construction-mode");
+  element("production-queue-actions").classList.remove("hidden");
+  element("construction-queue-actions").classList.add("hidden");
   const totalQueued = shipyards.reduce((sum, shipyard) => sum + shipyard.productionQueue.length, 0);
   const activeShipyards = shipyards.filter((shipyard) => shipyard.productionQueue[0]);
   const primary = shipyards.find((shipyard) => shipyard.id === primaryStructureId) ?? activeShipyards[0] ?? shipyards[0]!;
@@ -4525,6 +4757,46 @@ function renderSelectedProduction(): void {
     const separator = yardIndex < shipyards.length - 1 ? '<span class="queue-lane-separator"></span>' : "";
     return `${label}${tokens || '<span class="queue-lane-label">IDLE</span>'}${separator}`;
   }).join("");
+}
+
+function selectedBuilderBuildOrders(builderIds: ReadonlySet<number>): Extract<EconomyCommand, { type: "buildStructure" }>[] {
+  const commands = networkMode
+    ? [...pendingNetworkBuilds.values()]
+    : simulation.state.commandQueue.filter((command): command is Extract<GameCommand, { type: "buildStructure" }> =>
+      command.type === "buildStructure",
+    );
+  return commands
+    .filter((command) => command.playerId === localPlayerId
+      && (command.builderUnitIds ?? []).some((builderId) => builderIds.has(builderId)))
+    .sort((left, right) => left.sequence - right.sequence);
+}
+
+function renderSelectedConstructionQueue(builders: readonly ShipState[]): void {
+  const console = element("selection-queue");
+  const builderIds = new Set(builders.map((builder) => builder.id));
+  const activeConstructionIds = new Set(builders.flatMap((builder) =>
+    builder.orders.flatMap((order) => order.constructionId === undefined ? [] : [order.constructionId])));
+  const activeSites = clientView.structures
+    .filter((structure) => activeConstructionIds.has(structure.id) && structure.buildProgress < 1)
+    .sort((left, right) => left.id - right.id);
+  const queuedOrders = selectedBuilderBuildOrders(builderIds);
+  const active = activeSites[0];
+  console.classList.remove("hidden");
+  console.classList.add("construction-mode");
+  element("production-queue-actions").classList.add("hidden");
+  element("construction-queue-actions").classList.remove("hidden");
+  element("production-label").textContent = active
+    ? `${structureLabel(active.type)} // ${Math.floor(active.buildProgress * 100)}%`
+    : queuedOrders.length > 0 ? "FABRICATORS EN ROUTE" : "BUILD ROUTE IDLE";
+  element("queue-count").textContent = `${activeSites.length} ACTIVE · ${queuedOrders.length} QUEUED`;
+  element("production-progress").style.width = `${(active?.buildProgress ?? 0) * 100}%`;
+  element<HTMLButtonElement>("clear-build-queue").disabled = queuedOrders.length === 0;
+  const activeTokens = activeSites.map((site) =>
+    `<button class="queue-token active-construction" data-construction-id="${site.id}" title="Cancel active ${escapeHtml(structureLabel(site.type))}">${escapeHtml(STRUCTURE_ICONS[site.type])}<em>${Math.floor(site.buildProgress * 100)}%</em></button>`);
+  const queuedTokens = queuedOrders.map((command, index) =>
+    `<button class="queue-token queued-construction" data-build-sequence="${command.sequence}" title="Cancel queued ${escapeHtml(structureLabel(command.structureType))}">${escapeHtml(STRUCTURE_ICONS[command.structureType])}<em>${index + 1}</em></button>`);
+  element("queue-items").innerHTML = [...activeTokens, ...queuedTokens].join("")
+    || '<span class="queue-lane-label">HOLD SHIFT WHILE PLACING TO QUEUE A BUILD ROUTE</span>';
 }
 
 function setRallyPointMode(enabled: boolean): void {
@@ -4600,8 +4872,12 @@ function setProgressionButtonState(button: HTMLButtonElement, unlocked: boolean,
 }
 
 function updateProductionRosterVisibility(): void {
+  const selectedYardTypes = new Set(getSelectedShipyards().map((yard) => yard.type));
   for (const shipClass of SHIP_CLASSES) {
-    element<HTMLButtonElement>(SHIP_BUTTON_IDS[shipClass]).classList.remove("hidden");
+    element<HTMLButtonElement>(SHIP_BUTTON_IDS[shipClass]).classList.toggle(
+      "hidden",
+      !selectedYardTypes.has(SHIP_ECONOMY[shipClass].yardType),
+    );
   }
 }
 
@@ -4690,7 +4966,7 @@ function setStructureMode(type: BuildableStructureType | null): void {
   }
   const banner = element("command-mode");
   banner.classList.toggle("visible", type !== null || pendingCommandMode !== null || pendingRallyPoint);
-  if (type !== null) banner.textContent = `${structureLabel(type)} // SELECT VALID BUILD SITE`;
+  if (type !== null) banner.textContent = `${structureLabel(type)} // CLICK PLACE · DRAG ROTATE · SHIFT QUEUE · RMB CANCEL`;
 }
 
 function structureLabel(type: StructureType): string {
@@ -4825,6 +5101,60 @@ function issueBuildStructure(
     showToast(`BUILD REJECTED // ${result.reason.toUpperCase()}`);
   }
   if (!keepPlacing) setStructureMode(null);
+}
+
+function issueCancelConstruction(structureId: number): boolean {
+  const construction = clientView.structures.find((structure) =>
+    structure.id === structureId
+    && structure.ownerPlayerId === localPlayerId
+    && structure.buildProgress < 1,
+  );
+  if (!construction) return false;
+  commandSequence += 1;
+  const result = submitPlayerCommand({
+    type: "cancelConstruction", playerId: localPlayerId, sequence: commandSequence,
+    requestedTick: nextCommandTick(), structureId,
+  });
+  if (!result.accepted) {
+    showToast(`CANCEL REJECTED // ${result.reason.toUpperCase()}`);
+    return false;
+  }
+  element("directive").textContent = `${structureLabel(construction.type)} CONSTRUCTION CANCELLED`;
+  showToast("CONSTRUCTION CANCELLED");
+  return true;
+}
+
+function issueCancelBuildOrder(buildSequence: number, notify = true): boolean {
+  const pending = pendingNetworkBuilds.get(buildSequence)
+    ?? simulation.state.commandQueue.find((command): command is Extract<GameCommand, { type: "buildStructure" }> =>
+      command.type === "buildStructure" && command.playerId === localPlayerId && command.sequence === buildSequence,
+    );
+  if (!pending) return false;
+  commandSequence += 1;
+  const result = submitPlayerCommand({
+    type: "cancelBuildOrder", playerId: localPlayerId, sequence: commandSequence,
+    requestedTick: nextCommandTick(), buildSequence,
+  });
+  if (!result.accepted) {
+    if (notify) showToast(`QUEUE CANCEL REJECTED // ${result.reason.toUpperCase()}`);
+    return false;
+  }
+  if (networkMode) pendingNetworkBuilds.delete(buildSequence);
+  if (notify) showToast(`${structureLabel(pending.structureType)} ORDER CANCELLED`);
+  return true;
+}
+
+function clearSelectedBuildQueue(): void {
+  const builderIds = new Set(getSelectedShips()
+    .filter((ship) => SHIPS[ship.class].buildPower > 0)
+    .map((ship) => ship.id));
+  const queuedOrders = selectedBuilderBuildOrders(builderIds);
+  const cancelled = queuedOrders.reduce((total, command) =>
+    total + Number(issueCancelBuildOrder(command.sequence, false)), 0);
+  if (cancelled > 0) {
+    element("directive").textContent = `BUILD ROUTE CLEARED // ${cancelled} SITE${cancelled === 1 ? "" : "S"}`;
+    showToast(`BUILD ROUTE CLEARED // ${cancelled}`);
+  }
 }
 
 function issueQueueUnit(shipClass: ShipClass, count: number): void {
@@ -5618,9 +5948,26 @@ element("set-rally").addEventListener("click", () => setRallyPointMode(!pendingR
 element("cancel-production").addEventListener("click", cancelCurrentProduction);
 element("toggle-infinite-production").addEventListener("click", toggleInfiniteProduction);
 element("stop-production-all").addEventListener("click", stopAllProduction);
+element("cancel-construction").addEventListener("click", () => {
+  const construction = getSelectedStructures()
+    .find((structure) => structure.id === primaryStructureId && structure.buildProgress < 1)
+    ?? getSelectedStructures().find((structure) => structure.buildProgress < 1);
+  if (construction) issueCancelConstruction(construction.id);
+});
+element("clear-build-queue").addEventListener("click", clearSelectedBuildQueue);
 element("queue-items").addEventListener("click", (event) => {
   const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>(".queue-token") : null;
   if (!button) return;
+  const constructionId = Number(button.dataset.constructionId);
+  if (Number.isInteger(constructionId)) {
+    issueCancelConstruction(constructionId);
+    return;
+  }
+  const buildSequence = Number(button.dataset.buildSequence);
+  if (Number.isInteger(buildSequence)) {
+    issueCancelBuildOrder(buildSequence);
+    return;
+  }
   const structureId = Number(button.dataset.structureId);
   const queueItemId = Number(button.dataset.queueItemId);
   if (Number.isInteger(structureId) && Number.isInteger(queueItemId)) cancelProductionItem(structureId, queueItemId);
@@ -5872,6 +6219,7 @@ function updateAudioToggle(): void {
 
 document.addEventListener("visibilitychange", () => battleAudio.setHidden(document.hidden));
 
+installCommandTooltips();
 updateAudioToggle();
 showStartScreen(true);
 if (invitedMatchId) showMultiplayerJoinScreen();

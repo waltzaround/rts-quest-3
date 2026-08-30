@@ -31,6 +31,31 @@ describe("continuous economy and production", () => {
     expect(simulation.state.players[0]!.economy.energy).toBeLessThan(1_200);
   });
 
+  it("cancels an in-progress structure and stops charging its remaining cost", () => {
+    const simulation = createCombatScenario({ enemyCommander: false });
+    expect(simulation.submitCommand({
+      type: "buildStructure", playerId: "pilot-blue", sequence: 1, requestedTick: 1,
+      structureType: "solarArray", position: { x: -90, z: -205 }, queued: false,
+    }).accepted).toBe(true);
+    simulation.stepMany(20);
+    const construction = simulation.state.structures.find(
+      (structure) => structure.ownerPlayerId === "pilot-blue"
+        && structure.type === "solarArray" && structure.buildProgress < 1,
+    )!;
+    expect(construction.buildProgress).toBeGreaterThan(0);
+    expect(simulation.submitCommand({
+      type: "cancelConstruction", playerId: "pilot-blue", sequence: 2,
+      requestedTick: simulation.state.tick + 1, structureId: construction.id,
+    }).accepted).toBe(true);
+    simulation.step();
+    expect(simulation.state.structures.some((structure) => structure.id === construction.id)).toBe(false);
+    const alloyAfterCancellation = simulation.state.players[0]!.economy.alloy;
+    const energyAfterCancellation = simulation.state.players[0]!.economy.energy;
+    simulation.stepMany(10);
+    expect(simulation.state.players[0]!.economy.alloy).toBeGreaterThanOrEqual(alloyAfterCancellation);
+    expect(simulation.state.players[0]!.economy.energy).toBeGreaterThanOrEqual(energyAfterCancellation);
+  });
+
   it("adds storage capacity after a Storage Array finishes", () => {
     const simulation = createCombatScenario({ enemyCommander: false });
     expect(simulation.submitCommand({

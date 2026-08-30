@@ -120,13 +120,19 @@ try {
     (message) => message.type === "lockstep_frame" && message.tick === verifiedFrame.tick,
   );
   if (verifiedFrame.checksum !== wingFrame.checksum) throw new Error("Frame checksums differed between peers");
+  if (verifiedFrame.checksum !== 0) throw new Error("Relay frame unexpectedly carried an authoritative checksum");
 
   host.send({ type: "request_snapshot", reason: "manual" });
   const recovery = await host.waitFor((message) => message.type === "lockstep_state" && message.reason === "manual");
   assertLockstepState(recovery, "Recovery state");
-  if (!recovery.state.structures.some(
-    (structure) => structure.ownerPlayerId === hostWelcome.playerId && structure.type === "storage",
-  )) throw new Error("Recovery state omitted accepted construction");
+  if (JSON.stringify(recovery.state) !== JSON.stringify(hostStart.state)) {
+    throw new Error("Relay recovery did not retain the immutable bootstrap");
+  }
+  const recoveryCommands = await host.waitFor((message) => message.type === "lockstep_commands");
+  if (JSON.stringify(recoveryCommands.commands) !== JSON.stringify(hostCommands.commands)) {
+    throw new Error("Relay recovery omitted the ordered command journal");
+  }
+  await host.waitFor((message) => message.type === "lockstep_frame" && message.tick >= verifiedFrame.tick);
 
   const reconnectCredentials = wing.credentials;
   wing.close();
@@ -143,7 +149,9 @@ try {
     (message) => message.type === "lockstep_state" && message.reason === "reconnect",
   );
   assertLockstepState(reconnectState, "Reconnect state");
-  if (resumed.state !== "playing" || reconnectWelcome.playerId !== wingWelcome.playerId || reconnectState.tick < recovery.tick) {
+  const reconnectCommands = await rejoined.waitFor((message) => message.type === "lockstep_commands");
+  if (resumed.state !== "playing" || reconnectWelcome.playerId !== wingWelcome.playerId
+    || JSON.stringify(reconnectCommands.commands) !== JSON.stringify(hostCommands.commands)) {
     throw new Error("Reconnect did not restore the original player at the current tick");
   }
 
@@ -156,7 +164,7 @@ try {
     verifiedTick: verifiedFrame.tick,
     checksum: verifiedFrame.checksum,
     commandBroadcast: "passed",
-    recovery: "passed",
+    recovery: "bootstrap-plus-command-journal passed",
     reconnect: "passed",
   }));
 } finally {

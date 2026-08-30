@@ -89,17 +89,26 @@
           <div class="selection-roster hidden" id="selection-roster" role="group" aria-label="Selected units"></div>
           <div class="production-console hidden" id="selection-queue">
             <div class="production-heading"><span id="production-label">SHIPYARD IDLE</span><small id="queue-count">QUEUE 0</small></div>
-            <div class="production-status"><div><i id="production-progress"></i></div><button id="cancel-production" title="Cancel active production">×</button></div>
+            <div class="production-status" id="queue-progress-row"><div><i id="production-progress"></i></div><button id="cancel-production" title="Cancel active production">×</button></div>
             <div class="queue-items" id="queue-items"></div>
-            <div class="production-actions">
+            <div class="production-actions" id="production-queue-actions">
               <button id="toggle-infinite-production" type="button" aria-pressed="false"><span>↻ INFINITE QUEUE</span><small id="infinite-production-state">OFF</small></button>
               <button id="stop-production-all" type="button"><span>■ STOP EVERYTHING</span></button>
+            </div>
+            <div class="production-actions construction-queue-actions hidden" id="construction-queue-actions">
+              <button id="clear-build-queue" type="button"><span>× CLEAR QUEUED SITES</span><small>KEEP ACTIVE</small></button>
             </div>
           </div>
         </section>
         <section class="command-card">
           <div class="command-card-heading"><span id="command-context-title">COMMAND CARD</span><small id="command-context-subtitle">AWAITING SELECTION</small></div>
           <div class="command-empty" id="command-empty"><span>◇</span><p>SELECT A FRIENDLY UNIT<br />OR STRUCTURE</p></div>
+          <div class="construction-site-controls hidden" id="construction-site-controls">
+            <div class="construction-site-copy"><span id="construction-site-label">CONSTRUCTION ACTIVE</span><strong id="construction-site-progress">0%</strong></div>
+            <div class="construction-site-meter"><i id="construction-site-progress-bar"></i></div>
+            <button id="cancel-construction" type="button">× CANCEL CONSTRUCTION</button>
+            <small>Stops further resource spending and releases assigned fabricators.</small>
+          </div>
           <div class="command-grid hidden" id="fleet-controls">
             <button id="cmd-move"><b>↗</b><span>MOVE</span><kbd>M</kbd></button>
             <button id="cmd-attack"><b>⌖</b><span>ATTACK MOVE</span><kbd>A</kbd></button>
@@ -158,6 +167,8 @@
           </div>
         </section>
       </footer>
+
+      <aside id="command-tooltip" class="command-tooltip" role="tooltip" aria-hidden="true"></aside>
 
       <div class="camera-help">LEFT SELECT <b>·</b> RIGHT-DRAG FORMATION <b>·</b> SHIFT QUEUE <b>·</b> CTRL+1–9 GROUPS <b>·</b> \ FULLSCREEN</div>
       <section id="replay-controls" class="replay-controls hidden" aria-label="Replay controls">

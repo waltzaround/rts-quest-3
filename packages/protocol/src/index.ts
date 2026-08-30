@@ -33,6 +33,7 @@ const hasOwn = (record: object, key: unknown): key is string =>
 
 export const MAX_PLAYERS = 8;
 export const MAX_COMMAND_BATCH = 32;
+export const MAX_FLEET_COMMAND_UNITS = 2_048;
 export const MAX_MESSAGE_BYTES = 64 * 1024;
 export const REPLAY_CHUNK_BYTES = 32 * 1024;
 export const MAX_REPLAY_BYTES = 32 * 1024 * 1024;
@@ -113,6 +114,7 @@ export type ClientMessage =
   | { type: "start_match" }
   | { type: "commands"; commands: GameCommand[]; clientTick: number; clientChecksum?: number }
   | { type: "checksum"; tick: number; checksum: number }
+  | { type: "match_finished"; tick: number; checksum: number; winnerTeamId: number | null }
   | { type: "request_replay_manifest" }
   | { type: "request_replay_chunk"; index: number };
 
@@ -273,7 +275,8 @@ function isGameCommand(value: unknown): value is GameCommand {
     || !isInteger(value.requestedTick) || value.requestedTick < 1) return false;
 
   if (["move", "attackMove", "patrol", "stop", "hold", "focusFire"].includes(value.type)) {
-    if (!Array.isArray(value.unitIds) || value.unitIds.length > 512 || !value.unitIds.every((id) => isInteger(id) && id > 0)
+    if (!Array.isArray(value.unitIds) || value.unitIds.length > MAX_FLEET_COMMAND_UNITS
+      || !value.unitIds.every((id) => isInteger(id) && id > 0)
       || typeof value.queued !== "boolean") return false;
     if (value.type === "move" || value.type === "attackMove" || value.type === "patrol") {
       return isVec2(value.destination) && (value.formationEnd === undefined || isVec2(value.formationEnd));
@@ -300,6 +303,12 @@ function isGameCommand(value: unknown): value is GameCommand {
   if (value.type === "cancelProduction") {
     return isInteger(value.structureId) && value.structureId > 0
       && isInteger(value.queueItemId) && value.queueItemId > 0;
+  }
+  if (value.type === "cancelConstruction") {
+    return isInteger(value.structureId) && value.structureId > 0;
+  }
+  if (value.type === "cancelBuildOrder") {
+    return isInteger(value.buildSequence) && value.buildSequence > 0;
   }
   if (value.type === "setProductionRepeat") {
     return isInteger(value.structureId) && value.structureId > 0 && typeof value.enabled === "boolean";
@@ -377,6 +386,11 @@ export function parseClientMessage(raw: string): ClientMessage | null {
         ? value as ClientMessage : null;
     case "checksum":
       return isInteger(value.tick) && value.tick >= 0 && isInteger(value.checksum) ? value as ClientMessage : null;
+    case "match_finished":
+      return isInteger(value.tick) && value.tick >= 0 && isInteger(value.checksum)
+        && (value.winnerTeamId === null
+          || (isInteger(value.winnerTeamId) && value.winnerTeamId >= 1 && value.winnerTeamId <= MAX_PLAYERS))
+        ? value as ClientMessage : null;
     case "request_replay_manifest":
       return value as ClientMessage;
     case "request_replay_chunk":

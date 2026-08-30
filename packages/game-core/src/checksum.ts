@@ -65,6 +65,7 @@ export function calculateChecksum(state: SimulationState): number {
       hash = hashUint(hash, quantize(order.destination.x));
       hash = hashUint(hash, quantize(order.destination.z));
       hash = hashUint(hash, quantize(order.facing));
+      hash = hashUint(hash, order.constructionId ?? 0);
       if (order.type === "patrol" && order.patrolOrigin) {
         hash = hashUint(hash, 1);
         hash = hashUint(hash, quantize(order.patrolOrigin.x));
@@ -107,6 +108,13 @@ export function calculateChecksum(state: SimulationState): number {
     hash = hashUint(hash, quantize(structure.shields));
     hash = hashUint(hash, quantize(structure.buildProgress));
     hash = hashUint(hash, structure.resourceNodeId ?? 0);
+    hash = hashUint(hash, structure.constructionSequence ?? 0);
+    hash = hashString(hash, structure.upgradeSourceType ?? "");
+    hash = hashUint(hash, quantize(structure.upgradeSourceHealth ?? 0));
+    hash = hashUint(hash, quantize(structure.upgradeSourceShields ?? 0));
+    hash = hashUint(hash, quantize(structure.upgradeSourceYaw ?? 0));
+    hash = hashUint(hash, quantize(structure.upgradeSourceRallyPoint?.x ?? 0));
+    hash = hashUint(hash, quantize(structure.upgradeSourceRallyPoint?.z ?? 0));
     if (structure.repeatProduction) hash = hashUint(hash, 1);
     hash = hashUint(hash, quantize(structure.rallyPoint.x));
     hash = hashUint(hash, quantize(structure.rallyPoint.z));
@@ -172,6 +180,8 @@ export function calculateChecksum(state: SimulationState): number {
       const builderUnitIds = [...(command.builderUnitIds ?? [])].sort((a, b) => a - b);
       hash = hashUint(hash, builderUnitIds.length);
       for (const builderUnitId of builderUnitIds) hash = hashUint(hash, builderUnitId);
+    } else if (command.type === "cancelBuildOrder") {
+      hash = hashUint(hash, command.buildSequence);
     } else {
       hash = hashUint(hash, command.structureId);
       if (command.type === "queueUnit") {

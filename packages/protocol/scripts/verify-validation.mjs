@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { parseClientMessage, parseServerMessage } from "../dist/index.js";
+import { MAX_FLEET_COMMAND_UNITS, parseClientMessage, parseServerMessage } from "../dist/index.js";
 
 const buildCommand = (structureType) => JSON.stringify({
   type: "commands",
@@ -31,9 +31,31 @@ assert.equal(parseClientMessage(JSON.stringify({
   }],
 }))?.type, "commands", "Fabricator vessels should pass protocol validation");
 
+const fleetCommand = (unitCount) => JSON.stringify({
+  type: "commands",
+  clientTick: 0,
+  commands: [{
+    type: "move", playerId: "pilot-blue", sequence: 1, requestedTick: 1,
+    unitIds: Array.from({ length: unitCount }, (_, index) => index + 1),
+    queued: false, destination: { x: 120, z: -40 },
+  }],
+});
+assert.equal(
+  parseClientMessage(fleetCommand(1_500))?.type,
+  "commands",
+  "A 1,500-unit fleet order should pass protocol validation",
+);
+assert.equal(
+  parseClientMessage(fleetCommand(MAX_FLEET_COMMAND_UNITS + 1)),
+  null,
+  "Fleet orders must remain bounded above the supported large-battle limit",
+);
+
 for (const command of [
   { type: "setProductionRepeat", structureId: 12, enabled: true },
   { type: "clearProductionQueue", structureId: 12 },
+  { type: "cancelConstruction", structureId: 12 },
+  { type: "cancelBuildOrder", buildSequence: 4 },
 ]) {
   assert.equal(parseClientMessage(JSON.stringify({
     type: "commands",
@@ -165,6 +187,12 @@ assert.equal(parseClientMessage(JSON.stringify({ type: "spectate", name: "Observ
 assert.equal(parseClientMessage(JSON.stringify({ type: "authorize_spectator", teamId: 1 }))?.type, "authorize_spectator");
 assert.equal(parseClientMessage(JSON.stringify({ type: "request_replay_chunk", index: 0 }))?.type, "request_replay_chunk");
 assert.equal(parseClientMessage(JSON.stringify({ type: "request_replay_chunk", index: -1 })), null);
+assert.equal(parseClientMessage(JSON.stringify({
+  type: "match_finished", tick: 120, checksum: 123456, winnerTeamId: 1,
+}))?.type, "match_finished");
+assert.equal(parseClientMessage(JSON.stringify({
+  type: "match_finished", tick: 120, checksum: 123456, winnerTeamId: 99,
+})), null, "relay match results must identify a valid team");
 assert.equal(parseClientMessage(JSON.stringify({
   type: "commands", clientTick: 0,
   commands: [{

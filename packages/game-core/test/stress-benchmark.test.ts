@@ -4,6 +4,11 @@ import { createCombatScenario, projectPlayerView } from "../src";
 
 const RUN_STRESS_BENCHMARK = process.env.RUN_STRESS_BENCHMARK === "1";
 const SIMULATION_HZ = 20;
+const REQUESTED_FLEET_SIZES = process.env.STRESS_FLEET_SIZES
+  ?.split(",")
+  .map((value) => Number(value.trim()))
+  .filter((value) => Number.isInteger(value) && value >= 4);
+const REQUESTED_MEASURED_TICKS = Number(process.env.STRESS_MEASURED_TICKS ?? 0);
 
 interface StressResult {
   ships: number;
@@ -25,7 +30,9 @@ function percentile(values: readonly number[], fraction: number): number {
 
 describe("synthetic authority stress benchmark", () => {
   it.runIf(RUN_STRESS_BENCHMARK)("measures combat ticks and full player views", () => {
-    const fleetSizes = [128, 256, 482, 768] as const;
+    const fleetSizes: readonly number[] = REQUESTED_FLEET_SIZES?.length
+      ? REQUESTED_FLEET_SIZES
+      : [128, 256, 482, 768];
     const results: StressResult[] = [];
 
     for (const shipCount of fleetSizes) {
@@ -53,12 +60,16 @@ describe("synthetic authority stress benchmark", () => {
         }];
       }
 
-      simulation.stepMany(80);
+      const largeFixture = shipCount >= 2_000;
+      simulation.stepMany(largeFixture ? 4 : 80);
       const tickSamples: number[] = [];
       const viewSamples: number[] = [];
       const stringifySamples: number[] = [];
       let viewBytes = 0;
-      for (let tick = 0; tick < 160; tick += 1) {
+      const measuredTicks = Number.isInteger(REQUESTED_MEASURED_TICKS) && REQUESTED_MEASURED_TICKS > 0
+        ? REQUESTED_MEASURED_TICKS
+        : largeFixture ? 12 : 160;
+      for (let tick = 0; tick < measuredTicks; tick += 1) {
         const tickStartedAt = performance.now();
         simulation.step();
         tickSamples.push(performance.now() - tickStartedAt);
@@ -101,5 +112,5 @@ describe("synthetic authority stress benchmark", () => {
       "sim CPU ms/s": result.simCpuPerSecondMs.toFixed(0),
       "lockstep KiB/s": result.lockstepKiBPerSecond.toFixed(2),
     })));
-  }, 120_000);
+  }, 600_000);
 });

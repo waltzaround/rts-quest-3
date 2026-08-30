@@ -235,6 +235,37 @@ describe("horizontal infrastructure progression", () => {
     expect(node.claimedByStructureId).toBe(harvester.id);
   });
 
+  it("restores the replaced extractor when an upgrade is cancelled", () => {
+    const simulation = createCombatScenario({ enemyCommander: false });
+    simulation.state.obstacles = [];
+    addCompletedStructure(simulation, "fleetShipyard");
+    const basicExtractor = simulation.state.structures.find(
+      (structure) => structure.ownerPlayerId === "pilot-blue" && structure.type === "extractor",
+    )!;
+    const node = simulation.state.resourceNodes.find((candidate) => candidate.id === basicExtractor.resourceNodeId)!;
+    expect(simulation.submitCommand({
+      type: "buildStructure", playerId: "pilot-blue", sequence: 1, requestedTick: 1,
+      structureType: "deepCoreExtractor", position: { x: node.x, z: node.z },
+      resourceNodeId: node.id, queued: false,
+    }).accepted).toBe(true);
+    simulation.stepMany(8);
+    const upgrade = simulation.state.structures.find(
+      (structure) => structure.type === "deepCoreExtractor" && structure.resourceNodeId === node.id,
+    )!;
+    expect(upgrade.buildProgress).toBeGreaterThan(0);
+    expect(simulation.submitCommand({
+      type: "cancelConstruction", playerId: "pilot-blue", sequence: 2,
+      requestedTick: simulation.state.tick + 1, structureId: upgrade.id,
+    }).accepted).toBe(true);
+    simulation.step();
+    const restored = simulation.state.structures.find(
+      (structure) => structure.type === "extractor" && structure.resourceNodeId === node.id,
+    );
+    expect(restored?.buildProgress).toBe(1);
+    expect(node.claimedByStructureId).toBe(restored?.id);
+    expect(simulation.state.structures.some((structure) => structure.id === upgrade.id)).toBe(false);
+  });
+
   it("queues a remote construction site until its mobile fabricator reaches build range", () => {
     const simulation = createCombatScenario({ enemyCommander: false });
     const player = simulation.state.players.find((candidate) => candidate.id === "pilot-blue")!;
@@ -294,6 +325,7 @@ describe("horizontal infrastructure progression", () => {
       .toBeLessThanOrEqual(SHIPS.fabricator.buildRange);
     expect(simulation.getConstructionAssistingFabricatorIds(construction!.id)).toContain(fabricator.id);
     expect(simulation.getConstructionBuildPower(construction!.id)).toBeCloseTo(2.35);
+    expect(fabricator.orders[0]).toMatchObject({ type: "hold", constructionId: construction!.id });
     expect(simulation.state.commandQueue.some((command) =>
       command.type === "buildStructure" && command.position.x === remoteSite.x,
     )).toBe(false);
@@ -305,13 +337,57 @@ describe("horizontal infrastructure progression", () => {
       command.type === "buildStructure" && command.position.x === queuedSite.x,
     )).toBe(true);
 
-    simulation.stepMany(320);
-    expect(simulation.state.structures.some((structure) =>
-      structure.ownerPlayerId === player.id
-        && structure.type === "solarArray" && structure.x === queuedSite.x,
-    )).toBe(true);
+    for (let tick = 0; tick < 220 && construction!.buildProgress < 1; tick += 1) {
+      expect(simulation.state.structures.some((structure) =>
+        structure.ownerPlayerId === player.id
+          && structure.type === "solarArray" && structure.x === queuedSite.x,
+      )).toBe(false);
+      simulation.step();
+    }
+    expect(construction!.buildProgress).toBe(1);
+    expect(fabricator.orders.some((order) => order.constructionId === construction!.id)).toBe(false);
+    let queuedConstruction: StructureState | undefined;
+    for (let tick = 0; tick < 320; tick += 1) {
+      simulation.step();
+      queuedConstruction = simulation.state.structures.find((structure) =>
+        structure.ownerPlayerId === player.id
+          && structure.type === "solarArray" && structure.x === queuedSite.x);
+      if (queuedConstruction) break;
+    }
+    expect(queuedConstruction).toBeDefined();
     expect(simulation.state.commandQueue.some((command) =>
       command.type === "buildStructure" && command.position.x === queuedSite.x,
+    )).toBe(false);
+  });
+
+  it("cancels a queued mobile build order and removes its navigation stop", () => {
+    const simulation = createCombatScenario({ enemyCommander: false, startingFleet: true });
+    const player = simulation.state.players.find((candidate) => candidate.id === "pilot-blue")!;
+    const fabricator = simulation.state.ships.find((ship) => ship.ownerPlayerId === player.id)!;
+    fabricator.class = "fabricator";
+    fabricator.x = 650;
+    fabricator.z = -410;
+    fabricator.orders = [];
+    const site = { x: 1_050, z: -410 };
+    expect(simulation.submitCommand({
+      type: "buildStructure", playerId: player.id, sequence: 1, requestedTick: 1,
+      structureType: "solarArray", position: site, builderUnitIds: [fabricator.id], queued: true,
+    }).accepted).toBe(true);
+    simulation.step();
+    expect(fabricator.orders.some((order) => order.type === "move")).toBe(true);
+    expect(simulation.submitCommand({
+      type: "cancelBuildOrder", playerId: player.id, sequence: 2,
+      requestedTick: simulation.state.tick + 1, buildSequence: 1,
+    }).accepted).toBe(true);
+    simulation.step();
+    expect(simulation.state.commandQueue.some((command) =>
+      command.type === "buildStructure" && command.sequence === 1,
+    )).toBe(false);
+    expect(fabricator.orders.some((order) =>
+      order.type === "move" && Math.hypot(order.destination.x - site.x, order.destination.z - site.z) <= SHIPS.fabricator.buildRange,
+    )).toBe(false);
+    expect(simulation.state.structures.some((structure) =>
+      structure.ownerPlayerId === player.id && structure.x === site.x && structure.z === site.z,
     )).toBe(false);
   });
 

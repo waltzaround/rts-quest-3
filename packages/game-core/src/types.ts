@@ -176,6 +176,7 @@ export interface NavigationOrder {
   destination: Vec2;
   facing: number;
   patrolOrigin?: Vec2;
+  constructionId?: EntityId;
 }
 
 interface FleetCommandBase {
@@ -221,6 +222,14 @@ export type EconomyCommand =
       type: "cancelProduction";
       structureId: EntityId;
       queueItemId: EntityId;
+    })
+  | (EconomyCommandBase & {
+      type: "cancelConstruction";
+      structureId: EntityId;
+    })
+  | (EconomyCommandBase & {
+      type: "cancelBuildOrder";
+      buildSequence: number;
     })
   | (EconomyCommandBase & {
       type: "setProductionRepeat";
@@ -332,6 +341,12 @@ export interface StructureState {
   productionQueue: ProductionQueueItem[];
   repeatProduction: boolean;
   rallyPoint: Vec2;
+  constructionSequence?: number;
+  upgradeSourceType?: StructureType;
+  upgradeSourceHealth?: number;
+  upgradeSourceShields?: number;
+  upgradeSourceYaw?: number;
+  upgradeSourceRallyPoint?: Vec2;
 }
 
 export type CombatTargetState = ShipState | StructureState;

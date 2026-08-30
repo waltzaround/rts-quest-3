@@ -15,6 +15,26 @@ interface SensorSource {
   range: number;
 }
 
+const STRATEGIC_SENSOR_SHIP_COUNT = 1_000;
+const STRATEGIC_SENSOR_CELL_SIZE = 320;
+
+function collapseStrategicSensors(sources: readonly SensorSource[]): SensorSource[] {
+  const cells = new Map<string, SensorSource>();
+  for (const source of sources) {
+    const cellX = Math.floor(source.x / STRATEGIC_SENSOR_CELL_SIZE);
+    const cellZ = Math.floor(source.z / STRATEGIC_SENSOR_CELL_SIZE);
+    const centerX = (cellX + 0.5) * STRATEGIC_SENSOR_CELL_SIZE;
+    const centerZ = (cellZ + 0.5) * STRATEGIC_SENSOR_CELL_SIZE;
+    const coveringRange = source.range + Math.hypot(source.x - centerX, source.z - centerZ);
+    const key = `${cellX}:${cellZ}`;
+    const existing = cells.get(key);
+    if (!existing || coveringRange > existing.range) {
+      cells.set(key, { x: centerX, z: centerZ, range: coveringRange });
+    }
+  }
+  return [...cells.values()];
+}
+
 export function areTeamsAllied(state: SimulationState, teamA: TeamId, teamB: TeamId): boolean {
   if (teamA === teamB) return true;
   const first = state.teams.find((team) => team.id === teamA);
@@ -106,6 +126,12 @@ export function updateTeamVisibility(state: SimulationState): void {
     }
   }
   for (const projectile of state.projectiles) ownedProjectileIds.get(projectile.ownerTeamId)?.add(projectile.id);
+
+  if (state.ships.length > STRATEGIC_SENSOR_SHIP_COUNT) {
+    for (const teamId of teamIds) {
+      sourcesByTeam.set(teamId, collapseStrategicSensors(sourcesByTeam.get(teamId)!));
+    }
+  }
 
   for (const teamId of teamIds) {
     const detectedEntities = detectedEntityIds.get(teamId)!;

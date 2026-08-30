@@ -11,6 +11,7 @@ function firstLanAddress(): string | null {
 }
 
 export default defineConfig({
+  worker: { format: "es" },
   plugins: [{
     name: "voidfront-lan-info",
     configureServer(server) {
