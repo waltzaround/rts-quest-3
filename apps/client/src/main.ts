@@ -199,6 +199,8 @@ const STRUCTURE_BUTTON_IDS: Readonly<Record<BuildableStructureType, string>> = {
   matterForge: "build-matter-forge",
   quantumStorage: "build-quantum-storage",
   radarArray: "build-radar-array",
+  phasedRadarArray: "build-phased-radar",
+  deepSpaceRadarArray: "build-deep-space-radar",
   pointDefenseBattery: "build-pd-battery",
   missileBattery: "build-missile-battery",
   railBattery: "build-rail-battery",
@@ -284,6 +286,8 @@ const STRUCTURE_LABELS: Readonly<Record<StructureType, string>> = {
   capitalInfrastructure: "CAPITAL INFRASTRUCTURE",
   capitalShipyard: "LARGE SHIPYARD",
   radarArray: "RADAR ARRAY",
+  phasedRadarArray: "PHASED RADAR ARRAY",
+  deepSpaceRadarArray: "DEEP-SPACE RADAR ARRAY",
   pointDefenseBattery: "T1 FLAK BASTION",
   missileBattery: "T1 TORPEDO CITADEL",
   railBattery: "T2 RAIL FORTRESS",
@@ -309,6 +313,8 @@ const STRUCTURE_ICONS: Readonly<Record<StructureType, string>> = {
   capitalInfrastructure: "◉",
   capitalShipyard: "▰",
   radarArray: "⌁",
+  phasedRadarArray: "⌁⌁",
+  deepSpaceRadarArray: "⌁⌁⌁",
   pointDefenseBattery: "✣",
   missileBattery: "▲",
   railBattery: "⇈",
@@ -410,6 +416,11 @@ const commandMarkers: Array<{ mesh: THREE.Mesh; bornAt: number }> = [];
 let commandSequence = 0;
 let pendingCommandMode: "move" | "attackMove" | "patrol" | "focusFire" | null = null;
 let pendingStructureType: BuildableStructureType | null = null;
+let buildPlacementDrag: {
+  candidate: NonNullable<ReturnType<typeof getPlacementCandidate>>;
+  yaw: number;
+  keepPlacing: boolean;
+} | null = null;
 let pendingRallyPoint = false;
 let selectionDrag: { startX: number; startY: number; currentX: number; currentY: number; shift: boolean } | null = null;
 let commandDrag: {
@@ -447,6 +458,9 @@ let reconnectTimer = 0;
 let pingTimer = 0;
 let manuallyClosed = false;
 let lanInviteOrigin = location.origin;
+let mapSettingsOpen = false;
+let draftLobbySettings: LobbySettings | null = null;
+let draftLobbyMode: LobbyState["mode"] | null = null;
 
 type ClientViewMode = "player" | "team-spectator" | "post-match-omniscient";
 type RequestedNetworkRole = "player" | "team" | "replay";
@@ -467,17 +481,25 @@ const REPLAY_SPEEDS = [0.5, 1, 2, 4] as const;
 const MAP_PLAYER_CAPACITY: Readonly<Record<LobbySettings["mapSize"], number>> = {
   small: 4, medium: 6, large: 8, huge: 8, colossal: 8,
 };
-const MAP_DESCRIPTIONS: Readonly<Record<LobbySettings["mapPreset"], string>> = {
-  "orbital-ring": "Balanced resource ring with a valuable contested center.",
-  crossfire: "Split inner and outer resource lanes around a denser asteroid crossfire.",
-  "open-expanse": "Widely dispersed resources with fewer navigation hazards.",
-  "asteroid-belt": "A dense seeded asteroid belt divides the field into risky crossings and flanking routes.",
-  "spiral-arms": "Twin resource spirals pull fleets through curved expansion lanes toward the outer sectors.",
-  "shattered-core": "Broken central clusters create short sightlines, ambush pockets, and fragmented riches.",
+const MAP_CATALOG: Readonly<Record<LobbySettings["mapPreset"], {
+  readonly label: string;
+  readonly family: string;
+  readonly description: string;
+}>> = {
+  "orbital-ring": { label: "ORBITAL RING", family: "BALANCED", description: "Balanced resource ring with a valuable contested center." },
+  crossfire: { label: "CROSSFIRE", family: "DUAL LANES", description: "Split inner and outer resource lanes around a denser asteroid crossfire." },
+  "open-expanse": { label: "OPEN EXPANSE", family: "OPEN FIELD", description: "Widely dispersed resources with fewer navigation hazards." },
+  "asteroid-belt": { label: "ASTEROID BELT", family: "DIVIDED FIELD", description: "A dense seeded asteroid belt divides the field into risky crossings and flanking routes." },
+  "spiral-arms": { label: "SPIRAL ARMS", family: "CURVED LANES", description: "Twin resource spirals pull fleets through curved expansion lanes toward the outer sectors." },
+  "shattered-core": { label: "SHATTERED CORE", family: "AMBUSH POCKETS", description: "Broken central clusters create short sightlines, ambush pockets, and fragmented riches." },
+  "amazon-tunnel": { label: "AMAZON TUNNEL", family: "ONE CHOKE", description: "A broad central passage opens into a resource-rich contested basin between two blocked asteroid fields." },
+  "core-rush": { label: "CORE RUSH", family: "CENTRAL WEALTH", description: "Outer sectors are lean while unusually rich deposits pull expansion and early fleets toward the exposed center." },
+  "star-fortress": { label: "STAR FORTRESS", family: "DEFENDED START", description: "Each commander begins behind a broken asteroid rampart with one inward-facing gate and room to establish an economy." },
 };
+const MAP_PRESET_ORDER = Object.keys(MAP_CATALOG) as LobbySettings["mapPreset"][];
 
-function renderMapPreview(settings: LobbySettings, playerCount: number): void {
-  const canvas = element<HTMLCanvasElement>("map-preview-canvas");
+function renderMapPreview(settings: LobbySettings, playerCount: number, canvasId = "map-preview-canvas"): void {
+  const canvas = element<HTMLCanvasElement>(canvasId);
   const context = canvas.getContext("2d");
   if (!context) return;
   const width = canvas.width;
@@ -498,14 +520,51 @@ function renderMapPreview(settings: LobbySettings, playerCount: number): void {
   context.fillStyle = glow;
   context.fillRect(0, 0, width, height);
 
+  const commanders = Math.max(2, playerCount);
   const obstacleCount = settings.mapPreset === "open-expanse" ? 4
     : settings.mapPreset === "asteroid-belt" ? 18
       : settings.mapPreset === "shattered-core" ? 15
-        : settings.mapPreset === "crossfire" ? 12 : 8;
+        : settings.mapPreset === "crossfire" ? 12
+          : settings.mapPreset === "amazon-tunnel" ? 56
+            : settings.mapPreset === "star-fortress" ? commanders * 6
+              : settings.mapPreset === "core-rush" ? 6 : 8;
   for (let index = 0; index < obstacleCount; index += 1) {
     let x = Number.NaN;
     let y = Number.NaN;
-    if (settings.mapPreset === "asteroid-belt") {
+    if (settings.mapPreset === "amazon-tunnel") {
+      const obstaclesPerBlock = obstacleCount / 2;
+      const blockIndex = index % obstaclesPerBlock;
+      const sign = index < obstaclesPerBlock ? 1 : -1;
+      const left = -0.7;
+      const right = 0.7;
+      const horizontalProgress = blockIndex / obstaclesPerBlock;
+      const near = 0.19 + Math.max(0, 1 - Math.abs(horizontalProgress * 2 - 1)) * 0.07;
+      const far = 0.94;
+      const blockWidth = right - left;
+      const blockHeight = far - near;
+      const perimeter = 2 * (blockWidth + blockHeight);
+      let distance = blockIndex / obstaclesPerBlock * perimeter;
+      if (distance <= blockWidth) {
+        x = left + distance; y = near;
+      } else if ((distance -= blockWidth) <= blockHeight) {
+        x = right; y = near + distance;
+      } else if ((distance -= blockHeight) <= blockWidth) {
+        x = right - distance; y = far;
+      } else {
+        distance -= blockWidth; x = left; y = far - distance;
+      }
+      y *= sign;
+    } else if (settings.mapPreset === "star-fortress") {
+      const commanderIndex = Math.floor(index / 6);
+      const wallIndex = index % 6;
+      const baseAngle = Math.PI + commanderIndex / commanders * Math.PI * 2;
+      const centerX = Math.sin(baseAngle) * 0.82;
+      const centerY = Math.cos(baseAngle) * 0.82;
+      const wallOffsets = [-2.25, -1.5, -0.75, 0.75, 1.5, 2.25] as const;
+      const wallAngle = baseAngle + wallOffsets[wallIndex]!;
+      x = centerX + Math.sin(wallAngle) * 0.13;
+      y = centerY + Math.cos(wallAngle) * 0.13;
+    } else if (settings.mapPreset === "asteroid-belt") {
       const along = index / Math.max(1, obstacleCount - 1) * 1.7 - 0.85;
       const across = (random() - 0.5) * 0.18;
       x = along * Math.cos(rotation) - across * Math.sin(rotation);
@@ -546,6 +605,17 @@ function renderMapPreview(settings: LobbySettings, playerCount: number): void {
     if (settings.mapPreset === "open-expanse") {
       angle = random() * Math.PI * 2;
       radius = 0.22 + random() * 0.52;
+    } else if (settings.mapPreset === "amazon-tunnel") {
+      x = (progress - 0.5) * 1.2;
+      const centerFlare = Math.max(0, 1 - Math.abs(x) / 0.34);
+      y = (random() - 0.5) * (0.17 + centerFlare * 0.13);
+      angle = 0;
+      radius = 0;
+    } else if (settings.mapPreset === "core-rush") {
+      angle = random() * Math.PI * 2;
+      radius = 0.06 + random() * 0.28;
+    } else if (settings.mapPreset === "star-fortress") {
+      radius = 0.3 + random() * 0.25;
     } else if (settings.mapPreset === "spiral-arms") {
       const armProgress = Math.floor(index / 2) / Math.max(1, Math.ceil(resourceCount / 2) - 1);
       angle = rotation + (index % 2) * Math.PI + armProgress * Math.PI * 1.65;
@@ -573,11 +643,23 @@ function renderMapPreview(settings: LobbySettings, playerCount: number): void {
     context.restore();
   }
 
-  const commanders = Math.max(2, playerCount);
   for (let index = 0; index < commanders; index += 1) {
-    const angle = Math.PI + index / commanders * Math.PI * 2;
-    const x = toX(Math.sin(angle) * 0.88);
-    const y = toY(Math.cos(angle) * 0.88);
+    let commanderX: number;
+    let commanderY: number;
+    if (settings.mapPreset === "amazon-tunnel") {
+      const leftCount = Math.ceil(commanders / 2);
+      const onLeft = index < leftCount;
+      const sideIndex = onLeft ? index : index - leftCount;
+      const sideCount = onLeft ? leftCount : commanders - leftCount;
+      commanderX = onLeft ? -0.86 : 0.86;
+      commanderY = (sideIndex - (sideCount - 1) / 2) * Math.min(0.38, 1.24 / Math.max(1, sideCount - 1));
+    } else {
+      const angle = Math.PI + index / commanders * Math.PI * 2;
+      commanderX = Math.sin(angle) * 0.88;
+      commanderY = Math.cos(angle) * 0.88;
+    }
+    const x = toX(commanderX);
+    const y = toY(commanderY);
     context.fillStyle = `hsl(${195 + index * 137.5},85%,64%)`;
     context.shadowColor = context.fillStyle;
     context.shadowBlur = 10;
@@ -591,7 +673,7 @@ function renderMapPreview(settings: LobbySettings, playerCount: number): void {
   context.shadowBlur = 0;
   context.fillStyle = "rgba(133,205,210,.68)";
   context.font = '12px "JetBrains Mono"';
-  context.fillText(settings.mapPreset.replaceAll("-", " ").toUpperCase(), 12, 19);
+  context.fillText(MAP_CATALOG[settings.mapPreset].label, 12, 19);
 }
 
 const raycaster = new THREE.Raycaster();
@@ -612,13 +694,27 @@ placementGhost.add(placementBody, placementRing);
 placementGhost.visible = false;
 scene.add(placementGhost);
 
-function createTacticalIconBatch(sides: number, capacity: number): THREE.InstancedMesh {
-  const geometry = new THREE.RingGeometry(0.58, 1, sides);
-  geometry.rotateX(Math.PI / 2);
+function createTacticalIconBatch(
+  sides: number,
+  capacity: number,
+  opacity = 0.96,
+  innerRadius = 0.58,
+  blending: THREE.Blending = THREE.AdditiveBlending,
+): THREE.InstancedMesh {
+  const geometry = new THREE.RingGeometry(innerRadius, 1, sides);
+  return createTacticalGeometryBatch(geometry, capacity, opacity, blending);
+}
+
+function createTacticalGeometryBatch(
+  geometry: THREE.BufferGeometry,
+  capacity: number,
+  opacity = 0.96,
+  blending: THREE.Blending = THREE.AdditiveBlending,
+): THREE.InstancedMesh {
   const mesh = new THREE.InstancedMesh(geometry, new THREE.MeshBasicMaterial({
-    color: 0xffffff, transparent: true, opacity: 0.96, side: THREE.DoubleSide,
+    color: 0xffffff, transparent: true, opacity, side: THREE.DoubleSide,
     depthWrite: false, depthTest: false, fog: false, toneMapped: false,
-    blending: THREE.AdditiveBlending,
+    blending,
   }), capacity);
   mesh.count = 0;
   mesh.frustumCulled = false;
@@ -628,9 +724,107 @@ function createTacticalIconBatch(sides: number, capacity: number): THREE.Instanc
   return mesh;
 }
 
-const tacticalStructureIcons = createTacticalIconBatch(4, 1_024);
+type TacticalStructureFamily = "command" | "alloy" | "energy" | "fabrication" | "shipyard" | "storage" | "radar" | "defence";
+type TacticalStructureIconKey = `${TacticalStructureFamily}-${1 | 2 | 3}`;
+
+function tacticalBadgeBar(fromX: number, fromY: number, toX: number, toY: number, thickness = 0.12): THREE.BufferGeometry {
+  const deltaX = toX - fromX;
+  const deltaY = toY - fromY;
+  const bar = new THREE.PlaneGeometry(Math.hypot(deltaX, deltaY), thickness);
+  bar.rotateZ(Math.atan2(deltaY, deltaX));
+  bar.translate((fromX + toX) / 2, (fromY + toY) / 2, 0);
+  return bar;
+}
+
+function createStructureTacticalGeometry(family: TacticalStructureFamily, tier: 1 | 2 | 3): THREE.BufferGeometry {
+  const pieces: THREE.BufferGeometry[] = [new THREE.RingGeometry(0.78, 1, family === "defence" ? 8 : 4)];
+  const add = (x1: number, y1: number, x2: number, y2: number, thickness = 0.12): void => {
+    pieces.push(tacticalBadgeBar(x1, y1, x2, y2, thickness));
+  };
+  if (family === "command") {
+    pieces.push(new THREE.RingGeometry(0.3, 0.45, 4));
+    add(-0.55, 0, 0.55, 0, 0.1);
+    add(0, -0.55, 0, 0.55, 0.1);
+  } else if (family === "alloy") {
+    add(-0.5, 0.42, 0, -0.42, 0.15);
+    add(0.5, 0.42, 0, -0.42, 0.15);
+    add(0, -0.42, 0, 0.52, 0.11);
+  } else if (family === "energy") {
+    add(0.25, 0.58, -0.2, 0.08, 0.17);
+    add(-0.2, 0.08, 0.2, 0.08, 0.17);
+    add(0.2, 0.08, -0.28, -0.58, 0.17);
+  } else if (family === "fabrication") {
+    add(-0.5, 0.48, -0.5, -0.48, 0.14);
+    add(-0.5, 0.48, 0.48, 0.48, 0.14);
+    add(-0.5, 0, 0.28, 0, 0.14);
+    add(0.16, -0.5, 0.5, -0.16, 0.13);
+    add(0.5, -0.16, 0.16, 0.18, 0.13);
+  } else if (family === "shipyard") {
+    add(-0.55, 0.5, -0.55, -0.5, 0.13);
+    add(0.55, 0.5, 0.55, -0.5, 0.13);
+    add(-0.55, -0.5, 0.55, -0.5, 0.13);
+    add(0, -0.4, 0, 0.45, 0.15);
+    add(-0.28, 0.18, 0, 0.48, 0.13);
+    add(0, 0.48, 0.28, 0.18, 0.13);
+  } else if (family === "storage") {
+    add(-0.5, 0.38, 0.5, 0.38, 0.14);
+    add(-0.5, 0, 0.5, 0, 0.14);
+    add(-0.5, -0.38, 0.5, -0.38, 0.14);
+  } else if (family === "radar") {
+    add(0, -0.55, 0, 0.2, 0.12);
+    add(-0.48, 0.48, 0, 0.08, 0.12);
+    add(0, 0.08, 0.48, 0.48, 0.12);
+    add(-0.38, -0.5, 0.38, -0.5, 0.12);
+  } else {
+    add(-0.52, 0, 0.52, 0, 0.16);
+    add(0, -0.52, 0, 0.52, 0.16);
+  }
+  const pipWidth = 0.25;
+  const pipGap = 0.1;
+  const totalWidth = tier * pipWidth + (tier - 1) * pipGap;
+  for (let pip = 0; pip < tier; pip += 1) {
+    const start = -totalWidth / 2 + pip * (pipWidth + pipGap);
+    add(start, 1.18, start + pipWidth, 1.18, 0.13);
+  }
+  const geometry = mergeGeometries(pieces, false);
+  if (!geometry) throw new Error("Unable to build structure tactical icon");
+  return geometry;
+}
+
+function structureTacticalIcon(structureType: StructureType): { family: TacticalStructureFamily; tier: 1 | 2 | 3 } {
+  switch (structureType) {
+    case "extractor": return { family: "alloy", tier: 1 };
+    case "deepCoreExtractor": case "alloyRefinery": return { family: "alloy", tier: 2 };
+    case "singularityHarvester": case "matterForge": return { family: "alloy", tier: 3 };
+    case "solarArray": return { family: "energy", tier: 1 };
+    case "fusionReactor": return { family: "energy", tier: 2 };
+    case "antimatterReactor": return { family: "energy", tier: 3 };
+    case "fabricator": return { family: "fabrication", tier: 1 };
+    case "advancedFabrication": return { family: "fabrication", tier: 2 };
+    case "capitalInfrastructure": return { family: "fabrication", tier: 3 };
+    case "shipyard": return { family: "shipyard", tier: 1 };
+    case "fleetShipyard": return { family: "shipyard", tier: 2 };
+    case "capitalShipyard": return { family: "shipyard", tier: 3 };
+    case "storage": return { family: "storage", tier: 1 };
+    case "quantumStorage": return { family: "storage", tier: 3 };
+    case "radarArray": return { family: "radar", tier: 1 };
+    case "phasedRadarArray": return { family: "radar", tier: 2 };
+    case "deepSpaceRadarArray": return { family: "radar", tier: 3 };
+    case "pointDefenseBattery": case "missileBattery": return { family: "defence", tier: 1 };
+    case "railBattery": case "plasmaBattery": return { family: "defence", tier: 2 };
+    case "beamBattery": return { family: "defence", tier: 3 };
+    default: return { family: "command", tier: 3 };
+  }
+}
+
+const tacticalStructureIcons = new Map<TacticalStructureIconKey, THREE.InstancedMesh>();
+for (const family of ["command", "alloy", "energy", "fabrication", "shipyard", "storage", "radar", "defence"] as const) {
+  for (const tier of [1, 2, 3] as const) {
+    tacticalStructureIcons.set(`${family}-${tier}`, createTacticalGeometryBatch(createStructureTacticalGeometry(family, tier), 1_024));
+  }
+}
 const tacticalResourceIcons = createTacticalIconBatch(6, 1_024);
-const tacticalObstacleIcons = createTacticalIconBatch(10, 1_024);
+const tacticalObstacleIcons = createTacticalIconBatch(10, 1_024, 0.09, 0.94, THREE.NormalBlending);
 const tacticalIconMatrix = new THREE.Matrix4();
 const tacticalIconPosition = new THREE.Vector3();
 const tacticalIconScale = new THREE.Vector3();
@@ -639,6 +833,7 @@ const tacticalIconRotation = new THREE.Quaternion();
 
 const LOCAL_MAP_PRESETS: readonly LobbySettings["mapPreset"][] = [
   "orbital-ring", "crossfire", "open-expanse", "asteroid-belt", "spiral-arms", "shattered-core",
+  "amazon-tunnel", "core-rush", "star-fortress",
 ];
 
 function createPlayableScenario(): ReturnType<typeof createCombatScenario> {
@@ -659,6 +854,11 @@ function createPlayableScenario(): ReturnType<typeof createCombatScenario> {
 let simulation = createPlayableScenario();
 let physicsWorld: PlanarCirclePhysicsWorld | null = null;
 let pendingLockstepState: { state: SimulationState; notice?: string } | null = null;
+let lockstepTargetTick = 0;
+let lockstepTargetChecksum = 0;
+let lockstepResyncPending = false;
+let lockstepResyncCooldownUntil = 0;
+let lockstepChecksumGraceTick = 0;
 let lastDebug: DebugSnapshot = simulation.debugSnapshot();
 let accumulator = 0;
 let lastTime = performance.now();
@@ -724,21 +924,6 @@ function setClientViewMode(mode: ClientViewMode, teamId: number | null = null): 
   clientViewMode = mode;
   spectatorTeamId = mode === "team-spectator" ? teamId : null;
   const showingDemo = demoMode && mode === "player";
-  const badge = element("view-mode-badge");
-  badge.classList.toggle("player", mode === "player" && !showingDemo);
-  badge.classList.toggle("demo", showingDemo);
-  badge.classList.toggle("spectator", mode === "team-spectator");
-  badge.classList.toggle("replay", mode === "post-match-omniscient");
-  badge.querySelector("span")!.textContent = showingDemo
-    ? "SHOWCASE"
-    : mode === "player"
-    ? "PLAYER"
-    : mode === "team-spectator" ? "TEAM SPECTATOR" : "POST-MATCH OMNISCIENT";
-  badge.querySelector("small")!.textContent = showingDemo
-    ? "OMNISCIENT AUTOBATTLE"
-    : mode === "player"
-    ? "TACTICAL VIEW"
-    : mode === "team-spectator" ? `TEAM ${teamId ?? "?"} · FOG ACTIVE` : "ALL CONTACTS · REPLAY";
   element("replay-controls").classList.toggle("hidden", mode !== "post-match-omniscient");
   document.querySelector(".camera-help")?.classList.toggle("hidden", mode === "post-match-omniscient" || showingDemo);
   document.querySelector(".command-deck")?.classList.toggle("view-locked", mode !== "player" || showingDemo);
@@ -816,6 +1001,8 @@ interface ClientVisibilityView {
   structures: readonly StructureState[];
   projectiles: readonly ProjectileState[];
   resourceNodes: readonly ResourceNodeState[];
+  targetsById: ReadonlyMap<number, { readonly x: number; readonly z: number; readonly radius: number }>;
+  verticalLaunchOwnerIds: ReadonlySet<number>;
 }
 
 function currentState(): SimulationState | ProjectedViewState {
@@ -841,12 +1028,23 @@ function buildClientVisibilityView(): ClientVisibilityView {
       ownerShipId: projectile.ownerShipId ?? -1,
       targetEntityId: projectile.targetEntityId ?? -1,
     }));
+    const targets = [...ships, ...structures];
     return {
       state, localTeamId,
-      visibleEntityIds: new Set([...ships, ...structures].map((entity) => entity.id)),
+      visibleEntityIds: new Set(targets.map((entity) => entity.id)),
       visibleProjectileIds: new Set(projectiles.map((projectile) => projectile.id)),
       discoveredResourceNodeIds: new Set(state.resourceNodes.map((node) => node.id)),
       ships, structures, projectiles, resourceNodes: state.resourceNodes,
+      targetsById: new Map(targets.map((target) => [target.id, {
+        x: target.x,
+        z: target.z,
+        radius: "class" in target ? SHIPS[target.class].radius : STRUCTURES[target.type].radius,
+      }])),
+      verticalLaunchOwnerIds: new Set([
+        ...ships.filter((ship) => ship.class !== "bomber"
+          && ship.turrets.some((turret) => turret.weaponTypeId === "torpedo")).map((ship) => ship.id),
+        ...structures.filter((structure) => structure.type === "missileBattery").map((structure) => structure.id),
+      ]),
     };
   }
   const simulationState = state as SimulationState;
@@ -859,12 +1057,24 @@ function buildClientVisibilityView(): ClientVisibilityView {
     ?? simulationState.projectiles.map((projectile) => projectile.id));
   const discoveredResourceNodeIds = new Set(visibility?.discoveredResourceNodeIds
     ?? simulationState.resourceNodes.map((node) => node.id));
+  const ships = simulationState.ships.filter((ship) => visibleEntityIds.has(ship.id));
+  const structures = simulationState.structures.filter((structure) => visibleEntityIds.has(structure.id));
   return {
     state, localTeamId, visibleEntityIds, visibleProjectileIds, discoveredResourceNodeIds,
-    ships: simulationState.ships.filter((ship) => visibleEntityIds.has(ship.id)),
-    structures: simulationState.structures.filter((structure) => visibleEntityIds.has(structure.id)),
+    ships,
+    structures,
     projectiles: simulationState.projectiles.filter((projectile) => visibleProjectileIds.has(projectile.id)),
     resourceNodes: simulationState.resourceNodes.filter((node) => discoveredResourceNodeIds.has(node.id)),
+    targetsById: new Map([...ships, ...structures].map((target) => [target.id, {
+      x: target.x,
+      z: target.z,
+      radius: "class" in target ? SHIPS[target.class].radius : STRUCTURES[target.type].radius,
+    }])),
+    verticalLaunchOwnerIds: new Set([
+      ...ships.filter((ship) => ship.class !== "bomber"
+        && ship.turrets.some((turret) => turret.weaponTypeId === "torpedo")).map((ship) => ship.id),
+      ...structures.filter((structure) => structure.type === "missileBattery").map((structure) => structure.id),
+    ]),
   };
 }
 
@@ -1558,12 +1768,20 @@ function handleServerMessage(message: ServerMessage): void {
     case "lockstep_commands":
       for (const command of message.commands) simulation.submitCommand(command);
       return;
-    case "lockstep_frame":
+    case "lockstep_player_state": {
       serverTick = Math.max(serverTick, message.tick);
       if (pendingLockstepState || networkView) return;
       while (simulation.state.tick < message.tick) tickSimulation();
-      if (simulation.state.tick === message.tick && simulation.state.checksum !== message.checksum) {
-        sendNetworkMessage({ type: "request_snapshot", reason: "checksum" });
+      const player = simulation.state.players.find((candidate) => candidate.id === message.playerId);
+      if (player && player.state !== "defeated") player.state = message.state;
+      return;
+    }
+    case "lockstep_frame":
+      serverTick = Math.max(serverTick, message.tick);
+      if (pendingLockstepState || networkView) return;
+      if (message.tick >= lockstepTargetTick) {
+        lockstepTargetTick = message.tick;
+        lockstepTargetChecksum = message.checksum;
       }
       return;
     case "match_started":
@@ -1626,6 +1844,10 @@ function handleServerMessage(message: ServerMessage): void {
 
 function installLockstepState(state: SimulationState, notice?: string): void {
   simulation = restoreSimulation(state, physicsWorld ?? undefined);
+  lockstepTargetTick = state.tick;
+  lockstepTargetChecksum = state.checksum;
+  lockstepResyncPending = false;
+  lockstepChecksumGraceTick = state.tick + 20;
   networkView = null;
   accumulator = 0;
   lastDebug = simulation.debugSnapshot();
@@ -1643,6 +1865,16 @@ function installLockstepState(state: SimulationState, notice?: string): void {
     showToast(notice);
   }
   updateSelectionHud();
+}
+
+function verifyLockstepFrame(): void {
+  if (simulation.state.tick !== lockstepTargetTick || simulation.state.tick < lockstepChecksumGraceTick) return;
+  if (simulation.state.checksum === lockstepTargetChecksum) return;
+  const now = performance.now();
+  if (lockstepResyncPending || now < lockstepResyncCooldownUntil) return;
+  lockstepResyncPending = true;
+  lockstepResyncCooldownUntil = now + 5_000;
+  sendNetworkMessage({ type: "request_snapshot", reason: "checksum" });
 }
 
 function adoptAuthoritativeView(view: ProjectedViewState, notice?: string): void {
@@ -1824,7 +2056,20 @@ function inferNetworkCombatEvents(
     const projectile = beforeProjectileByTarget.get(target.id) ?? newProjectileByTarget.get(target.id);
     const projectileId = projectile?.id ?? -target.id;
     events.push({ type: "hit", tick, projectileId, targetId: target.id, damage });
-    if (projectile) hitProjectileIds.add(projectile.id);
+    if (projectile) {
+      hitProjectileIds.add(projectile.id);
+      const owner = projectile.ownerShipId === null ? undefined : beforeShips.get(projectile.ownerShipId);
+      if (owner?.class !== "fighter") {
+        const speed = Math.max(0.001, Math.hypot(projectile.vx, projectile.vz));
+        const targetRadius = "class" in target ? SHIPS[target.class].radius : STRUCTURES[target.type].radius;
+        events.push({
+          type: "projectileDetonated", tick, projectileId: projectile.id,
+          weaponTypeId: projectile.weaponTypeId,
+          x: target.x - projectile.vx / speed * (targetRadius + projectile.radius * 0.5),
+          z: target.z - projectile.vz / speed * (targetRadius + projectile.radius * 0.5),
+        });
+      }
+    }
   }
   const afterProjectileIds = new Set(after.projectiles.map((projectile) => projectile.id));
   const elapsedTicks = Math.max(1, after.state.tick - before.state.tick);
@@ -1868,10 +2113,12 @@ function renderLobby(): void {
   refreshLobbyInvite();
   const localSlot = networkLobby.slots.find((slot) => slot.playerId === localPlayerId);
   const observing = clientViewMode !== "player";
+  const canEditMap = Boolean(localSlot?.isHost) && networkLobby.phase === "lobby";
   element("lobby-match-code").textContent = networkLobby.matchId.toUpperCase();
   element("lobby-status").textContent = networkLobby.phase === "lobby"
     ? `${networkLobby.slots.length} SLOTS // ${networkLobby.mode.toUpperCase()} // ${networkLobby.settings.mapSize.toUpperCase()}`
     : networkLobby.phase === "playing" ? "ENGAGEMENT IN PROGRESS" : "ENGAGEMENT COMPLETE";
+  renderLobbyMapSidebar(networkLobby.settings, networkLobby.mode, canEditMap);
   const mapCapacity = MAP_PLAYER_CAPACITY[networkLobby.settings.mapSize];
   const occupiedSlots = networkLobby.slots.map((slot) => {
     const canAssignTeam = networkLobby!.mode === "teams" && networkLobby!.phase === "lobby"
@@ -1879,61 +2126,58 @@ function renderLobby(): void {
     const teamControl = networkLobby!.mode === "ffa"
       ? `<em>SIDE ${slot.slotIndex + 1}</em>`
       : `<select class="slot-team-select" data-team-player="${escapeHtml(slot.playerId)}" aria-label="Team for ${escapeHtml(slot.name)}" ${canAssignTeam ? "" : "disabled"}>${Array.from({ length: 8 }, (_, index) => `<option value="${index + 1}" ${slot.teamId === index + 1 ? "selected" : ""}>TEAM ${index + 1}</option>`).join("")}</select>`;
-    const aiDescription = slot.isAi
-      ? `${(slot.aiDifficulty ?? "normal").toUpperCase()} · ${(slot.aiPersonality ?? "balanced").toUpperCase()}`
-      : slot.connected ? "HUMAN · CONNECTED" : "HUMAN · RECONNECTING";
-    const commanderDetail = slot.isAi && localSlot?.isHost && networkLobby!.phase === "lobby"
-      ? `<small class="ai-slot-settings"><select data-ai-difficulty="${escapeHtml(slot.playerId)}" aria-label="Difficulty for ${escapeHtml(slot.name)}"><option value="easy" ${slot.aiDifficulty === "easy" ? "selected" : ""}>EASY</option><option value="normal" ${!slot.aiDifficulty || slot.aiDifficulty === "normal" ? "selected" : ""}>NORMAL</option><option value="hard" ${slot.aiDifficulty === "hard" ? "selected" : ""}>HARD</option></select><select data-ai-personality="${escapeHtml(slot.playerId)}" aria-label="Doctrine for ${escapeHtml(slot.name)}"><option value="balanced" ${!slot.aiPersonality || slot.aiPersonality === "balanced" ? "selected" : ""}>BALANCED</option><option value="aggressive" ${slot.aiPersonality === "aggressive" ? "selected" : ""}>AGGRESSIVE</option><option value="turtle" ${slot.aiPersonality === "turtle" ? "selected" : ""}>TURTLE</option><option value="economic" ${slot.aiPersonality === "economic" ? "selected" : ""}>ECONOMIC</option></select></small>`
-      : `<small>${aiDescription}</small>`;
+    const canEditAi = slot.isAi && localSlot?.isHost && networkLobby!.phase === "lobby";
+    const commanderDetail = slot.isAi
+      ? "<small>COMPUTER CONTROL</small>"
+      : `<small>${slot.connected ? "CONNECTED" : "RECONNECTING"}</small>`;
+    const typeControl = slot.isAi
+      ? canEditAi
+        ? `<select class="slot-ai-select slot-type-select" data-ai-personality="${escapeHtml(slot.playerId)}" aria-label="Type for ${escapeHtml(slot.name)}"><option value="balanced" ${!slot.aiPersonality || slot.aiPersonality === "balanced" ? "selected" : ""}>BALANCED</option><option value="aggressive" ${slot.aiPersonality === "aggressive" ? "selected" : ""}>AGGRESSIVE</option><option value="turtle" ${slot.aiPersonality === "turtle" ? "selected" : ""}>TURTLE</option><option value="economic" ${slot.aiPersonality === "economic" ? "selected" : ""}>ECONOMIC</option></select>`
+        : `<span class="slot-type">${(slot.aiPersonality ?? "balanced").toUpperCase()}</span>`
+      : "<span class=\"slot-type\">HUMAN</span>";
+    const difficultyControl = slot.isAi
+      ? canEditAi
+        ? `<select class="slot-ai-select slot-difficulty-select" data-ai-difficulty="${escapeHtml(slot.playerId)}" aria-label="Difficulty for ${escapeHtml(slot.name)}"><option value="easy" ${slot.aiDifficulty === "easy" ? "selected" : ""}>EASY</option><option value="normal" ${!slot.aiDifficulty || slot.aiDifficulty === "normal" ? "selected" : ""}>NORMAL</option><option value="hard" ${slot.aiDifficulty === "hard" ? "selected" : ""}>HARD</option></select>`
+        : `<span class="slot-difficulty">${(slot.aiDifficulty ?? "normal").toUpperCase()}</span>`
+      : "<em class=\"slot-difficulty\">—</em>";
     return `
       <div class="lobby-slot ${slot.playerId === localPlayerId ? "local" : ""}">
         <i style="--slot-color:#${slot.color.toString(16).padStart(6, "0")}"></i>
         <span><b>${escapeHtml(slot.name)}</b>${commanderDetail}</span>
-        <span class="slot-type">${slot.isAi ? "COMPUTER" : "HUMAN"}</span>
+        ${typeControl}
+        ${difficultyControl}
         ${teamControl}
         ${slot.isHost ? "<strong>HOST</strong>" : slot.ready ? "<strong>READY</strong>" : "<strong>NOT READY</strong>"}
         ${localSlot?.isHost && slot.isAi ? `<button data-remove-slot="${escapeHtml(slot.playerId)}" title="Remove AI">×</button>` : "<span class=\"slot-pad\"></span>"}
       </div>`;
   });
   const emptySlots = Array.from({ length: Math.max(0, mapCapacity - networkLobby.slots.length) }, (_, index) => `
-    <div class="lobby-slot empty"><i></i><span><b>OPEN SLOT</b><small>AWAITING COMMANDER</small></span><span class="slot-type">OPEN</span><em>—</em><strong>OPEN</strong><span class="slot-pad"></span></div>
+    <div class="lobby-slot empty"><i></i><span><b>OPEN SLOT</b><small>AWAITING COMMANDER</small></span><em>—</em><em class="slot-difficulty">—</em><em>—</em><strong>OPEN</strong><span class="slot-pad"></span></div>
   `);
   element("lobby-slots").innerHTML = [...occupiedSlots, ...emptySlots].join("");
-  element("mode-teams").classList.toggle("active", networkLobby.mode === "teams");
-  element("mode-ffa").classList.toggle("active", networkLobby.mode === "ffa");
-  element<HTMLButtonElement>("mode-teams").disabled = !localSlot?.isHost;
-  element<HTMLButtonElement>("mode-ffa").disabled = !localSlot?.isHost;
   const exceedsMapCapacity = networkLobby.slots.length > mapCapacity;
   const capacity = element("lobby-capacity");
   capacity.textContent = `${networkLobby.slots.length} / ${mapCapacity}`;
   capacity.classList.toggle("over-capacity", exceedsMapCapacity);
-  element("settings-authority").textContent = localSlot?.isHost ? "HOST CONTROL" : "HOST LOCKED";
-  const settingsControls: Array<[string, string]> = [
-    ["map-preset", networkLobby.settings.mapPreset],
-    ["map-size", networkLobby.settings.mapSize],
-    ["starting-resources", networkLobby.settings.startingResources],
-    ["resource-density", networkLobby.settings.resourceDensity],
-    ["team-spawn-mode", networkLobby.settings.teamSpawnMode],
-  ];
-  for (const [id, value] of settingsControls) {
-    const control = element<HTMLSelectElement>(id);
-    control.value = value;
-    control.disabled = !localSlot?.isHost || networkLobby.phase !== "lobby";
+  element("settings-authority").textContent = canEditMap ? "HOST CONTROL" : "HOST LOCKED · VIEW ONLY";
+  if (!mapSettingsOpen || !draftLobbySettings || !draftLobbyMode || !canEditMap) {
+    draftLobbySettings = { ...networkLobby.settings };
+    draftLobbyMode = networkLobby.mode;
+    syncMapSettingsForm(draftLobbySettings, draftLobbyMode, canEditMap);
+  } else {
+    setMapSettingsEditingEnabled(canEditMap);
   }
-  element("team-spawn-setting").classList.toggle("hidden", networkLobby.mode !== "teams");
-  const deploymentDescription = networkLobby.mode === "teams"
-    ? ` Team deployment: ${networkLobby.settings.teamSpawnMode === "together" ? "allies share adjacent sectors" : networkLobby.settings.teamSpawnMode === "interleaved" ? "teams alternate around the perimeter" : "commanders receive seeded random sectors"}.`
-    : "";
-  element("map-description").textContent = `${MAP_DESCRIPTIONS[networkLobby.settings.mapPreset]} ${networkLobby.settings.mapSize.toUpperCase()} sectors support up to ${mapCapacity} commanders; ${networkLobby.settings.startingResources.toUpperCase()} starting reserves and ${networkLobby.settings.resourceDensity.toUpperCase()} deposits.${deploymentDescription}`;
-  element("map-preview").className = `map-preview map-${networkLobby.settings.mapPreset}`;
-  renderMapPreview(networkLobby.settings, networkLobby.slots.length);
-  element<HTMLButtonElement>("add-ai").disabled = !localSlot?.isHost || networkLobby.slots.length >= Math.min(networkLobby.maxPlayers, mapCapacity);
+  const canAddAi = Boolean(localSlot?.isHost) && networkLobby.phase === "lobby";
+  element("lobby-ai-actions").classList.toggle("hidden", !canAddAi);
+  element<HTMLButtonElement>("add-ai").disabled = !canAddAi
+    || networkLobby.slots.length >= Math.min(networkLobby.maxPlayers, mapCapacity);
+  element<HTMLButtonElement>("open-player-invite").disabled = !canAddAi;
+  element<HTMLButtonElement>("open-spectator-invite").disabled = !canAddAi;
   element<HTMLButtonElement>("authorize-spectator").disabled = !localSlot?.isHost || networkLobby.phase === "finished";
   element<HTMLSelectElement>("spectator-team-select").disabled = !localSlot?.isHost || networkLobby.phase === "finished";
   const startMatch = element<HTMLButtonElement>("start-match");
   startMatch.disabled = !localSlot?.isHost || networkLobby.slots.length < 2 || exceedsMapCapacity;
   startMatch.classList.toggle("hidden", !localSlot?.isHost);
-  element("host-controls").classList.toggle("hidden", !localSlot?.isHost);
   document.querySelector(".lobby-final-actions")?.classList.toggle("hidden", observing);
   const ready = element<HTMLButtonElement>("ready-toggle");
   ready.textContent = localSlot?.ready ? "STAND DOWN" : "MARK READY";
@@ -1941,14 +2185,130 @@ function renderLobby(): void {
   ready.disabled = !localSlot || networkLobby.phase !== "lobby";
 }
 
+function renderLobbyMapSidebar(settings: LobbySettings, mode: LobbyState["mode"], canEdit: boolean): void {
+  const map = MAP_CATALOG[settings.mapPreset];
+  const capacity = MAP_PLAYER_CAPACITY[settings.mapSize];
+  element("lobby-map-name").textContent = map.label;
+  element("lobby-map-summary").textContent = `${settings.mapSize.toUpperCase()} · ${settings.resourceDensity.toUpperCase()}`;
+  element("lobby-map-description").textContent = map.description;
+  element("lobby-map-size-summary").textContent = `${settings.mapSize.toUpperCase()} · 2–${capacity}`;
+  element("lobby-density-summary").textContent = settings.resourceDensity.toUpperCase();
+  element("lobby-deployment-summary").textContent = mode === "ffa"
+    ? "INDIVIDUAL SIDES"
+    : settings.teamSpawnMode === "together" ? "ALLIED SECTORS"
+      : settings.teamSpawnMode === "interleaved" ? "INTERLEAVED" : "SEEDED RANDOM";
+  element("lobby-map-preview").className = `map-preview map-${settings.mapPreset}`;
+  renderMapPreview(settings, networkLobby?.slots.length ?? 2, "lobby-map-preview-canvas");
+
+  const startingResources = element<HTMLSelectElement>("starting-resources");
+  startingResources.value = settings.startingResources;
+  startingResources.disabled = !canEdit;
+  element("mode-teams").classList.toggle("active", mode === "teams");
+  element("mode-ffa").classList.toggle("active", mode === "ffa");
+  element<HTMLButtonElement>("mode-teams").disabled = !canEdit;
+  element<HTMLButtonElement>("mode-ffa").disabled = !canEdit;
+}
+
 function selectedLobbySettings(): LobbySettings {
   return {
-    mapPreset: element<HTMLSelectElement>("map-preset").value as LobbySettings["mapPreset"],
+    mapPreset: element<HTMLInputElement>("map-preset").value as LobbySettings["mapPreset"],
     mapSize: element<HTMLSelectElement>("map-size").value as LobbySettings["mapSize"],
     startingResources: element<HTMLSelectElement>("starting-resources").value as LobbySettings["startingResources"],
     resourceDensity: element<HTMLSelectElement>("resource-density").value as LobbySettings["resourceDensity"],
     teamSpawnMode: element<HTMLSelectElement>("team-spawn-mode").value as LobbySettings["teamSpawnMode"],
   };
+}
+
+function ensureMapPresetCatalog(): void {
+  const grid = element("map-preset-grid");
+  if (grid.childElementCount > 0) return;
+  grid.innerHTML = MAP_PRESET_ORDER.map((mapPreset) => {
+    const map = MAP_CATALOG[mapPreset];
+    return `<button class="map-preset-card" type="button" data-map-preset="${mapPreset}"><b>${map.label}</b><small>${map.family}</small></button>`;
+  }).join("");
+}
+
+function mapSettingsDescription(settings: LobbySettings, mode: LobbyState["mode"]): string {
+  const mapCapacity = MAP_PLAYER_CAPACITY[settings.mapSize];
+  const deploymentDescription = mode === "teams"
+    ? ` Team deployment: ${settings.teamSpawnMode === "together" ? "allies share adjacent sectors" : settings.teamSpawnMode === "interleaved" ? "teams alternate around the perimeter" : "commanders receive seeded random sectors"}.`
+    : "";
+  return `${MAP_CATALOG[settings.mapPreset].description} ${settings.mapSize.toUpperCase()} sectors support up to ${mapCapacity} commanders; ${settings.startingResources.toUpperCase()} starting reserves and ${settings.resourceDensity.toUpperCase()} deposits.${deploymentDescription}`;
+}
+
+function setMapSettingsEditingEnabled(canEdit: boolean): void {
+  for (const card of document.querySelectorAll<HTMLButtonElement>("[data-map-preset]")) card.disabled = !canEdit;
+  for (const id of ["map-size", "resource-density", "team-spawn-mode"]) {
+    element<HTMLSelectElement>(id).disabled = !canEdit;
+  }
+  element<HTMLButtonElement>("apply-map-settings").disabled = !canEdit;
+  element("cancel-map-settings").textContent = canEdit ? "CANCEL" : "CLOSE";
+}
+
+function updateMapSettingsDraftView(): void {
+  if (!draftLobbyMode) return;
+  draftLobbySettings = selectedLobbySettings();
+  const settings = draftLobbySettings;
+  for (const card of document.querySelectorAll<HTMLButtonElement>("[data-map-preset]")) {
+    card.classList.toggle("active", card.dataset.mapPreset === settings.mapPreset);
+  }
+  element("team-spawn-setting").classList.toggle("hidden", draftLobbyMode !== "teams");
+  element("map-description").textContent = mapSettingsDescription(settings, draftLobbyMode);
+  element("map-preview").className = `map-preview map-${settings.mapPreset}`;
+  renderMapPreview(settings, networkLobby?.slots.length ?? 2);
+}
+
+function syncMapSettingsForm(settings: LobbySettings, mode: LobbyState["mode"], canEdit: boolean): void {
+  ensureMapPresetCatalog();
+  element<HTMLInputElement>("map-preset").value = settings.mapPreset;
+  element<HTMLSelectElement>("map-size").value = settings.mapSize;
+  element<HTMLSelectElement>("starting-resources").value = settings.startingResources;
+  element<HTMLSelectElement>("resource-density").value = settings.resourceDensity;
+  element<HTMLSelectElement>("team-spawn-mode").value = settings.teamSpawnMode;
+  draftLobbyMode = mode;
+  setMapSettingsEditingEnabled(canEdit);
+  updateMapSettingsDraftView();
+}
+
+function openMapSettings(): void {
+  if (!networkLobby) return;
+  const localSlot = networkLobby.slots.find((slot) => slot.playerId === localPlayerId);
+  draftLobbySettings = { ...networkLobby.settings };
+  draftLobbyMode = networkLobby.mode;
+  mapSettingsOpen = true;
+  syncMapSettingsForm(draftLobbySettings, draftLobbyMode, Boolean(localSlot?.isHost) && networkLobby.phase === "lobby");
+  element("map-settings-modal").classList.remove("hidden");
+  document.querySelector<HTMLButtonElement>(`[data-map-preset="${draftLobbySettings.mapPreset}"]`)?.focus();
+}
+
+function closeMapSettings(): void {
+  mapSettingsOpen = false;
+  draftLobbySettings = null;
+  draftLobbyMode = null;
+  element("map-settings-modal").classList.add("hidden");
+}
+
+type LobbyUtilityModalId = "player-invite-modal" | "spectator-invite-modal";
+
+function closeLobbyUtilityModals(): void {
+  element("player-invite-modal").classList.add("hidden");
+  element("spectator-invite-modal").classList.add("hidden");
+}
+
+function openLobbyUtilityModal(modalId: LobbyUtilityModalId, focusId: string): void {
+  if (!networkLobby) return;
+  closeMapSettings();
+  closeLobbyUtilityModals();
+  element(modalId).classList.remove("hidden");
+  element<HTMLElement>(focusId).focus();
+}
+
+function lobbySettingsEqual(left: LobbySettings, right: LobbySettings): boolean {
+  return left.mapPreset === right.mapPreset
+    && left.mapSize === right.mapSize
+    && left.startingResources === right.startingResources
+    && left.resourceDensity === right.resourceDensity
+    && left.teamSpawnMode === right.teamSpawnMode;
 }
 
 function setConnectionState(title: string, detail: string, state: "online" | "connecting" | "offline"): void {
@@ -2010,6 +2370,8 @@ function leaveNetworkMatch(): void {
   pageUrl.searchParams.delete("match");
   history.replaceState(null, "", pageUrl);
   setConnectionState("MULTIPLAYER", "LAN LOBBY", "online");
+  closeMapSettings();
+  closeLobbyUtilityModals();
   element("spectator-grant").classList.add("hidden");
   setClientViewMode("player");
   showStartScreen(true);
@@ -2027,6 +2389,8 @@ function showStartScreen(resetBattle = false): void {
   element("start-view").classList.remove("hidden");
   element("network-join-view").classList.add("hidden");
   element("network-lobby-view").classList.add("hidden");
+  closeMapSettings();
+  closeLobbyUtilityModals();
   showNetworkError("");
   if (resetBattle || !demoMode) {
     resetReplaySession();
@@ -2199,14 +2563,32 @@ function createResourceVisual(node: ResourceNodeState): ResourceVisual {
 function createObstacleVisual(obstacle: ObstacleState): ObstacleVisual {
   const group = new THREE.Group();
   const seed = obstacle.visualSeed >>> 0;
-  const tint = 0x303943 + (seed % 3) * 0x020100;
+  const tint = 0x151c22 + (seed % 3) * 0x010100;
+  if (obstacle.type === "barrier" && obstacle.width && obstacle.depth) {
+    const slab = new THREE.Mesh(
+      new THREE.BoxGeometry(obstacle.width, 30, obstacle.depth),
+      new THREE.MeshStandardMaterial({ color: tint, roughness: 1, metalness: 0.08, emissive: 0x020609 }),
+    );
+    slab.position.y = 12;
+    group.add(slab);
+    const colliderRing = new THREE.Mesh(
+      new THREE.PlaneGeometry(obstacle.width, obstacle.depth),
+      new THREE.MeshBasicMaterial({ color: 0x26343e, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false }),
+    );
+    colliderRing.rotation.x = -Math.PI / 2;
+    colliderRing.position.y = 27.1;
+    group.add(colliderRing);
+    group.position.set(obstacle.x, 0, obstacle.z);
+    worldRoot.add(group);
+    return { group, colliderRing };
+  }
   const asteroid = new THREE.Mesh(
     new THREE.IcosahedronGeometry(1, 1),
     new THREE.MeshStandardMaterial({
       color: tint,
-      roughness: 0.96,
-      metalness: 0.12,
-      emissive: 0x0a1116,
+      roughness: 1,
+      metalness: 0.04,
+      emissive: 0x020609,
       flatShading: true,
     }),
   );
@@ -2224,7 +2606,7 @@ function createObstacleVisual(obstacle: ObstacleState): ObstacleVisual {
     new THREE.MeshBasicMaterial({
       color: 0x71818c,
       transparent: true,
-      opacity: 0.25,
+      opacity: 0.07,
       side: THREE.DoubleSide,
       depthWrite: false,
       toneMapped: false,
@@ -2468,25 +2850,39 @@ function createStructureVisual(structure: StructureState): StructureVisual {
       arm.add(emitter);
       group.add(arm);
     }
-  } else if (structure.type === "radarArray") {
-    const base = new THREE.Mesh(new THREE.CylinderGeometry(13, 17, 6, 8), hull);
+  } else if (structure.type === "radarArray" || structure.type === "phasedRadarArray" || structure.type === "deepSpaceRadarArray") {
+    const radarTier = structure.type === "deepSpaceRadarArray" ? 3 : structure.type === "phasedRadarArray" ? 2 : 1;
+    const radarScale = radarTier === 3 ? 1.55 : radarTier === 2 ? 1.25 : 1;
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(13 * radarScale, 17 * radarScale, 6 * radarScale, 8), hull);
     base.position.y = 3;
     group.add(base);
-    const mast = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 4.2, 25, 7), dark);
-    mast.position.y = 17;
+    const mast = new THREE.Mesh(new THREE.CylinderGeometry(2.2 * radarScale, 4.2 * radarScale, 25 * radarScale, 7), dark);
+    mast.position.y = 17 * radarScale;
     group.add(mast);
-    const dish = new THREE.Mesh(new THREE.SphereGeometry(13, 16, 8, 0, Math.PI * 2, 0, Math.PI * 0.34), accent);
+    const dish = new THREE.Mesh(new THREE.SphereGeometry(13 * radarScale, 16, 8, 0, Math.PI * 2, 0, Math.PI * 0.34), accent);
     dish.scale.y = 0.42;
     dish.rotation.x = Math.PI * 0.28;
-    dish.position.set(0, 31, 2);
+    dish.position.set(0, 31 * radarScale, 2 * radarScale);
     group.add(dish);
-    const receiver = new THREE.Mesh(new THREE.OctahedronGeometry(2.5, 0), accent);
-    receiver.position.set(0, 37, -1);
+    const receiver = new THREE.Mesh(new THREE.OctahedronGeometry(2.5 * radarScale, 0), accent);
+    receiver.position.set(0, 37 * radarScale, -radarScale);
     group.add(receiver);
-    const sweepRing = new THREE.Mesh(new THREE.TorusGeometry(16, 0.75, 5, 28), accent);
+    const sweepRing = new THREE.Mesh(new THREE.TorusGeometry(16 * radarScale, 0.75 * radarScale, 5, 28), accent);
     sweepRing.rotation.x = Math.PI / 2;
-    sweepRing.position.y = 8;
+    sweepRing.position.y = 8 * radarScale;
     group.add(sweepRing);
+    for (let extra = 1; extra < radarTier; extra += 1) {
+      const sideDish = dish.clone();
+      const side = extra % 2 === 1 ? -1 : 1;
+      sideDish.scale.multiplyScalar(0.58);
+      sideDish.rotation.z = side * 0.32;
+      sideDish.position.set(side * 12 * radarScale, (22 + extra * 3) * radarScale, -4 * radarScale);
+      group.add(sideDish);
+      const phaseRing = new THREE.Mesh(new THREE.TorusGeometry((10 + extra * 5) * radarScale, 0.5 * radarScale, 5, 28), accent);
+      phaseRing.rotation.x = Math.PI / 2;
+      phaseRing.position.y = (12 + extra * 6) * radarScale;
+      group.add(phaseRing);
+    }
   } else if (isDefensiveStructureType(structure.type)) {
     const base = new THREE.Mesh(new THREE.CylinderGeometry(
       definition.radius * 0.72, definition.radius * 0.9, 6, 8,
@@ -2822,7 +3218,7 @@ function updateVisuals(alpha: number, now: number): void {
     emitStressEffects(now);
   }
   worldRoot.visible = !benchmarkActive;
-  tacticalStructureIcons.visible = !benchmarkActive;
+  for (const iconBatch of tacticalStructureIcons.values()) iconBatch.visible = !benchmarkActive;
   tacticalResourceIcons.visible = !benchmarkActive;
   tacticalObstacleIcons.visible = !benchmarkActive;
   placementGhost.visible = !benchmarkActive && placementGhost.visible;
@@ -2848,9 +3244,15 @@ function updateVisuals(alpha: number, now: number): void {
   const projectiles = benchmarkActive ? stressScenario.projectiles : clientView.projectiles;
   const tacticalRatio = renderState.shipCount > 0 ? renderState.metrics.lod[3] / renderState.shipCount : 0;
   const projectileLimit = Math.max(500, Math.round(PROJECTILE_LIMIT[renderQuality] * (1 - tacticalRatio * 0.68)));
-  projectileVfx.update(projectiles, alpha, projectileLimit);
+  projectileVfx.update(
+    projectiles,
+    alpha,
+    projectileLimit,
+    benchmarkActive ? undefined : clientView.targetsById,
+    benchmarkActive ? undefined : clientView.verticalLaunchOwnerIds,
+  );
   combatEffects.update(now);
-  battleAudio.update(source.ships, camera, now, paused);
+  battleAudio.update(source.ships, camera, now, paused || landingLobbyActive);
   updateDebugVisuals(benchmarkActive);
   updateRallyVisuals(benchmarkActive);
 }
@@ -2981,7 +3383,7 @@ function updateStaticWorldVisuals(now: number): void {
       obstacleVisuals.set(obstacle.id, visual);
     }
     visual.group.position.set(obstacle.x, 0, obstacle.z);
-    visual.group.visible = !tactical;
+    visual.group.visible = obstacle.type === "barrier" || !tactical;
     (visual.colliderRing.material as THREE.MeshBasicMaterial).opacity = 0.18 + Math.sin(now * 0.0008 + obstacle.visualSeed) * 0.04;
   }
   const liveResourceIds = new Set(clientView.resourceNodes.map((node) => node.id));
@@ -3048,31 +3450,50 @@ function updateStaticWorldVisuals(now: number): void {
 
 function updateTacticalWorldMarkers(visible: boolean): void {
   if (!visible) {
-    tacticalStructureIcons.count = 0;
+    for (const iconBatch of tacticalStructureIcons.values()) iconBatch.count = 0;
     tacticalResourceIcons.count = 0;
     tacticalObstacleIcons.count = 0;
     return;
   }
+  tacticalIconRotation.copy(camera.quaternion);
   const strategicScale = Math.max(1, cameraRig.distance / STRATEGIC_ZOOM_DISTANCE);
   const distantStructureScale = Math.pow(strategicScale, 0.72);
   let obstacleCount = 0;
   const obstacleLimit = Math.min(1_024, clientView.state.obstacles.length);
+  const smallestObstacleRadius = clientView.state.obstacles.reduce(
+    (smallest, obstacle) => Math.min(smallest, obstacle.radius),
+    Number.POSITIVE_INFINITY,
+  );
+  const terrainFillThreshold = smallestObstacleRadius * 2.2;
   for (let index = 0; index < obstacleLimit; index += 1) {
     const obstacle = clientView.state.obstacles[index]!;
+    if (obstacle.type === "barrier") continue;
+    // Large overlapping obstacles seal otherwise empty terrain fields. They are
+    // collision coverage, not useful tactical contacts, so only show the smaller
+    // perimeter pieces that communicate the actual navigable boundary.
+    if (obstacle.radius > terrainFillThreshold) continue;
     tacticalIconPosition.set(obstacle.x, 1, obstacle.z);
-    tacticalIconScale.setScalar(obstacle.radius * strategicScale);
+    tacticalIconScale.setScalar(obstacle.radius * strategicScale * 0.72);
     tacticalIconMatrix.compose(tacticalIconPosition, tacticalIconRotation, tacticalIconScale);
     tacticalObstacleIcons.setMatrixAt(obstacleCount, tacticalIconMatrix);
-    tacticalObstacleIcons.setColorAt(obstacleCount, tacticalIconColor.setHex(0x81919b));
+    tacticalObstacleIcons.setColorAt(obstacleCount, tacticalIconColor.setHex(0x52616a));
     obstacleCount += 1;
   }
   tacticalObstacleIcons.count = obstacleCount;
   tacticalObstacleIcons.instanceMatrix.needsUpdate = obstacleCount > 0;
   if (tacticalObstacleIcons.instanceColor) tacticalObstacleIcons.instanceColor.needsUpdate = obstacleCount > 0;
-  let structureCount = 0;
+  const structureCounts = new Map<TacticalStructureIconKey, number>();
+  for (const [key, iconBatch] of tacticalStructureIcons) {
+    structureCounts.set(key, 0);
+    iconBatch.count = 0;
+  }
   const structureLimit = Math.min(1_024, clientView.structures.length);
   for (let index = 0; index < structureLimit; index += 1) {
     const structure = clientView.structures[index]!;
+    const icon = structureTacticalIcon(structure.type);
+    const iconKey: TacticalStructureIconKey = `${icon.family}-${icon.tier}`;
+    const iconBatch = tacticalStructureIcons.get(iconKey)!;
+    const structureCount = structureCounts.get(iconKey)!;
     const baseIconRadius = THREE.MathUtils.clamp(STRUCTURES[structure.type].radius * 0.58, 10, 23);
     const radius = baseIconRadius
       * (selectedStructureIds.has(structure.id) ? 1.18 : 1)
@@ -3080,16 +3501,19 @@ function updateTacticalWorldMarkers(visible: boolean): void {
     tacticalIconPosition.set(structure.x, 1.5, structure.z);
     tacticalIconScale.setScalar(radius);
     tacticalIconMatrix.compose(tacticalIconPosition, tacticalIconRotation, tacticalIconScale);
-    tacticalStructureIcons.setMatrixAt(structureCount, tacticalIconMatrix);
-    tacticalStructureIcons.setColorAt(
+    iconBatch.setMatrixAt(structureCount, tacticalIconMatrix);
+    iconBatch.setColorAt(
       structureCount,
       tacticalIconColor.setHex(colorForPlayer(structure.ownerPlayerId, structure.teamId)),
     );
-    structureCount += 1;
+    structureCounts.set(iconKey, structureCount + 1);
   }
-  tacticalStructureIcons.count = structureCount;
-  tacticalStructureIcons.instanceMatrix.needsUpdate = structureCount > 0;
-  if (tacticalStructureIcons.instanceColor) tacticalStructureIcons.instanceColor.needsUpdate = structureCount > 0;
+  for (const [key, iconBatch] of tacticalStructureIcons) {
+    const structureCount = structureCounts.get(key)!;
+    iconBatch.count = structureCount;
+    iconBatch.instanceMatrix.needsUpdate = structureCount > 0;
+    if (iconBatch.instanceColor) iconBatch.instanceColor.needsUpdate = structureCount > 0;
+  }
   let resourceCount = 0;
   const resourceLimit = Math.min(1_024, clientView.resourceNodes.length);
   for (let index = 0; index < resourceLimit; index += 1) {
@@ -3283,7 +3707,9 @@ function tickSimulation(): void {
   lastDebug = simulation.step();
   clientView = buildClientVisibilityView();
   const visibleEvents = lastDebug.events.filter((event) => isEventVisible(event, before, clientView));
-  battleAudio.ingestEvents(visibleEvents, clientView.ships, selectedShipIds);
+  if (!landingLobbyActive) {
+    battleAudio.ingestEvents(visibleEvents, clientView.ships, selectedShipIds);
+  }
   processEvents(visibleEvents);
   simulationCpuMs = performance.now() - startedAt;
 }
@@ -3336,11 +3762,21 @@ function isEventVisible(
   if (event.type === "unitProduced") return event.playerId === localPlayerId || entityVisible(event.shipId);
   if (event.type === "weaponFired") return entityVisible(event.shipId) || entityVisible(event.targetId);
   if (event.type === "hit") return entityVisible(event.targetId) || projectileVisible(event.projectileId);
-  if (event.type === "projectileDetonated") return projectileVisible(event.projectileId);
+  if (event.type === "projectileDetonated") {
+    if (projectileVisible(event.projectileId)) return true;
+    // A fast projectile can be created and destroyed between multiplayer view snapshots.
+    // Keep the impact if it lands against an entity that is actually visible to this client.
+    return [...before.targetsById.values(), ...after.targetsById.values()].some(
+      (target) => Math.hypot(target.x - event.x, target.z - event.z) <= target.radius + 12,
+    );
+  }
   return event.type === "destroyed" && entityVisible(event.entityId);
 }
 
 function processEvents(events: SimulationEvent[]): void {
+  const detonatedProjectileIds = new Set(events.flatMap(
+    (event) => event.type === "projectileDetonated" ? [event.projectileId] : [],
+  ));
   for (const event of events) {
     if (event.type === "commandAccepted" && event.unitIds.length > 0) {
       eventLines.unshift(`<b>CMD</b> ${event.commandType} // ${event.unitIds.length} units`);
@@ -3410,7 +3846,8 @@ function processEvents(events: SimulationEvent[]): void {
         const shielded = origin.shields >= event.damage;
         origin.shields = Math.max(0, origin.shields - event.damage);
         const now = performance.now();
-        if (stressScenario.activeCount === 0
+        if (!detonatedProjectileIds.has(event.projectileId)
+          && stressScenario.activeCount === 0
           && now - (lastDamageEffectAt.get(event.targetId) ?? -Infinity) >= 55
           && isEffectVisible(origin.x, origin.y, origin.z)) {
           combatEffects.spawnDamageImpact(
@@ -3423,12 +3860,25 @@ function processEvents(events: SimulationEvent[]): void {
     } else if (event.type === "projectileDetonated") {
       const style = {
         autocannon: { y: 4.2, size: 0.55 }, pointDefense: { y: 6.8, size: 0.45 },
-        plasma: { y: 7.2, size: 1.7 }, torpedo: { y: 10, size: 3.2 },
+        plasma: { y: 7.2, size: 1.7 }, torpedo: { y: 10, size: 7.2 },
         heavyRail: { y: 10.2, size: 2.35 }, beam: { y: 8.5, size: 1.4 },
       }[event.weaponTypeId];
-      if (stressScenario.activeCount === 0 && isEffectVisible(event.x, style.y, event.z)) {
+      let impactOrigin: EffectOrigin | undefined;
+      let nearestImpactDistance = Infinity;
+      for (const origin of effectOrigins.values()) {
+        const distance = Math.hypot(origin.x - event.x, origin.z - event.z);
+        if (distance <= origin.radius + 12 && distance < nearestImpactDistance) {
+          impactOrigin = origin;
+          nearestImpactDistance = distance;
+        }
+      }
+      const impactY = impactOrigin?.y ?? style.y;
+      const impactSize = event.weaponTypeId === "torpedo" && impactOrigin
+        ? THREE.MathUtils.clamp(impactOrigin.radius * 0.22, style.size, 13)
+        : style.size;
+      if (stressScenario.activeCount === 0 && isEffectVisible(event.x, impactY, event.z)) {
         combatEffects.spawnProjectileDetonation(
-          event.x, style.y, event.z, WEAPONS[event.weaponTypeId].color, style.size, performance.now(),
+          event.x, impactY, event.z, WEAPONS[event.weaponTypeId].color, impactSize, performance.now(),
         );
       }
     } else if (event.type === "destroyed") {
@@ -3507,17 +3957,6 @@ function updateHud(): void {
   const player = canIssuePlayerCommands()
     ? state.players.find((candidate) => candidate.id === localPlayerId)
     : undefined;
-  if (clientViewMode === "post-match-omniscient") {
-    element("blue-count").textContent = clientView.ships.length.toString();
-    element("red-count").textContent = clientView.structures.length.toString();
-    element("friendly-team-name").textContent = "SHIPS";
-    element("hostile-team-name").textContent = "STRUCTURES";
-  } else {
-    element("blue-count").textContent = clientView.ships.filter((ship) => !isHostileToLocalPlayer(ship.teamId)).length.toString();
-    element("red-count").textContent = clientView.ships.filter((ship) => isHostileToLocalPlayer(ship.teamId)).length.toString();
-    element("friendly-team-name").textContent = networkMode ? `TEAM ${clientView.localTeamId ?? "?"}` : "ASTER";
-    element("hostile-team-name").textContent = "CONTACTS";
-  }
   if (player?.economy) {
     const economy = player.economy;
     element("alloy-value").textContent = Math.floor(economy.alloy).toLocaleString();
@@ -3581,6 +4020,15 @@ function drawMinimap(): void {
   for (const obstacle of clientView.state.obstacles) {
     const x = minimapCoordinate(obstacle.x, halfExtent, width);
     const y = minimapCoordinate(obstacle.z, halfExtent, width);
+    if (obstacle.type === "barrier" && obstacle.width && obstacle.depth) {
+      const obstacleWidth = obstacle.width / (halfExtent * 2) * width;
+      const obstacleDepth = obstacle.depth / (halfExtent * 2) * width;
+      context.fillStyle = "#26313a";
+      context.fillRect(x - obstacleWidth / 2, y - obstacleDepth / 2, obstacleWidth, obstacleDepth);
+      context.strokeStyle = "#71818c";
+      context.strokeRect(x - obstacleWidth / 2, y - obstacleDepth / 2, obstacleWidth, obstacleDepth);
+      continue;
+    }
     const radius = Math.max(2, obstacle.radius / (halfExtent * 2) * width);
     context.beginPath();
     context.arc(x, y, radius, 0, Math.PI * 2);
@@ -3958,8 +4406,8 @@ function updateSelectionHud(): void {
           ? { icon: "+A", text: `DIRECT ALLOY +${definition.alloyIncome}/S · −${definition.energyUpkeep}E/S` }
         : primary.type === "storage" || primary.type === "quantumStorage"
           ? { icon: "+CAP", text: `STORAGE +${definition.alloyStorage}A · +${definition.energyStorage}E` }
-        : primary.type === "radarArray"
-          ? { icon: "⌁", text: `LONG-RANGE SENSOR ${definition.sensorRange} · −${definition.energyUpkeep}E/S` }
+        : primary.type === "radarArray" || primary.type === "phasedRadarArray" || primary.type === "deepSpaceRadarArray"
+          ? { icon: STRUCTURE_ICONS[primary.type], text: `LONG-RANGE SENSOR ${definition.sensorRange} · NO UPKEEP` }
         : isDefensiveStructureType(primary.type)
           ? { icon: STRUCTURE_ICONS[primary.type], text: `${fortressLoadoutSummary(primary.type)} · −${definition.energyUpkeep}E/S` }
           : { icon: "+E", text: `ENERGY GRID +${definition.energyIncome}` };
@@ -4219,6 +4667,8 @@ function setStructureMode(type: BuildableStructureType | null): void {
     return;
   }
   pendingStructureType = type;
+  buildPlacementDrag = null;
+  placementGhost.rotation.y = 0;
   placementGhost.visible = false;
   for (const structureType of BUILDABLE_STRUCTURE_TYPES) {
     element(STRUCTURE_BUTTON_IDS[structureType]).classList.toggle("active", type === structureType);
@@ -4259,7 +4709,11 @@ function canPlaceStructureInView(
       < STRUCTURES[structure.type].radius + definition.radius + 8) return false;
   }
   for (const obstacle of clientView.state.obstacles) {
-    if (Math.hypot(obstacle.x - position.x, obstacle.z - position.z) < obstacle.radius + definition.radius + 8) return false;
+    if (obstacle.type === "barrier" && obstacle.width && obstacle.depth) {
+      const nearestX = THREE.MathUtils.clamp(position.x, obstacle.x - obstacle.width / 2, obstacle.x + obstacle.width / 2);
+      const nearestZ = THREE.MathUtils.clamp(position.z, obstacle.z - obstacle.depth / 2, obstacle.z + obstacle.depth / 2);
+      if (Math.hypot(position.x - nearestX, position.z - nearestZ) < definition.radius + 8) return false;
+    } else if (Math.hypot(obstacle.x - position.x, obstacle.z - position.z) < obstacle.radius + definition.radius + 8) return false;
   }
   const queuedBuilds = networkMode
     ? pendingNetworkBuilds.values()
@@ -4328,7 +4782,11 @@ function updatePlacementGhost(clientX: number, clientY: number): void {
   placementRingMaterial.color.setHex(color);
 }
 
-function issueBuildStructure(candidate: NonNullable<ReturnType<typeof getPlacementCandidate>>, keepPlacing: boolean): void {
+function issueBuildStructure(
+  candidate: NonNullable<ReturnType<typeof getPlacementCandidate>>,
+  keepPlacing: boolean,
+  yaw = 0,
+): void {
   if (!pendingStructureType || !candidate.valid) {
     showToast("INVALID BUILD SITE");
     return;
@@ -4338,6 +4796,7 @@ function issueBuildStructure(candidate: NonNullable<ReturnType<typeof getPlaceme
     type: "buildStructure", playerId: localPlayerId, sequence: commandSequence,
     requestedTick: nextCommandTick(), structureType: pendingStructureType,
     position: { x: candidate.position.x, z: candidate.position.z }, queued: keepPlacing,
+    yaw,
     builderUnitIds: getSelectedMobileBuilderIds(),
     ...(candidate.nodeId === undefined ? {} : { resourceNodeId: candidate.nodeId }),
   };
@@ -4673,6 +5132,11 @@ function animate(now: number): void {
       tickSimulation();
       accumulator -= FIXED_DT;
     }
+  } else if (!paused && networkMode && !networkView && !pendingLockstepState && physicsWorld) {
+    const ticksBehind = lockstepTargetTick - simulation.state.tick;
+    const tickBudget = ticksBehind > 6 ? 2 : 1;
+    for (let tick = 0; tick < Math.min(ticksBehind, tickBudget); tick += 1) tickSimulation();
+    verifyLockstepFrame();
   }
   updateCamera(delta);
   const preparationStartedAt = performance.now();
@@ -4848,7 +5312,16 @@ addEventListener("keydown", (event) => {
 addEventListener("keyup", (event) => keys.delete(event.code));
 addEventListener("pointermove", (event) => {
   pointerX = event.clientX; pointerY = event.clientY;
-  if (pendingStructureType) updatePlacementGhost(event.clientX, event.clientY);
+  if (buildPlacementDrag) {
+    const direction = getWorldPoint(event.clientX, event.clientY);
+    if (direction) {
+      const dx = direction.x - buildPlacementDrag.candidate.position.x;
+      const dz = direction.z - buildPlacementDrag.candidate.position.z;
+      if (Math.hypot(dx, dz) >= 4) buildPlacementDrag.yaw = Math.atan2(dx, dz);
+      placementGhost.position.copy(buildPlacementDrag.candidate.position);
+      placementGhost.rotation.y = buildPlacementDrag.yaw;
+    }
+  } else if (pendingStructureType) updatePlacementGhost(event.clientX, event.clientY);
   if (middleDrag && !element("app").classList.contains("start-screen-active")) {
     cameraRig.azimuth -= (event.clientX - lastPointerX) * 0.006;
     lastPointerX = event.clientX;
@@ -4875,6 +5348,12 @@ addEventListener("pointerdown", (event) => {
 });
 addEventListener("pointerup", (event) => {
   if (event.button === 1) middleDrag = false;
+  if (buildPlacementDrag && event.button === 0) {
+    const drag = buildPlacementDrag;
+    buildPlacementDrag = null;
+    issueBuildStructure(drag.candidate, drag.keepPlacing, drag.yaw);
+    return;
+  }
   if (selectionDrag && event.button === 0) {
     const drag = selectionDrag;
     selectionDrag = null;
@@ -4911,12 +5390,28 @@ addEventListener("pointerup", (event) => {
 });
 addEventListener("wheel", (event) => {
   if (element("app").classList.contains("start-screen-active")) return;
-  const distanceScaledZoom = THREE.MathUtils.clamp(cameraRig.distance / 1_600, 0.9, 8);
-  cameraRig.distance = THREE.MathUtils.clamp(
-    cameraRig.distance + event.deltaY * distanceScaledZoom,
+  const anchorBeforeZoom = getWorldPoint(event.clientX, event.clientY);
+  const wheelDelta = THREE.MathUtils.clamp(event.deltaY, -600, 600);
+  const nextDistance = THREE.MathUtils.clamp(
+    cameraRig.distance * Math.exp(wheelDelta * 0.003),
     MIN_CAMERA_DISTANCE,
     MAX_CAMERA_DISTANCE,
   );
+  if (nextDistance === cameraRig.distance) return;
+
+  cameraRig.distance = nextDistance;
+  updateCamera(0);
+  camera.updateMatrixWorld();
+  const anchorAfterZoom = getWorldPoint(event.clientX, event.clientY);
+  if (anchorBeforeZoom && anchorAfterZoom) {
+    cameraRig.target.x += anchorBeforeZoom.x - anchorAfterZoom.x;
+    cameraRig.target.z += anchorBeforeZoom.z - anchorAfterZoom.z;
+    const panLimit = minimapHalfExtent();
+    cameraRig.target.x = THREE.MathUtils.clamp(cameraRig.target.x, -panLimit, panLimit);
+    cameraRig.target.z = THREE.MathUtils.clamp(cameraRig.target.z, -panLimit, panLimit);
+    updateCamera(0);
+    camera.updateMatrixWorld();
+  }
 }, { passive: true });
 
 canvas.addEventListener("pointerdown", (event) => {
@@ -4945,7 +5440,10 @@ canvas.addEventListener("pointerdown", (event) => {
   }
   if (pendingStructureType && event.button === 0) {
     const candidate = getPlacementCandidate(event.clientX, event.clientY);
-    if (candidate) issueBuildStructure(candidate, event.shiftKey);
+    if (candidate) {
+      buildPlacementDrag = { candidate, yaw: 0, keepPlacing: event.shiftKey };
+      placementGhost.rotation.y = 0;
+    }
     return;
   }
   if (event.button === 0 && pendingCommandMode === "focusFire") {
@@ -5079,6 +5577,8 @@ element("build-singularity").addEventListener("click", () => setStructureMode("s
 element("build-matter-forge").addEventListener("click", () => setStructureMode("matterForge"));
 element("build-quantum-storage").addEventListener("click", () => setStructureMode("quantumStorage"));
 element("build-radar-array").addEventListener("click", () => setStructureMode("radarArray"));
+element("build-phased-radar").addEventListener("click", () => setStructureMode("phasedRadarArray"));
+element("build-deep-space-radar").addEventListener("click", () => setStructureMode("deepSpaceRadarArray"));
 element("build-pd-battery").addEventListener("click", () => setStructureMode("pointDefenseBattery"));
 element("build-missile-battery").addEventListener("click", () => setStructureMode("missileBattery"));
 element("build-rail-battery").addEventListener("click", () => setStructureMode("railBattery"));
@@ -5234,18 +5734,78 @@ element("ready-toggle").addEventListener("click", () => {
   const slot = networkLobby?.slots.find((candidate) => candidate.playerId === localPlayerId);
   if (slot) sendNetworkMessage({ type: "set_ready", ready: !slot.ready });
 });
-element("mode-teams").addEventListener("click", () => sendNetworkMessage({ type: "set_mode", mode: "teams" }));
-element("mode-ffa").addEventListener("click", () => sendNetworkMessage({ type: "set_mode", mode: "ffa" }));
-for (const settingId of ["map-preset", "map-size", "starting-resources", "resource-density", "team-spawn-mode"]) {
-  element<HTMLSelectElement>(settingId).addEventListener("change", () => {
-    sendNetworkMessage({ type: "set_settings", settings: selectedLobbySettings() });
+element("open-map-settings").addEventListener("click", openMapSettings);
+element("open-player-invite").addEventListener("click", () => {
+  refreshLobbyInvite();
+  openLobbyUtilityModal("player-invite-modal", "copy-lobby-invite");
+});
+element("open-spectator-invite").addEventListener("click", () => {
+  openLobbyUtilityModal("spectator-invite-modal", "spectator-team-select");
+});
+element("close-map-settings").addEventListener("click", closeMapSettings);
+element("cancel-map-settings").addEventListener("click", closeMapSettings);
+element("close-player-invite").addEventListener("click", closeLobbyUtilityModals);
+element("close-spectator-invite").addEventListener("click", closeLobbyUtilityModals);
+element("map-settings-modal").addEventListener("click", (event) => {
+  const target = event.target as HTMLElement;
+  if (target.closest("[data-close-map-settings]")) closeMapSettings();
+});
+for (const modalId of ["player-invite-modal", "spectator-invite-modal"]) {
+  element(modalId).addEventListener("click", (event) => {
+    if ((event.target as HTMLElement).closest("[data-close-lobby-modal]")) closeLobbyUtilityModals();
   });
 }
+element("map-preset-grid").addEventListener("click", (event) => {
+  const card = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-map-preset]");
+  if (!card || card.disabled || !card.dataset.mapPreset) return;
+  element<HTMLInputElement>("map-preset").value = card.dataset.mapPreset;
+  updateMapSettingsDraftView();
+});
+element("mode-teams").addEventListener("click", () => {
+  if (element<HTMLButtonElement>("mode-teams").disabled) return;
+  sendNetworkMessage({ type: "set_mode", mode: "teams" });
+});
+element("mode-ffa").addEventListener("click", () => {
+  if (element<HTMLButtonElement>("mode-ffa").disabled) return;
+  sendNetworkMessage({ type: "set_mode", mode: "ffa" });
+});
+element<HTMLSelectElement>("starting-resources").addEventListener("change", () => {
+  if (!networkLobby) return;
+  sendNetworkMessage({
+    type: "set_settings",
+    settings: {
+      ...networkLobby.settings,
+      startingResources: element<HTMLSelectElement>("starting-resources").value as LobbySettings["startingResources"],
+    },
+  });
+});
+for (const settingId of ["map-size", "resource-density", "team-spawn-mode"]) {
+  element<HTMLSelectElement>(settingId).addEventListener("change", () => {
+    updateMapSettingsDraftView();
+  });
+}
+element("apply-map-settings").addEventListener("click", () => {
+  if (!networkLobby || !draftLobbyMode) return;
+  const localSlot = networkLobby.slots.find((slot) => slot.playerId === localPlayerId);
+  if (!localSlot?.isHost || networkLobby.phase !== "lobby") return;
+  const settings = selectedLobbySettings();
+  if (!lobbySettingsEqual(settings, networkLobby.settings)) sendNetworkMessage({ type: "set_settings", settings });
+  closeMapSettings();
+});
+window.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  const utilityModalOpen = ["player-invite-modal", "spectator-invite-modal"]
+    .some((modalId) => !element(modalId).classList.contains("hidden"));
+  if (!mapSettingsOpen && !utilityModalOpen) return;
+  event.preventDefault();
+  if (mapSettingsOpen) closeMapSettings();
+  closeLobbyUtilityModals();
+});
 element("add-ai").addEventListener("click", () => sendNetworkMessage({
   type: "add_ai",
   teamId: (networkLobby?.slots.find((slot) => slot.playerId === localPlayerId)?.teamId ?? 1) === 1 ? 2 : 1,
-  difficulty: element<HTMLSelectElement>("ai-difficulty").value as "easy" | "normal" | "hard",
-  personality: element<HTMLSelectElement>("ai-personality").value as "balanced" | "aggressive" | "turtle" | "economic",
+  difficulty: "normal",
+  personality: "balanced",
 }));
 element("authorize-spectator").addEventListener("click", () => sendNetworkMessage({
   type: "authorize_spectator",

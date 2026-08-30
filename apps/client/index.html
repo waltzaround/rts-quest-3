@@ -20,12 +20,6 @@
         <div class="resource alloy"><span>ALLOY</span><strong id="alloy-value">900</strong><small id="alloy-rate">+14 / −0</small></div>
         <div class="resource energy"><span>ENERGY</span><strong id="energy-value">900</strong><small id="energy-rate">+34 / −0</small></div>
         <div class="resource efficiency"><span>GRID FLOW</span><strong id="economy-efficiency">100%</strong><small>ECONOMY</small></div>
-        <div class="team-score">
-          <span class="team blue"><i></i><span id="friendly-team-name">ASTER</span> <b id="blue-count">8</b></span>
-          <em>ENGAGED</em>
-          <span class="team red"><b id="red-count">0</b> <span id="hostile-team-name">CONTACTS</span><i></i></span>
-        </div>
-        <div id="view-mode-badge" class="view-mode-badge player"><span>PLAYER</span><small>TACTICAL VIEW</small></div>
         <div class="clock"><span>SIM TIME</span><strong id="sim-time">00:00</strong></div>
         <button class="connection online" id="network-open" type="button" title="Open multiplayer lobby">
           <i></i><span><strong id="connection-title">MULTIPLAYER</strong><small id="connection-detail">LAN LOBBY</small></span>
@@ -140,6 +134,8 @@
             </div>
             <div class="construction-category" data-construction-category="defence">
               <button id="build-radar-array"><b>RA</b><span>RADAR ARRAY</span><small>420A · 360E</small><em class="command-lock"></em></button>
+              <button id="build-phased-radar"><b>R2</b><span>PHASED RADAR</span><small>1250A · 1050E</small><em class="command-lock"></em></button>
+              <button id="build-deep-space-radar"><b>R3</b><span>DEEP-SPACE ARRAY</span><small>3200A · 2900E</small><em class="command-lock"></em></button>
               <button id="build-pd-battery"><b>F1</b><span>T1 FLAK BASTION</span><small>620A · 430E · ANTI-FIGHTER</small><em class="command-lock"></em></button>
               <button id="build-missile-battery"><b>T1</b><span>T1 TORPEDO CITADEL</span><small>1050A · 860E · ANTI-CAPITAL</small><em class="command-lock"></em></button>
               <button id="build-rail-battery"><b>R2</b><span>T2 RAIL FORTRESS</span><small>1750A · 1350E · ANTI-CAPITAL</small><em class="command-lock"></em></button>
@@ -214,57 +210,114 @@
               </div>
             </div>
             <div class="lobby-grid">
-              <div class="lobby-roster-column">
-                <div class="lobby-section-heading"><span>PLAYER SLOTS</span><small id="lobby-capacity">0 / 6</small></div>
-                <div class="lobby-slot-head"><span>COMMANDER</span><span>TYPE</span><span>TEAM</span><span>STATUS</span></div>
-                <div id="lobby-slots" class="lobby-slots"></div>
-              </div>
-              <section class="lobby-settings-panel">
-                <div class="lobby-section-heading"><span>BATTLESPACE INTEL</span><small id="settings-authority">HOST CONTROL</small></div>
+              <aside class="lobby-map-sidebar">
+                <div class="lobby-section-heading"><span>BATTLEFIELD INTEL</span><small>LIVE SUMMARY</small></div>
                 <div class="map-preview-shell" aria-hidden="true">
-                  <div id="map-preview" class="map-preview map-orbital-ring">
-                    <canvas id="map-preview-canvas" width="600" height="316"></canvas>
+                  <div id="lobby-map-preview" class="map-preview map-orbital-ring">
+                    <canvas id="lobby-map-preview-canvas" width="600" height="316"></canvas>
                     <span>PROCEDURAL LAYOUT SAMPLE</span>
                   </div>
                 </div>
-                <div class="setting-group-label">BATTLEFIELD</div>
-                <div class="lobby-settings-grid">
-                  <label>MAP LAYOUT<select id="map-preset"><option value="orbital-ring">ORBITAL RING</option><option value="crossfire">CROSSFIRE</option><option value="open-expanse">OPEN EXPANSE</option><option value="asteroid-belt">ASTEROID BELT</option><option value="spiral-arms">SPIRAL ARMS</option><option value="shattered-core">SHATTERED CORE</option></select></label>
-                  <label>MAP SIZE<select id="map-size"><option value="small">SMALL · 2–4</option><option value="medium">MEDIUM · 2–6</option><option value="large">LARGE · 2–8</option><option value="huge">HUGE · 6,000 RANGE</option><option value="colossal">COLOSSAL · 8,500 RANGE</option></select></label>
-                  <label>STARTING RESOURCES<select id="starting-resources"><option value="low">LOW · 500</option><option value="standard">STANDARD · 900</option><option value="high">HIGH · 1,800</option></select></label>
-                  <label>RESOURCE DENSITY<select id="resource-density"><option value="scarce">SCARCE</option><option value="standard">STANDARD</option><option value="rich">RICH</option></select></label>
-                  <label id="team-spawn-setting">TEAM DEPLOYMENT<select id="team-spawn-mode"><option value="together">TOGETHER · ALLIED SECTOR</option><option value="interleaved">INTERLEAVED · EVEN SPACING</option><option value="random">RANDOM · SEEDED</option></select></label>
+                <button id="open-map-settings" class="lobby-map-open" type="button"><span>CHANGE BATTLEFIELD</span><small>MAP · SIZE · DEPLOYMENT</small></button>
+                <div class="lobby-map-brief">
+                  <span><small>SELECTED MAP</small><strong id="lobby-map-name">ORBITAL RING</strong><em id="lobby-map-summary">MEDIUM · STANDARD</em></span>
+                  <p id="lobby-map-description">Balanced resource ring with a valuable contested center.</p>
+                  <dl class="lobby-option-summary">
+                    <div><dt>MAP SIZE</dt><dd id="lobby-map-size-summary">MEDIUM · 2–6</dd></div>
+                    <div><dt>DEPOSITS</dt><dd id="lobby-density-summary">STANDARD</dd></div>
+                    <div><dt>DEPLOYMENT</dt><dd id="lobby-deployment-summary">ALLIED SECTORS</dd></div>
+                  </dl>
                 </div>
-                <div class="setting-group-label rules-label">GAME MODE</div>
-                <div class="mode-control lobby-mode-control"><button id="mode-teams" type="button"><b>TEAM CONQUEST</b><small>SHARED VICTORY</small></button><button id="mode-ffa" type="button"><b>FREE-FOR-ALL</b><small>LAST COMMANDER</small></button></div>
-                <p id="map-description">Balanced resource ring with a contested central field.</p>
+                <div class="lobby-sidebar-control">
+                  <div class="setting-group-label">STARTING RESOURCES</div>
+                  <select id="starting-resources" aria-label="Starting resources"><option value="low">LOW · 500</option><option value="standard">STANDARD · 900</option><option value="high">HIGH · 1,800</option></select>
+                </div>
+                <div class="lobby-sidebar-control">
+                  <div class="setting-group-label">GAME MODE</div>
+                  <div class="mode-control lobby-mode-control"><button id="mode-teams" type="button"><b>TEAM CONQUEST</b><small>SHARED VICTORY</small></button><button id="mode-ffa" type="button"><b>FREE-FOR-ALL</b><small>LAST COMMANDER</small></button></div>
+                </div>
+              </aside>
+              <div class="lobby-roster-column">
+                <div class="lobby-section-heading"><span>PLAYER SLOTS</span><small id="lobby-capacity">0 / 6</small></div>
+                <div class="lobby-slot-head"><span>COMMANDER</span><span>TYPE</span><span>DIFFICULTY</span><span>TEAM</span><span>STATUS</span></div>
+                <div id="lobby-slots" class="lobby-slots"></div>
+                <div id="lobby-ai-actions" class="lobby-ai-actions hidden">
+                  <button id="add-ai" type="button">+ ADD AI COMMANDER</button>
+                  <button id="open-player-invite" type="button">INVITE PLAYERS</button>
+                  <button id="open-spectator-invite" type="button">INVITE SPECTATORS</button>
+                </div>
+              </div>
+            </div>
+            <div id="map-settings-modal" class="lobby-map-modal hidden" role="dialog" aria-modal="true" aria-labelledby="map-settings-title">
+              <div class="lobby-map-backdrop" data-close-map-settings></div>
+              <section class="lobby-map-dialog">
+                <header class="lobby-map-header">
+                  <span><small>BATTLEFIELD CONFIGURATION</small><h2 id="map-settings-title">SELECT MAP</h2></span>
+                  <small id="settings-authority">HOST CONTROL</small>
+                  <button id="close-map-settings" type="button" aria-label="Close battlefield settings">×</button>
+                </header>
+                <div class="lobby-map-body">
+                  <div class="lobby-map-catalog">
+                    <div class="setting-group-label">MAP FAMILY</div>
+                    <div id="map-preset-grid" class="map-preset-grid"></div>
+                  </div>
+                  <div class="lobby-map-config">
+                    <div class="map-preview-shell" aria-hidden="true">
+                      <div id="map-preview" class="map-preview map-orbital-ring">
+                        <canvas id="map-preview-canvas" width="600" height="316"></canvas>
+                        <span>PROCEDURAL LAYOUT SAMPLE</span>
+                      </div>
+                    </div>
+                    <input id="map-preset" type="hidden" value="orbital-ring" />
+                    <p id="map-description">Balanced resource ring with a contested central field.</p>
+                    <div class="setting-group-label">MATCH SETTINGS</div>
+                    <div class="lobby-settings-grid">
+                      <label>MAP SIZE<select id="map-size"><option value="small">SMALL · 2–4</option><option value="medium">MEDIUM · 2–6</option><option value="large">LARGE · 2–8</option><option value="huge">HUGE · 6,000 RANGE</option><option value="colossal">COLOSSAL · 8,500 RANGE</option></select></label>
+                      <label>RESOURCE DENSITY<select id="resource-density"><option value="scarce">SCARCE</option><option value="standard">STANDARD</option><option value="rich">RICH</option></select></label>
+                      <label id="team-spawn-setting">TEAM DEPLOYMENT<select id="team-spawn-mode"><option value="together">TOGETHER · ALLIED SECTOR</option><option value="interleaved">INTERLEAVED · EVEN SPACING</option><option value="random">RANDOM · SEEDED</option></select></label>
+                    </div>
+                  </div>
+                </div>
+                <footer class="lobby-map-actions"><button id="cancel-map-settings" type="button">CANCEL</button><button id="apply-map-settings" class="network-primary" type="button">APPLY BATTLEFIELD</button></footer>
               </section>
             </div>
-            <div class="lobby-command-row">
-              <div class="lobby-transmission">
-                <div class="transmission-log"><small><i></i> COMMAND NETWORK ONLINE</small><p>Invite commanders with this LAN address.</p></div>
-                <div class="lobby-share"><span><small>LAN INVITE</small><strong id="lobby-invite-url">Preparing invite…</strong></span><button id="copy-lobby-invite" type="button">COPY INVITE</button></div>
-              </div>
-              <div id="host-controls" class="host-controls hidden">
-                <div class="host-control-group host-ai-group">
-                  <span class="host-group-label">ADD AI COMMANDER</span>
-                  <label>SKILL<select id="ai-difficulty"><option value="easy">EASY</option><option value="normal" selected>NORMAL</option><option value="hard">HARD</option></select></label>
-                  <label>DOCTRINE<select id="ai-personality"><option value="balanced">BALANCED</option><option value="aggressive">AGGRESSIVE</option><option value="turtle">TURTLE</option><option value="economic">ECONOMIC</option></select></label>
-                  <button id="add-ai" type="button">+ ADD AI</button>
+            <div id="player-invite-modal" class="lobby-utility-modal hidden" role="dialog" aria-modal="true" aria-labelledby="player-invite-title">
+              <div class="lobby-map-backdrop" data-close-lobby-modal></div>
+              <section class="lobby-utility-dialog">
+                <header class="lobby-map-header">
+                  <span><small>COMMAND NETWORK</small><h2 id="player-invite-title">INVITE PLAYERS</h2></span>
+                  <small>LAN ACCESS</small>
+                  <button id="close-player-invite" type="button" aria-label="Close player invite">×</button>
+                </header>
+                <div class="lobby-utility-body">
+                  <p>Share this address with commanders on the same local network.</p>
+                  <div class="lobby-share lobby-modal-share"><span><small>LAN INVITE</small><strong id="lobby-invite-url">Preparing invite…</strong></span><button id="copy-lobby-invite" type="button">COPY INVITE</button></div>
                 </div>
-                <div class="host-control-group host-spectator-group">
-                  <span class="host-group-label">SPECTATOR ACCESS</span>
-                  <label>VIEW TEAM<select id="spectator-team-select"><option value="1">TEAM 1</option><option value="2">TEAM 2</option><option value="3">TEAM 3</option><option value="4">TEAM 4</option><option value="5">TEAM 5</option><option value="6">TEAM 6</option><option value="7">TEAM 7</option><option value="8">TEAM 8</option></select></label>
-                  <button id="authorize-spectator" type="button">CREATE TOKEN</button>
-                </div>
-              </div>
-              <div class="lobby-final-actions">
-                <span class="launch-status-copy"><small>DEPLOYMENT STATUS</small><strong>Ready your fleet, then launch when every commander is prepared.</strong></span>
-                <button id="ready-toggle" type="button">MARK READY</button>
-                <button id="start-match" class="network-primary" type="button">LAUNCH MATCH</button>
-              </div>
+              </section>
             </div>
-            <div id="spectator-grant" class="spectator-grant hidden"><span><small>TEAM VIEW TOKEN</small><strong id="spectator-grant-token">—</strong></span><button id="copy-spectator-token" type="button">COPY TOKEN</button></div>
+            <div id="spectator-invite-modal" class="lobby-utility-modal hidden" role="dialog" aria-modal="true" aria-labelledby="spectator-invite-title">
+              <div class="lobby-map-backdrop" data-close-lobby-modal></div>
+              <section class="lobby-utility-dialog">
+                <header class="lobby-map-header">
+                  <span><small>LIMITED BATTLESPACE ACCESS</small><h2 id="spectator-invite-title">INVITE SPECTATORS</h2></span>
+                  <small>HOST CONTROL</small>
+                  <button id="close-spectator-invite" type="button" aria-label="Close spectator invite">×</button>
+                </header>
+                <div class="lobby-utility-body">
+                  <p>Create a team-scoped viewing token. Spectators can only see the selected alliance.</p>
+                  <div class="spectator-invite-controls">
+                    <label>VIEW TEAM<select id="spectator-team-select"><option value="1">TEAM 1</option><option value="2">TEAM 2</option><option value="3">TEAM 3</option><option value="4">TEAM 4</option><option value="5">TEAM 5</option><option value="6">TEAM 6</option><option value="7">TEAM 7</option><option value="8">TEAM 8</option></select></label>
+                    <button id="authorize-spectator" type="button">CREATE VIEW TOKEN</button>
+                  </div>
+                  <div id="spectator-grant" class="spectator-grant hidden"><span><small>TEAM VIEW TOKEN</small><strong id="spectator-grant-token">—</strong></span><button id="copy-spectator-token" type="button">COPY TOKEN</button></div>
+                </div>
+              </section>
+            </div>
+            <div class="lobby-final-actions">
+              <span class="launch-status-copy"><small>DEPLOYMENT STATUS</small><strong>Ready your fleet, then launch when every commander is prepared.</strong></span>
+              <button id="ready-toggle" type="button">MARK READY</button>
+              <button id="start-match" class="network-primary" type="button">LAUNCH MATCH</button>
+            </div>
             <button id="leave-match" class="network-link" type="button">LEAVE NETWORK</button>
           </div>
           <p id="network-error" role="alert"></p>

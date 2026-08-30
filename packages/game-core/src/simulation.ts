@@ -48,6 +48,8 @@ const AI_THINK_TICKS = 40;
 const BASE_CONSTRUCTION_BUILD_POWER = 1;
 const OBSTACLE_CLEARANCE = 8;
 const PHYSICS_SUBSTEPS = 4;
+const MEDIUM_BATTLE_PHYSICS_SHIP_COUNT = 512;
+const LARGE_BATTLE_CHECKSUM_INTERVAL_TICKS = 20;
 const CONTESTED_RESOURCE_NODES_PER_PLAYER = 3;
 const STARTING_RESOURCE_NODES_PER_PLAYER = 3;
 const CAPITAL_SHIP_CLASSES: ReadonlySet<ShipClass> = new Set(["cruiser", "carrier", "battleship"]);
@@ -61,6 +63,13 @@ const ALL_COLLISION_CATEGORIES = STATIC_COLLISION_CATEGORY
   | SMALL_CRAFT_COLLISION_CATEGORY
   | CAPITAL_SHIP_COLLISION_CATEGORY;
 
+function shipsPhaseThroughStructure(type: StructureType): boolean {
+  return SHIPYARD_TYPES.includes(type as ShipyardType)
+    || type === "fabricator"
+    || type === "advancedFabrication"
+    || type === "capitalInfrastructure";
+}
+
 export interface ScenarioOptions {
   seed?: number;
   fightersPerTeam?: number;
@@ -72,7 +81,8 @@ export interface ScenarioOptions {
   /** Lightweight title-screen battle with two fighter-heavy AI fleets. */
   menuBattle?: boolean;
   enemyCommander?: boolean;
-  mapPreset?: "orbital-ring" | "crossfire" | "open-expanse" | "asteroid-belt" | "spiral-arms" | "shattered-core";
+  mapPreset?: "orbital-ring" | "crossfire" | "open-expanse" | "asteroid-belt" | "spiral-arms" | "shattered-core"
+    | "amazon-tunnel" | "core-rush" | "star-fortress";
   mapSize?: "small" | "medium" | "large" | "huge" | "colossal";
   startingResources?: "low" | "standard" | "high";
   resourceDensity?: "scarce" | "standard" | "rich";
@@ -94,6 +104,8 @@ export class GameSimulation {
   readonly state: SimulationState;
   private readonly spatialHash = new SpatialHash<CombatTargetState>(160);
   private readonly navigationHash = new SpatialHash<ShipState>(160);
+  private readonly obstacleHash = new SpatialHash<ObstacleState>(220);
+  private readonly staticCollisionHash = new SpatialHash<{ id: number; x: number; z: number; radius: number }>(220);
   private readonly targetsById = new Map<EntityId, CombatTargetState>();
   private readonly visibleEntityIdsByTeam = new Map<TeamId, Set<EntityId>>();
   private readonly alliedTeamIdsByTeam = new Map<TeamId, Set<TeamId>>();
@@ -104,6 +116,9 @@ export class GameSimulation {
   private physicsBodyCount = 0;
   private avoidance: import("./types").AvoidanceDebugState[] = [];
   private readonly productionRateMultiplier: number;
+  private checksumTick = -1;
+  private maxObstacleRadius = 0;
+  private maxStaticRadius = 0;
 
   constructor(
     state: SimulationState,
@@ -120,6 +135,7 @@ export class GameSimulation {
     }
     this.refreshVisibilityCache();
     this.state.checksum = calculateChecksum(this.state);
+    this.checksumTick = this.state.tick;
   }
 
   attachPhysicsWorld(physicsWorld: PlanarCirclePhysicsWorld): void {
@@ -200,6 +216,10 @@ export class GameSimulation {
     this.state.tick += 1;
     this.ingestCommands();
     this.updateEconomyAndProduction();
+    this.obstacleHash.rebuild(this.state.obstacles);
+    this.maxObstacleRadius = this.state.obstacles.reduce(
+      (largest, obstacle) => obstacle.type === "asteroid" ? Math.max(largest, obstacle.radius) : largest, 0,
+    );
     this.navigationHash.rebuild(this.state.ships);
     this.updateNavigation();
     this.integrateMovement();
@@ -221,7 +241,10 @@ export class GameSimulation {
     this.destroyDeadEntities();
     this.evaluateVictory();
     this.runEnemyCommanders();
-    this.state.checksum = calculateChecksum(this.state);
+    if (this.state.ships.length < MEDIUM_BATTLE_PHYSICS_SHIP_COUNT
+      || this.state.tick - this.checksumTick >= LARGE_BATTLE_CHECKSUM_INTERVAL_TICKS) {
+      this.refreshChecksum();
+    }
     return this.debugSnapshot();
   }
 
@@ -233,6 +256,13 @@ export class GameSimulation {
 
   snapshot(): SimulationState {
     return JSON.parse(JSON.stringify(this.state)) as SimulationState;
+  }
+
+  /** Forces a full-state determinism audit before checkpoints and resynchronization snapshots. */
+  refreshChecksum(): number {
+    this.state.checksum = calculateChecksum(this.state);
+    this.checksumTick = this.state.tick;
+    return this.state.checksum;
   }
 
   playerView(playerId: string): PlayerViewState | null {
@@ -349,8 +379,7 @@ export class GameSimulation {
       if (Math.hypot(structure.x - placementPosition.x, structure.z - placementPosition.z) < minimumDistance) return false;
     }
     for (const obstacle of this.state.obstacles) {
-      const minimumDistance = obstacle.radius + definition.radius + PLACEMENT_PADDING;
-      if (Math.hypot(obstacle.x - placementPosition.x, obstacle.z - placementPosition.z) < minimumDistance) return false;
+      if (circleOverlapsObstacle(placementPosition.x, placementPosition.z, definition.radius + PLACEMENT_PADDING, obstacle)) return false;
     }
     for (const command of this.state.commandQueue) {
       if (command.type !== "buildStructure") continue;
@@ -674,7 +703,7 @@ export class GameSimulation {
           id: this.state.nextEntityId++, ownerPlayerId: command.playerId,
           teamId: this.state.players.find((player) => player.id === command.playerId)!.teamId,
           type: command.structureType,
-          x: node?.x ?? command.position.x, z: node?.z ?? command.position.z, yaw: 0,
+          x: node?.x ?? command.position.x, z: node?.z ?? command.position.z, yaw: wrapAngle(command.yaw ?? 0),
           health: definition.maxHealth * 0.1, shields: 0, buildProgress: 0,
           resourceNodeId: node?.id ?? null, productionQueue: [], repeatProduction: false,
           rallyPoint: this.defaultRallyPoint(command.playerId, node?.x ?? command.position.x, node?.z ?? command.position.z),
@@ -974,17 +1003,20 @@ export class GameSimulation {
 
   private integrateMovement(): void {
     const overlapStatics = [
-      ...this.state.obstacles.map((obstacle) => ({ x: obstacle.x, z: obstacle.z, radius: obstacle.radius })),
-      ...this.state.structures.map((structure) => ({
-        x: structure.x, z: structure.z, radius: STRUCTURES[structure.type].radius,
+      ...this.state.obstacles.filter((obstacle) => obstacle.type === "asteroid")
+        .map((obstacle) => ({ id: -obstacle.id, x: obstacle.x, z: obstacle.z, radius: obstacle.radius })),
+      ...this.state.structures.filter((structure) => !shipsPhaseThroughStructure(structure.type)).map((structure) => ({
+        id: structure.id, x: structure.x, z: structure.z, radius: STRUCTURES[structure.type].radius,
       })),
     ];
+    this.staticCollisionHash.rebuild(overlapStatics);
+    this.maxStaticRadius = overlapStatics.reduce((largest, obstacle) => Math.max(largest, obstacle.radius), 0);
     if (this.physicsWorld) {
       const staticCircles = [
-        ...this.state.obstacles.map((obstacle) => ({
+        ...this.state.obstacles.filter((obstacle) => obstacle.type === "asteroid").map((obstacle) => ({
           id: `obstacle:${obstacle.id}`, x: obstacle.x, z: obstacle.z, radius: obstacle.radius,
         })),
-        ...this.state.structures.map((structure) => ({
+        ...this.state.structures.filter((structure) => !shipsPhaseThroughStructure(structure.type)).map((structure) => ({
           id: `structure:${structure.id}`, x: structure.x, z: structure.z, radius: STRUCTURES[structure.type].radius,
         })),
       ];
@@ -1003,14 +1035,16 @@ export class GameSimulation {
         }),
       });
       const shipsByPhysicsId = new Map(this.state.ships.map((ship) => [`ship:${ship.id}`, ship]));
-      for (const body of this.physicsWorld.step(FIXED_DT, PHYSICS_SUBSTEPS)) {
+      const physicsSubsteps = this.state.ships.length > LARGE_BATTLE_SHIP_COUNT ? 2 : PHYSICS_SUBSTEPS;
+      for (const body of this.physicsWorld.step(FIXED_DT, physicsSubsteps)) {
         const ship = shipsByPhysicsId.get(body.id);
         if (!ship) continue;
         ship.x = quantizePhysics(body.x);
         ship.z = quantizePhysics(body.z);
         ship.vx = quantizePhysics(body.vx);
         ship.vz = quantizePhysics(body.vz);
-        this.resolveStaticOverlaps(ship, overlapStatics);
+        this.resolveStaticOverlaps(ship);
+        this.resolveBarrierOverlaps(ship);
       }
       this.physicsBodyCount = this.physicsWorld.bodyCount;
       return;
@@ -1018,7 +1052,8 @@ export class GameSimulation {
     for (const ship of this.state.ships) {
       ship.x += ship.vx * FIXED_DT;
       ship.z += ship.vz * FIXED_DT;
-      this.resolveStaticOverlaps(ship, overlapStatics);
+      this.resolveStaticOverlaps(ship);
+      this.resolveBarrierOverlaps(ship);
     }
     this.physicsBodyCount = 0;
   }
@@ -1037,7 +1072,12 @@ export class GameSimulation {
     let totalZ = 0;
     let strongestObstacleId = -1;
     let strongest = 0;
-    for (const obstacle of this.state.obstacles) {
+    const searchRadius = Math.max(
+      this.maxObstacleRadius * 2.1 + definition.radius + OBSTACLE_CLEARANCE,
+      definition.speed * 2.4 + this.maxObstacleRadius,
+    );
+    for (const obstacle of this.obstacleHash.query(ship.x, ship.z, searchRadius)) {
+      if (obstacle.type === "barrier") continue;
       const toX = obstacle.x - ship.x;
       const toZ = obstacle.z - ship.z;
       const clearance = obstacle.radius + definition.radius + OBSTACLE_CLEARANCE;
@@ -1075,9 +1115,9 @@ export class GameSimulation {
 
   private resolveStaticOverlaps(
     ship: ShipState,
-    statics: readonly { x: number; z: number; radius: number }[],
   ): void {
     const radius = SHIPS[ship.class].radius;
+    const statics = this.staticCollisionHash.query(ship.x, ship.z, radius + this.maxStaticRadius + 1);
     for (let pass = 0; pass < 4; pass += 1) {
       let resolved = false;
       for (const obstacle of statics) {
@@ -1102,6 +1142,41 @@ export class GameSimulation {
         resolved = true;
       }
       if (!resolved) break;
+    }
+  }
+
+  private resolveBarrierOverlaps(ship: ShipState): void {
+    const radius = SHIPS[ship.class].radius;
+    for (const obstacle of this.state.obstacles) {
+      if (obstacle.type !== "barrier" || !obstacle.width || !obstacle.depth) continue;
+      const halfWidth = obstacle.width * 0.5;
+      const halfDepth = obstacle.depth * 0.5;
+      const nearestX = Math.max(obstacle.x - halfWidth, Math.min(ship.x, obstacle.x + halfWidth));
+      const nearestZ = Math.max(obstacle.z - halfDepth, Math.min(ship.z, obstacle.z + halfDepth));
+      let dx = ship.x - nearestX;
+      let dz = ship.z - nearestZ;
+      let distance = Math.hypot(dx, dz);
+      if (distance >= radius) continue;
+      if (distance < 0.001) {
+        const left = Math.abs(ship.x - (obstacle.x - halfWidth));
+        const right = Math.abs(obstacle.x + halfWidth - ship.x);
+        const top = Math.abs(ship.z - (obstacle.z - halfDepth));
+        const bottom = Math.abs(obstacle.z + halfDepth - ship.z);
+        const nearest = Math.min(left, right, top, bottom);
+        if (nearest === left) { dx = -1; dz = 0; ship.x = obstacle.x - halfWidth - radius; }
+        else if (nearest === right) { dx = 1; dz = 0; ship.x = obstacle.x + halfWidth + radius; }
+        else if (nearest === top) { dx = 0; dz = -1; ship.z = obstacle.z - halfDepth - radius; }
+        else { dx = 0; dz = 1; ship.z = obstacle.z + halfDepth + radius; }
+        distance = 1;
+      } else {
+        ship.x = nearestX + dx / distance * radius;
+        ship.z = nearestZ + dz / distance * radius;
+      }
+      const inwardVelocity = ship.vx * dx / distance + ship.vz * dz / distance;
+      if (inwardVelocity < 0) {
+        ship.vx -= dx / distance * inwardVelocity;
+        ship.vz -= dz / distance * inwardVelocity;
+      }
     }
   }
 
@@ -1312,19 +1387,29 @@ export class GameSimulation {
           impact = { fraction, key, target };
         }
       };
-      for (const obstacle of this.state.obstacles) {
-        considerImpact(sweptCircleHitFraction({
+      const segmentX = projectile.x - projectile.previousX;
+      const segmentZ = projectile.z - projectile.previousZ;
+      const queryX = (projectile.previousX + projectile.x) * 0.5;
+      const queryZ = (projectile.previousZ + projectile.z) * 0.5;
+      const obstacleQueryRadius = Math.hypot(segmentX, segmentZ) * 0.5 + projectile.radius + this.maxObstacleRadius;
+      for (const obstacle of this.obstacleHash.query(queryX, queryZ, obstacleQueryRadius)) {
+        if (obstacle.type === "barrier") continue;
+        const obstacleHit = sweptCircleHitFraction({
           fromX: projectile.previousX, fromZ: projectile.previousZ,
           toX: projectile.x, toZ: projectile.z,
           centerX: obstacle.x, centerZ: obstacle.z,
           radius: projectile.radius + obstacle.radius,
-        }), `0:${obstacle.id}`, null);
+        });
+        considerImpact(obstacleHit, `0:${obstacle.id}`, null);
       }
-      const segmentX = projectile.x - projectile.previousX;
-      const segmentZ = projectile.z - projectile.previousZ;
+      for (const obstacle of this.state.obstacles) {
+        if (obstacle.type !== "barrier" || !obstacle.width || !obstacle.depth) continue;
+        considerImpact(sweptCircleRectangleHitFraction(
+          projectile.previousX, projectile.previousZ, projectile.x, projectile.z,
+          obstacle.x, obstacle.z, obstacle.width, obstacle.depth, projectile.radius,
+        ), `0:${obstacle.id}`, null);
+      }
       const queryRadius = Math.hypot(segmentX, segmentZ) * 0.5 + projectile.radius + MAX_COMBAT_TARGET_RADIUS;
-      const queryX = (projectile.previousX + projectile.x) * 0.5;
-      const queryZ = (projectile.previousZ + projectile.z) * 0.5;
       for (const target of this.spatialHash.query(queryX, queryZ, queryRadius)) {
         if (target.health <= 0 || !this.isHostile(projectile.ownerTeamId, target.teamId)) continue;
         const owner = projectileOwners.get(projectile.ownerShipId);
@@ -1341,7 +1426,17 @@ export class GameSimulation {
       }
       const resolvedImpact = impact as { fraction: number; key: string; target: CombatTargetState | null } | null;
       if (resolvedImpact?.target) {
+        projectile.x = projectile.previousX + (projectile.x - projectile.previousX) * resolvedImpact.fraction;
+        projectile.z = projectile.previousZ + (projectile.z - projectile.previousZ) * resolvedImpact.fraction;
         this.applyDamage(resolvedImpact.target, projectile.damage, projectile.id);
+        const owner = projectileOwners.get(projectile.ownerShipId);
+        if (owner?.class !== "fighter") {
+          this.events.push({
+            type: "projectileDetonated", tick: this.state.tick,
+            projectileId: projectile.id, weaponTypeId: projectile.weaponTypeId,
+            x: projectile.x, z: projectile.z,
+          });
+        }
       } else if (resolvedImpact === null && projectile.lifetimeTicks > 0) {
         survivingProjectiles.push(projectile);
       } else {
@@ -1470,10 +1565,11 @@ export class GameSimulation {
               || left.id - right.id;
           })[0];
         if (fleet.length >= attackThreshold && target) {
+          const tunnelWaypoint = this.amazonTunnelWaypoint(center);
           this.submitCommand({
             type: "attackMove", playerId, sequence: player.lastCommandSequence + 1,
             requestedTick: this.state.tick + 1, unitIds: fleet.map((ship) => ship.id), queued: false,
-            destination: { x: target.x, z: target.z },
+            destination: tunnelWaypoint ?? { x: target.x, z: target.z },
           });
         } else if (fleet.length >= attackThreshold && !target) {
           const strikeGroup = fleet
@@ -1485,15 +1581,26 @@ export class GameSimulation {
           );
           if (core && strikeGroup.length >= attackThreshold) {
             const inwardLength = Math.hypot(core.x, core.z) || 1;
+            const tunnelWaypoint = this.amazonTunnelWaypoint(center);
             this.submitCommand({
               type: "attackMove", playerId, sequence: player.lastCommandSequence + 1,
               requestedTick: this.state.tick + 1, unitIds: strikeGroup.map((ship) => ship.id), queued: false,
-              destination: { x: core.x - core.x / inwardLength * 900, z: core.z - core.z / inwardLength * 900 },
+              destination: tunnelWaypoint
+                ?? { x: core.x - core.x / inwardLength * 900, z: core.z - core.z / inwardLength * 900 },
             });
           }
         }
       }
     }
+  }
+
+  private amazonTunnelWaypoint(fleetCenter: Readonly<{ x: number; z: number }>): { x: number; z: number } | null {
+    if (this.state.mapPreset !== "amazon-tunnel") return null;
+    const outerX = Math.max(0, ...this.state.obstacles.map((obstacle) => Math.abs(obstacle.x)));
+    const baseRadius = outerX / 1.08;
+    if (baseRadius <= 0 || Math.abs(fleetCenter.z) <= baseRadius * 0.16) return null;
+    const side = fleetCenter.x < 0 ? -1 : 1;
+    return { x: side * baseRadius * 0.82, z: 0 };
   }
 
   private dispatchAiScouts(playerId: PlayerId, settings: AiCommanderSettings): void {
@@ -1808,6 +1915,7 @@ export function createCombatScenario(options: ScenarioOptions = {}): GameSimulat
       difficulty: player.aiDifficulty ?? "normal",
       personality: player.aiPersonality ?? "balanced",
     }])),
+    mapPreset,
     status: "playing", winnerTeamId: null, checksum: 0,
   };
 
@@ -1821,7 +1929,7 @@ export function createCombatScenario(options: ScenarioOptions = {}): GameSimulat
     let candidateZ = z;
     for (let attempt = 0; attempt < 10; attempt += 1) {
       const blocked = state.obstacles.some((obstacle) =>
-        Math.hypot(obstacle.x - candidateX, obstacle.z - candidateZ) < obstacle.radius + 48,
+        circleOverlapsObstacle(candidateX, candidateZ, 48, obstacle),
       );
       if (!blocked) break;
       const angle = Math.atan2(candidateX, candidateZ) + 0.31 + mapRandom() * 0.17;
@@ -1904,8 +2012,16 @@ export function createCombatScenario(options: ScenarioOptions = {}): GameSimulat
       }
     }
   } else {
-    if (mapPreset !== "asteroid-belt" && mapPreset !== "shattered-core") {
+    if (mapPreset !== "asteroid-belt" && mapPreset !== "shattered-core" && mapPreset !== "amazon-tunnel") {
       addMapNode((mapRandom() - 0.5) * baseRadius * 0.06, (mapRandom() - 0.5) * baseRadius * 0.06, 1.9 * density.richness);
+    }
+    if (mapPreset === "amazon-tunnel") {
+      const basinNodes = [
+        { x: 0, z: 0, richness: 3.2 },
+        { x: -baseRadius * 0.085, z: -baseRadius * 0.045, richness: 2.55 },
+        { x: baseRadius * 0.085, z: baseRadius * 0.045, richness: 2.55 },
+      ] as const;
+      for (const node of basinNodes) addMapNode(node.x, node.z, node.richness * density.richness);
     }
     const contestedCount = Math.max(
       4,
@@ -1920,6 +2036,7 @@ export function createCombatScenario(options: ScenarioOptions = {}): GameSimulat
       let radius = baseRadius * (0.49 + (mapRandom() - 0.5) * 0.1);
       let x: number;
       let z: number;
+      let richnessMultiplier = 1;
       if (mapPreset === "orbital-ring" && index < players.length) {
         // Preserve one fair inward expansion lane per spawn, then randomize the remaining ring nodes.
         angle = index / players.length * Math.PI * 2 + (mapRandom() - 0.5) * 0.08;
@@ -1930,6 +2047,19 @@ export function createCombatScenario(options: ScenarioOptions = {}): GameSimulat
       } else if (mapPreset === "open-expanse") {
         radius = baseRadius * (0.25 + mapRandom() * 0.48);
         angle = mapRandom() * Math.PI * 2;
+      } else if (mapPreset === "amazon-tunnel") {
+        x = (progress - 0.5) * baseRadius * 1.25;
+        const centerFlare = Math.max(0, 1 - Math.abs(x) / (baseRadius * 0.32));
+        z = (mapRandom() - 0.5) * baseRadius * (0.14 + centerFlare * 0.12);
+        richnessMultiplier = 1.18;
+        addMapNode(x, z, (1.25 + index % 3 * 0.12 + mapRandom() * 0.08) * density.richness * richnessMultiplier);
+        continue;
+      } else if (mapPreset === "core-rush") {
+        angle = mapRandom() * Math.PI * 2;
+        radius = baseRadius * (0.07 + mapRandom() * 0.27);
+        richnessMultiplier = 1.42;
+      } else if (mapPreset === "star-fortress") {
+        radius = baseRadius * (0.28 + mapRandom() * 0.3);
       } else if (mapPreset === "spiral-arms") {
         const armProgress = Math.floor(index / 2) / Math.max(1, Math.ceil(contestedCount / 2) - 1);
         angle = layoutRotation + (index % 2) * Math.PI + armProgress * Math.PI * 1.65 + (mapRandom() - 0.5) * 0.18;
@@ -1948,19 +2078,37 @@ export function createCombatScenario(options: ScenarioOptions = {}): GameSimulat
       }
       x = Math.sin(angle) * radius;
       z = Math.cos(angle) * radius;
-      addMapNode(x, z, (1.25 + index % 3 * 0.12 + mapRandom() * 0.08) * density.richness);
+      addMapNode(x, z, (1.25 + index % 3 * 0.12 + mapRandom() * 0.08) * density.richness * richnessMultiplier);
+    }
+    const tunnelSpawnByIndex = new Map<number, { side: -1 | 1; z: number }>();
+    if (mapPreset === "amazon-tunnel") {
+      const orderedTeamIds = [...new Set(configs.map((config) => config.teamId))].sort((a, b) => a - b);
+      const indicesBySide: Record<-1 | 1, number[]> = { [-1]: [], [1]: [] };
+      for (let index = 0; index < configs.length; index += 1) {
+        const teamIndex = Math.max(0, orderedTeamIds.indexOf(configs[index]!.teamId));
+        const side = (teamIndex % 2 === 0 ? -1 : 1) as -1 | 1;
+        indicesBySide[side].push(index);
+      }
+      for (const side of [-1, 1] as const) {
+        const sideIndices = indicesBySide[side];
+        for (let sideIndex = 0; sideIndex < sideIndices.length; sideIndex += 1) {
+          const normalized = sideIndices.length <= 1 ? 0 : sideIndex / (sideIndices.length - 1) - 0.5;
+          tunnelSpawnByIndex.set(sideIndices[sideIndex]!, { side, z: normalized * baseRadius * 1.22 });
+        }
+      }
     }
     for (let index = 0; index < players.length; index += 1) {
       const player = players[index]!;
+      const tunnelSpawn = tunnelSpawnByIndex.get(index);
       const angle = Math.PI + index / players.length * Math.PI * 2;
-      const outwardX = Math.sin(angle);
-      const outwardZ = Math.cos(angle);
+      const outwardX = tunnelSpawn?.side ?? Math.sin(angle);
+      const outwardZ = tunnelSpawn ? 0 : Math.cos(angle);
       const inwardX = -outwardX;
       const inwardZ = -outwardZ;
       const tangentX = outwardZ;
       const tangentZ = -outwardX;
-      const baseX = outwardX * baseRadius;
-      const baseZ = outwardZ * baseRadius;
+      const baseX = outwardX * baseRadius * (tunnelSpawn ? 0.88 : 1);
+      const baseZ = tunnelSpawn?.z ?? outwardZ * baseRadius;
       const yaw = Math.atan2(inwardX, inwardZ);
       const clusterScale = Math.min(1.2, Math.max(0.9, mapScale));
       const rally = { x: baseX + inwardX * 145 * clusterScale, z: baseZ + inwardZ * 145 * clusterScale };
@@ -2419,14 +2567,77 @@ function createScenarioObstacles(
   seed = 0xc0ffee,
 ): ObstacleState[] {
   const random = createMapRandom(seed ^ Math.imul(playerCount, 0x85ebca6b), mapPreset);
+  const obstacles: ObstacleState[] = [];
+  const addObstacle = (x: number, z: number, radius: number): void => {
+    obstacles.push({
+      id: obstacles.length + 1,
+      type: "asteroid",
+      x: quantizePhysics(x),
+      z: quantizePhysics(z),
+      radius: quantizePhysics(radius),
+      visualSeed: Math.floor(random() * 0x1_0000_0000) >>> 0,
+    });
+  };
+  const addBarrier = (x: number, z: number, width: number, depth: number): void => {
+    obstacles.push({
+      id: obstacles.length + 1,
+      type: "barrier",
+      x: quantizePhysics(x), z: quantizePhysics(z),
+      radius: quantizePhysics(Math.hypot(width, depth) * 0.5),
+      width: quantizePhysics(width), depth: quantizePhysics(depth),
+      visualSeed: Math.floor(random() * 0x1_0000_0000) >>> 0,
+    });
+  };
+
+  if (mapPreset === "amazon-tunnel") {
+    // A closed outer boundary and two sealed inner fields create an actual H-shaped
+    // arena. Fleets can move vertically on either home side, but the only route
+    // between opponents is the narrow horizontal tunnel through the center.
+    const outerX = baseRadius * 1.08;
+    const outerZ = baseRadius * 0.91;
+    const fieldX = baseRadius * 0.7;
+    const tunnelHalfWidth = baseRadius * 0.18;
+    const border = Math.max(120, baseRadius * 0.055);
+    const fieldDepth = outerZ - tunnelHalfWidth;
+    addBarrier(0, tunnelHalfWidth + fieldDepth * 0.5, fieldX * 2, fieldDepth);
+    addBarrier(0, -tunnelHalfWidth - fieldDepth * 0.5, fieldX * 2, fieldDepth);
+    addBarrier(0, outerZ + border * 0.5, outerX * 2 + border * 2, border);
+    addBarrier(0, -outerZ - border * 0.5, outerX * 2 + border * 2, border);
+    addBarrier(-outerX - border * 0.5, 0, border, outerZ * 2);
+    addBarrier(outerX + border * 0.5, 0, border, outerZ * 2);
+    return obstacles;
+  }
+
+  if (mapPreset === "star-fortress") {
+    const wallRadius = Math.max(38, baseRadius * 0.022);
+    const wallDistance = Math.max(320, baseRadius * 0.19);
+    const wallPieces = 12;
+    for (let playerIndex = 0; playerIndex < playerCount; playerIndex += 1) {
+      const spawnAngle = Math.PI + playerIndex / playerCount * Math.PI * 2;
+      const centerX = Math.sin(spawnAngle) * baseRadius;
+      const centerZ = Math.cos(spawnAngle) * baseRadius;
+      for (let wallIndex = 0; wallIndex < wallPieces; wallIndex += 1) {
+        const offset = wallIndex / wallPieces * Math.PI * 2;
+        const inwardOffset = Math.abs(Math.atan2(Math.sin(offset - Math.PI), Math.cos(offset - Math.PI)));
+        if (inwardOffset < Math.PI / 5) continue;
+        addObstacle(
+          centerX + Math.sin(spawnAngle + offset) * wallDistance,
+          centerZ + Math.cos(spawnAngle + offset) * wallDistance,
+          wallRadius * (0.82 + random() * 0.22),
+        );
+      }
+    }
+    return obstacles;
+  }
+
   const obstacleCount = mapPreset === "open-expanse" ? Math.max(2, Math.ceil(playerCount / 2))
     : mapPreset === "crossfire" ? Math.max(6, playerCount * 2)
       : mapPreset === "asteroid-belt" ? Math.max(10, playerCount * 3)
         : mapPreset === "shattered-core" ? Math.max(9, playerCount * 2)
           : mapPreset === "spiral-arms" ? Math.max(6, playerCount)
-            : playerCount;
+            : mapPreset === "core-rush" ? Math.max(3, Math.ceil(playerCount * 0.75))
+              : playerCount;
   const rotation = random() * Math.PI * 2;
-  const obstacles: ObstacleState[] = [];
   for (let index = 0; index < obstacleCount; index += 1) {
     let x = 0;
     let z = 0;
@@ -2455,14 +2666,7 @@ function createScenarioObstacles(
     }
     const radiusBase = mapPreset === "open-expanse" ? 22 : mapPreset === "asteroid-belt" ? 35 : 30;
     const radius = radiusBase * (0.72 + random() * 0.58);
-    obstacles.push({
-      id: index + 1,
-      type: "asteroid",
-      x: quantizePhysics(x),
-      z: quantizePhysics(z),
-      radius: quantizePhysics(radius),
-      visualSeed: Math.floor(random() * 0x1_0000_0000) >>> 0,
-    });
+    addObstacle(x, z, radius);
   }
   return obstacles;
 }
@@ -2511,19 +2715,57 @@ function compareCodeUnits(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
+function circleOverlapsObstacle(x: number, z: number, radius: number, obstacle: ObstacleState): boolean {
+  if (obstacle.type !== "barrier" || !obstacle.width || !obstacle.depth) {
+    return Math.hypot(obstacle.x - x, obstacle.z - z) < obstacle.radius + radius;
+  }
+  const nearestX = Math.max(obstacle.x - obstacle.width * 0.5, Math.min(x, obstacle.x + obstacle.width * 0.5));
+  const nearestZ = Math.max(obstacle.z - obstacle.depth * 0.5, Math.min(z, obstacle.z + obstacle.depth * 0.5));
+  return Math.hypot(x - nearestX, z - nearestZ) < radius;
+}
+
+function sweptCircleRectangleHitFraction(
+  fromX: number, fromZ: number, toX: number, toZ: number,
+  centerX: number, centerZ: number, width: number, depth: number, radius: number,
+): number | null {
+  const minX = centerX - width * 0.5 - radius;
+  const maxX = centerX + width * 0.5 + radius;
+  const minZ = centerZ - depth * 0.5 - radius;
+  const maxZ = centerZ + depth * 0.5 + radius;
+  const dx = toX - fromX;
+  const dz = toZ - fromZ;
+  let entry = 0;
+  let exit = 1;
+  for (const [origin, delta, minimum, maximum] of [[fromX, dx, minX, maxX], [fromZ, dz, minZ, maxZ]] as const) {
+    if (Math.abs(delta) < 1e-9) {
+      if (origin < minimum || origin > maximum) return null;
+      continue;
+    }
+    const first = (minimum - origin) / delta;
+    const second = (maximum - origin) / delta;
+    entry = Math.max(entry, Math.min(first, second));
+    exit = Math.min(exit, Math.max(first, second));
+    if (entry > exit) return null;
+  }
+  return entry >= 0 && entry <= 1 ? entry : null;
+}
+
 interface NavigableStatic {
   key: string;
   x: number;
   z: number;
   radius: number;
+  width?: number;
+  depth?: number;
 }
 
 function buildNavigableStatics(state: SimulationState): NavigableStatic[] {
   return [
     ...state.obstacles.map((obstacle) => ({
       key: `obstacle:${obstacle.id}`, x: obstacle.x, z: obstacle.z, radius: obstacle.radius,
+      width: obstacle.width, depth: obstacle.depth,
     })),
-    ...state.structures.map((structure) => ({
+    ...state.structures.filter((structure) => !shipsPhaseThroughStructure(structure.type)).map((structure) => ({
       key: `structure:${structure.id}`, x: structure.x, z: structure.z, radius: STRUCTURES[structure.type].radius,
     })),
   ].sort((left, right) => compareCodeUnits(left.key, right.key));
@@ -2542,6 +2784,31 @@ function projectNavigableDestination(
     let projected = false;
     for (let index = 0; index < statics.length; index += 1) {
       const obstacle = statics[index]!;
+      if (obstacle.width && obstacle.depth) {
+        const halfWidth = obstacle.width * 0.5;
+        const halfDepth = obstacle.depth * 0.5;
+        const nearestX = Math.max(obstacle.x - halfWidth, Math.min(x, obstacle.x + halfWidth));
+        const nearestZ = Math.max(obstacle.z - halfDepth, Math.min(z, obstacle.z + halfDepth));
+        let dx = x - nearestX;
+        let dz = z - nearestZ;
+        let distance = Math.hypot(dx, dz);
+        if (distance >= shipRadius + 2) continue;
+        if (distance < 0.001) {
+          const distances = [
+            { value: Math.abs(x - (obstacle.x - halfWidth)), x: obstacle.x - halfWidth - shipRadius - 2, z },
+            { value: Math.abs(obstacle.x + halfWidth - x), x: obstacle.x + halfWidth + shipRadius + 2, z },
+            { value: Math.abs(z - (obstacle.z - halfDepth)), x, z: obstacle.z - halfDepth - shipRadius - 2 },
+            { value: Math.abs(obstacle.z + halfDepth - z), x, z: obstacle.z + halfDepth + shipRadius + 2 },
+          ].sort((left, right) => left.value - right.value);
+          x = distances[0]!.x; z = distances[0]!.z;
+        } else {
+          distance = shipRadius + 2;
+          x = nearestX + dx / Math.hypot(dx, dz) * distance;
+          z = nearestZ + dz / Math.hypot(dx, dz) * distance;
+        }
+        projected = true;
+        continue;
+      }
       let dx = x - obstacle.x;
       let dz = z - obstacle.z;
       let distance = Math.hypot(dx, dz);

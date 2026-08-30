@@ -154,7 +154,6 @@ function createTacticalGeometry(classId: number): THREE.BufferGeometry {
 
   const geometry = mergeGeometries(pieces, false);
   if (!geometry) throw new Error("Unable to build tactical badge geometry");
-  geometry.rotateX(Math.PI / 2);
   return geometry;
 }
 
@@ -250,6 +249,11 @@ const THRUSTER_COLOR = [0x8ff7ff, 0x79f0c8, 0x78e8ff, 0x72dfff, 0x82f3ff, 0x77dc
 const HEALTH_BAR_GREEN = new THREE.Color(0x63df8c);
 const HEALTH_BAR_AMBER = new THREE.Color(0xf1bd5a);
 const HEALTH_BAR_RED = new THREE.Color(0xff5674);
+const DAMAGE_SCORCH = new THREE.Color(0x24130d);
+const DAMAGE_EMBER = new THREE.Color(0xff6a24);
+const DAMAGE_EMBER_HOT = new THREE.Color(0xffc04f);
+const MAX_DAMAGE_INSTANCES = 256;
+const DAMAGE_VISIBLE_CLASS_IDS = new Set([2, 4, 5, 6, 7, 8, 9]);
 
 export class BatchedShipRenderer {
   readonly group = new THREE.Group();
@@ -273,6 +277,7 @@ export class BatchedShipRenderer {
   private readonly thrusterBatch: InstanceBatch;
   private readonly healthBarBackgroundBatch: InstanceBatch;
   private readonly healthBarFillBatch: InstanceBatch;
+  private readonly damageBatch: InstanceBatch;
   private readonly thrusterTime = { value: 0 };
   private readonly shipMatrices = new Float32Array(MAX_RENDER_SHIPS * 16);
   private readonly matrix = new THREE.Matrix4();
@@ -416,16 +421,31 @@ export class BatchedShipRenderer {
       MAX_RENDER_SHIPS,
       true,
     );
+    const damageGeometry = mergeGeometries([
+      new THREE.IcosahedronGeometry(0.72, 0),
+      new THREE.ConeGeometry(0.72, 2.8, 5).toNonIndexed().translate(0, 1.6, 0),
+      new THREE.ConeGeometry(0.46, 2.1, 5).toNonIndexed().translate(0.55, 1.25, 0.18),
+    ], false)!;
+    this.damageBatch = createBatch(
+      damageGeometry,
+      new THREE.MeshBasicMaterial({
+        color: 0xffffff, transparent: true, opacity: 0.72,
+        blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+      }),
+      MAX_DAMAGE_INSTANCES,
+      true,
+    );
+    this.damageBatch.mesh.renderOrder = 2;
     this.healthBarBackgroundBatch.mesh.renderOrder = 44;
     this.healthBarFillBatch.mesh.renderOrder = 45;
     this.thrusterBatch.mesh.renderOrder = 1;
     this.allBatches.push(
       this.selectionBatch, this.shieldBatch, this.thrusterBatch,
-      this.healthBarBackgroundBatch, this.healthBarFillBatch,
+      this.healthBarBackgroundBatch, this.healthBarFillBatch, this.damageBatch,
     );
     this.group.add(
       this.selectionBatch.mesh, this.shieldBatch.mesh, this.thrusterBatch.mesh,
-      this.healthBarBackgroundBatch.mesh, this.healthBarFillBatch.mesh,
+      this.healthBarBackgroundBatch.mesh, this.healthBarFillBatch.mesh, this.damageBatch.mesh,
     );
     scene.add(this.group);
   }
@@ -474,6 +494,7 @@ export class BatchedShipRenderer {
       this.color.setHex(state.shipColor[index]!);
       const health = state.shipHealth[index]!;
       this.tint.copy(this.color).lerp(this.white, 0.58).multiplyScalar(0.62 + health * 0.38);
+      if (health < 0.7) this.tint.lerp(DAMAGE_SCORCH, Math.min(0.58, (0.7 - health) * 0.92));
       if (health < 0.3) this.color.multiplyScalar(0.62 + Math.abs(Math.sin(now * 0.012 + state.shipIds[index]!)) * 0.38);
       const lod = state.shipLod[index]! as VisualLod;
       const classId = state.shipClass[index]!;
@@ -548,7 +569,7 @@ export class BatchedShipRenderer {
           const tacticalScale = (TACTICAL_SCALE[classId] ?? 28) * tacticalScaleMultiplier;
           this.scale.setScalar(tacticalScale);
           this.position.y = 1.5;
-          this.localMatrix.compose(this.position, this.identityQuaternion, this.scale);
+          this.localMatrix.compose(this.position, this.billboardQuaternion, this.scale);
           this.writeInstance(batch, this.localMatrix, this.color);
         } else {
           this.writeInstance(batch, this.matrix, this.color);
@@ -574,6 +595,9 @@ export class BatchedShipRenderer {
 
       if (showHealthBars && health < 0.995 && health > 0) {
         this.writeHealthBar(state, index, classId, lod, health, camera, focalPixels);
+      }
+      if (health > 0 && health < 0.7 && (lod === VisualLod.Close || lod === VisualLod.Medium)) {
+        this.writeShipDamage(state, index, classId, health, now);
       }
     }
 
@@ -675,6 +699,41 @@ export class BatchedShipRenderer {
         ? HEALTH_BAR_AMBER
         : HEALTH_BAR_GREEN;
     this.writeInstance(this.healthBarFillBatch, this.matrix, fillColor);
+  }
+
+  private writeShipDamage(
+    state: InterpolatedRenderState,
+    shipIndex: number,
+    classId: number,
+    health: number,
+    now: number,
+  ): void {
+    if (!DAMAGE_VISIBLE_CLASS_IDS.has(classId) || this.damageBatch.count >= MAX_DAMAGE_INSTANCES) return;
+    if (this.quality === "low" && health >= 0.35) return;
+    if (state.shipCount > 1_024 && classId < 6) return;
+    const shipClass = SHIP_CLASSES[classId]!;
+    const radius = SHIPS[shipClass].radius;
+    const shipId = state.shipIds[shipIndex]!;
+    const breachCount = health < 0.22 && this.quality === "high" ? 2 : 1;
+    this.matrix.fromArray(this.shipMatrices, shipIndex * 16);
+    for (let breach = 0; breach < breachCount && this.damageBatch.count < MAX_DAMAGE_INSTANCES; breach += 1) {
+      const phase = shipId * 1.618 + breach * 2.71;
+      const pulse = 0.82 + Math.abs(Math.sin(now * 0.009 + phase)) * 0.38;
+      const severity = Math.min(1, (0.7 - health) / 0.7);
+      this.position.set(
+        Math.sin(phase * 1.7) * radius * 0.38,
+        radius * (0.1 + Math.abs(Math.sin(phase * 0.73)) * 0.12),
+        Math.cos(phase * 1.31) * radius * 0.42,
+      );
+      const size = Math.max(0.75, radius * (0.055 + severity * 0.045)) * pulse;
+      this.scale.set(size, size * (0.9 + severity * 0.45), size);
+      this.localMatrix.compose(this.position, this.identityQuaternion, this.scale).premultiply(this.matrix);
+      this.writeInstance(
+        this.damageBatch,
+        this.localMatrix,
+        health < 0.28 ? DAMAGE_EMBER_HOT : DAMAGE_EMBER,
+      );
+    }
   }
 
   private writeThrusters(
@@ -1025,10 +1084,21 @@ export class CombatEffectRenderer {
   }
 
   spawnProjectileDetonation(x: number, y: number, z: number, color: number, size: number, now: number): void {
-    this.muzzle.spawn(x, y, z, Math.max(0.35, size * 0.7), color, now, 130);
+    this.muzzle.spawn(x, y, z, Math.max(0.35, size * 0.7), size >= 5 ? 0xfff1c7 : color, now, 130);
     if (size < 1) return;
-    this.flash.spawn(x, y, z, size, color, now, 210);
-    this.shock.spawn(x, y, z, size * 0.82, color, now, 340);
+    this.flash.spawn(x, y, z, size, size >= 5 ? 0xffa24a : color, now, size >= 5 ? 320 : 210);
+    this.shock.spawn(x, y, z, size * 0.82, color, now, size >= 5 ? 520 : 340);
+    if (size < 5) return;
+    const debrisCount = this.quality === "low" ? 2 : this.quality === "medium" ? 4 : 6;
+    for (let index = 0; index < debrisCount; index += 1) {
+      const angle = index / debrisCount * Math.PI * 2 + x * 0.17 + z * 0.11;
+      const speed = 8 + index % 3 * 4;
+      this.debris.spawn(
+        x, y, z, Math.max(0.55, size * 0.09), index % 2 === 0 ? 0xffd28a : color,
+        now, 520 + index * 55,
+        Math.sin(angle) * speed, 4 + index % 2 * 4, Math.cos(angle) * speed,
+      );
+    }
   }
 
   spawnShipDeath(

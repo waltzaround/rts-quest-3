@@ -114,6 +114,12 @@ assert.equal(parseServerMessage(JSON.stringify({
     type: "hold", playerId: "pilot-blue", sequence: 4, requestedTick: 20, unitIds: [7], queued: false,
   }],
 }))?.type, "lockstep_commands", "validated command streams should cross the lockstep boundary");
+assert.equal(parseServerMessage(JSON.stringify({
+  type: "lockstep_player_state", tick: 13, playerId: "pilot-blue", state: "disconnected",
+}))?.type, "lockstep_player_state", "player connection transitions should cross the lockstep boundary");
+assert.equal(parseServerMessage(JSON.stringify({
+  type: "lockstep_player_state", tick: 13, playerId: "pilot-blue", state: "defeated",
+})), null, "player connection transitions must not override defeat state");
 
 const lobby = {
   matchId: "secure-match",
@@ -133,6 +139,11 @@ const lobby = {
 assert.equal(parseServerMessage(JSON.stringify({ type: "lobby", lobby }))?.type, "lobby");
 assert.equal(parseServerMessage(JSON.stringify({ type: "lobby", lobby: { ...lobby, seed: 123 } })), null, "lobby seed must be private");
 assert.equal(parseClientMessage(JSON.stringify({ type: "set_settings", settings: lobby.settings }))?.type, "set_settings");
+for (const mapPreset of ["amazon-tunnel", "core-rush", "star-fortress"]) {
+  assert.equal(parseClientMessage(JSON.stringify({
+    type: "set_settings", settings: { ...lobby.settings, mapPreset },
+  }))?.type, "set_settings", `${mapPreset} should pass lobby validation`);
+}
 assert.equal(parseClientMessage(JSON.stringify({
   type: "set_settings",
   settings: { ...lobby.settings, mapSize: "planet-sized" },

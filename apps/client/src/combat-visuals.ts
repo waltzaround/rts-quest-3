@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { WEAPONS, type ProjectileState, type ShipClass, type WeaponTypeId } from "@space-rts/game-core";
+import { FIXED_DT } from "@space-rts/shared";
 
 const MAX_PROJECTILES = 8_192;
 const VERTICES_PER_STREAK = 6;
@@ -684,31 +685,139 @@ interface ProjectileVisualPose {
   directionZ: number;
 }
 
-function smoothstep(value: number): number {
-  const clamped = Math.min(1, Math.max(0, value));
-  return clamped * clamped * (3 - 2 * clamped);
+interface ProjectileVisualTarget {
+  readonly x: number;
+  readonly z: number;
+  readonly radius: number;
 }
 
-function projectileVisualPose(projectile: ProjectileState, alpha: number, style: WeaponStyle): ProjectileVisualPose {
+interface VerticalLaunchFlight {
+  readonly launchX: number;
+  readonly launchZ: number;
+  readonly totalDistance: number;
+  readonly totalFlightTicks: number;
+  readonly boostProgress: number;
+  readonly boostHeight: number;
+  readonly arcLift: number;
+}
+
+function torpedoThrustScale(ageTicks: number): number {
+  const launchProgress = THREE.MathUtils.clamp((ageTicks - 2) / 6, 0, 1);
+  const easedLaunch = launchProgress * launchProgress * (3 - 2 * launchProgress);
+  return 0.08 + easedLaunch * 0.92;
+}
+
+function torpedoDistanceAtAge(ageTicks: number): number {
+  const distancePerTick = WEAPONS.torpedo.projectileSpeed * FIXED_DT;
+  const wholeTicks = Math.floor(Math.max(0, ageTicks));
+  let distance = 0;
+  for (let tick = 0; tick < wholeTicks; tick += 1) {
+    distance += distancePerTick * torpedoThrustScale(tick);
+  }
+  return distance + distancePerTick * torpedoThrustScale(wholeTicks) * (ageTicks - wholeTicks);
+}
+
+function torpedoFlightTicksForDistance(distance: number): number {
+  const distancePerTick = WEAPONS.torpedo.projectileSpeed * FIXED_DT;
+  let travelled = 0;
+  for (let tick = 0; tick < WEAPONS.torpedo.projectileLifetimeTicks; tick += 1) {
+    const stepDistance = distancePerTick * torpedoThrustScale(tick);
+    if (travelled + stepDistance >= distance) {
+      return tick + (distance - travelled) / Math.max(0.001, stepDistance);
+    }
+    travelled += stepDistance;
+  }
+  return WEAPONS.torpedo.projectileLifetimeTicks;
+}
+
+function createVerticalLaunchFlight(
+  projectile: ProjectileState,
+  alpha: number,
+  target?: ProjectileVisualTarget,
+): VerticalLaunchFlight {
+  const speed = Math.max(0.001, Math.hypot(projectile.vx, projectile.vz));
+  const horizontalX = projectile.vx / speed;
+  const horizontalZ = projectile.vz / speed;
+  // The rendered age follows the interpolation between previous and current simulation states.
+  const ageTicks = Math.max(
+    0,
+    WEAPONS.torpedo.projectileLifetimeTicks - projectile.lifetimeTicks - 1 + alpha,
+  );
+  const x = THREE.MathUtils.lerp(projectile.previousX, projectile.x, alpha);
+  const z = THREE.MathUtils.lerp(projectile.previousZ, projectile.z, alpha);
+  const travelled = torpedoDistanceAtAge(ageTicks);
+  const launchX = x - horizontalX * travelled;
+  const launchZ = z - horizontalZ * travelled;
+  const distanceToTarget = target
+    ? Math.max(1, Math.hypot(target.x - launchX, target.z - launchZ) - target.radius - projectile.radius)
+    : WEAPONS.torpedo.range;
+  const totalDistance = Math.max(travelled + 1, distanceToTarget);
+  const totalFlightTicks = Math.max(ageTicks + 1, torpedoFlightTicksForDistance(totalDistance));
+  const boostProgress = THREE.MathUtils.clamp(9 / totalFlightTicks, 0.12, 0.28);
+  const boostHeight = THREE.MathUtils.clamp(totalDistance * 0.18, 38, 72);
+  // This value makes the climb rate continuous where the straight boost hands off to the arc.
+  const arcLift = boostHeight / (4 * boostProgress);
+  return { launchX, launchZ, totalDistance, totalFlightTicks, boostProgress, boostHeight, arcLift };
+}
+
+function projectileVisualPose(
+  projectile: ProjectileState,
+  alpha: number,
+  style: WeaponStyle,
+  flight?: VerticalLaunchFlight,
+): ProjectileVisualPose {
   const x = THREE.MathUtils.lerp(projectile.previousX, projectile.x, alpha);
   const z = THREE.MathUtils.lerp(projectile.previousZ, projectile.z, alpha);
   const speed = Math.max(0.001, Math.hypot(projectile.vx, projectile.vz));
   const horizontalX = projectile.vx / speed;
   const horizontalZ = projectile.vz / speed;
-  if (projectile.weaponTypeId !== "torpedo") {
+  if (projectile.weaponTypeId !== "torpedo" || !flight) {
     return { x, y: style.height, z, directionX: horizontalX, directionY: 0, directionZ: horizontalZ };
   }
-  const ageTicks = Math.max(0, WEAPONS.torpedo.projectileLifetimeTicks - projectile.lifetimeTicks + alpha);
-  const rise = smoothstep(ageTicks / 3.5);
-  const pitch = smoothstep((ageTicks - 2) / 6);
-  const horizontal = Math.sin(pitch * Math.PI / 2);
+
+  const ageTicks = Math.max(
+    0,
+    WEAPONS.torpedo.projectileLifetimeTicks - projectile.lifetimeTicks - 1 + alpha,
+  );
+  const progress = THREE.MathUtils.clamp(ageTicks / flight.totalFlightTicks, 0, 1);
+  if (progress <= flight.boostProgress) {
+    const boostPhase = progress / flight.boostProgress;
+    return {
+      x: flight.launchX,
+      y: style.height + flight.boostHeight * boostPhase,
+      z: flight.launchZ,
+      directionX: 0,
+      directionY: 1,
+      directionZ: 0,
+    };
+  }
+
+  const arcProgress = (progress - flight.boostProgress) / (1 - flight.boostProgress);
+  // Hold the missile over its launch cell for the boost, then smoothly release it onto
+  // the simulation's horizontal track as the nose pitches over.
+  const pitchProgress = THREE.MathUtils.clamp(arcProgress / 0.18, 0, 1);
+  const pitchBlend = pitchProgress * pitchProgress * (3 - 2 * pitchProgress);
+  const visualX = THREE.MathUtils.lerp(flight.launchX, x, pitchBlend);
+  const visualZ = THREE.MathUtils.lerp(flight.launchZ, z, pitchBlend);
+  const relativeHeight = flight.boostHeight * (1 - arcProgress)
+    + 4 * flight.arcLift * arcProgress * (1 - arcProgress);
+  const heightDerivative = -flight.boostHeight + 4 * flight.arcLift * (1 - 2 * arcProgress);
+  const slope = THREE.MathUtils.clamp(heightDerivative / flight.totalDistance, -8, 8);
+  const directionScale = 1 / Math.hypot(1, slope);
+  let directionX = horizontalX * directionScale * pitchBlend;
+  let directionY = THREE.MathUtils.lerp(1, slope * directionScale, pitchBlend);
+  let directionZ = horizontalZ * directionScale * pitchBlend;
+  const directionLength = Math.max(0.001, Math.hypot(directionX, directionY, directionZ));
+  directionX /= directionLength;
+  directionY /= directionLength;
+  directionZ /= directionLength;
   return {
-    x,
-    y: style.height + rise * (1 - pitch) * 16,
-    z,
-    directionX: horizontalX * horizontal,
-    directionY: Math.cos(pitch * Math.PI / 2),
-    directionZ: horizontalZ * horizontal,
+    x: visualX,
+    y: style.height + relativeHeight,
+    z: visualZ,
+    directionX,
+    directionY,
+    directionZ,
   };
 }
 
@@ -772,6 +881,7 @@ export class ProjectileVfx {
   private readonly scale = new THREE.Vector3();
   private readonly direction = new THREE.Vector3();
   private readonly forward = new THREE.Vector3(0, 0, 1);
+  private readonly verticalLaunchFlights = new Map<number, VerticalLaunchFlight>();
 
   constructor(scene: THREE.Scene) {
     for (const weaponTypeId of Object.keys(WEAPON_STYLE) as WeaponTypeId[]) {
@@ -802,7 +912,13 @@ export class ProjectileVfx {
 
   renderedCount = 0;
 
-  update(projectiles: readonly ProjectileState[], alpha: number, renderLimit = MAX_PROJECTILES): void {
+  update(
+    projectiles: readonly ProjectileState[],
+    alpha: number,
+    renderLimit = MAX_PROJECTILES,
+    targetsById?: ReadonlyMap<number, ProjectileVisualTarget>,
+    verticalLaunchOwnerIds?: ReadonlySet<number>,
+  ): void {
     const counts = new Map<WeaponTypeId, number>();
     const visibleCount = Math.min(projectiles.length, MAX_PROJECTILES, renderLimit);
     this.renderedCount = visibleCount;
@@ -811,7 +927,19 @@ export class ProjectileVfx {
       const style = WEAPON_STYLE[projectile.weaponTypeId];
       const instanceIndex = counts.get(projectile.weaponTypeId) ?? 0;
       const head = this.heads.get(projectile.weaponTypeId)!;
-      const pose = projectileVisualPose(projectile, alpha, style);
+      const verticalLaunch = projectile.weaponTypeId === "torpedo"
+        && (verticalLaunchOwnerIds?.has(projectile.ownerShipId) ?? true);
+      let flight = verticalLaunch ? this.verticalLaunchFlights.get(projectile.id) : undefined;
+      if (verticalLaunch && !flight) {
+        flight = createVerticalLaunchFlight(projectile, alpha, targetsById?.get(projectile.targetEntityId));
+        this.verticalLaunchFlights.set(projectile.id, flight);
+      }
+      const pose = projectileVisualPose(
+        projectile,
+        alpha,
+        style,
+        flight,
+      );
       this.position.set(pose.x, pose.y, pose.z);
       this.direction.set(pose.directionX, pose.directionY, pose.directionZ).normalize();
       this.quaternion.setFromUnitVectors(this.forward, this.direction);
@@ -828,8 +956,16 @@ export class ProjectileVfx {
         head.instanceMatrix.needsUpdate = true;
       }
     }
-    this.writeStreaks(this.glowStreaks, projectiles, visibleCount, alpha, 3.8, 0.14);
-    this.writeStreaks(this.coreStreaks, projectiles, visibleCount, alpha, 1, 0.025);
+    this.writeStreaks(
+      this.glowStreaks, projectiles, visibleCount, alpha, 3.8, 0.14, targetsById, verticalLaunchOwnerIds,
+    );
+    this.writeStreaks(
+      this.coreStreaks, projectiles, visibleCount, alpha, 1, 0.025, targetsById, verticalLaunchOwnerIds,
+    );
+    const activeProjectileIds = new Set(projectiles.map((projectile) => projectile.id));
+    for (const projectileId of this.verticalLaunchFlights.keys()) {
+      if (!activeProjectileIds.has(projectileId)) this.verticalLaunchFlights.delete(projectileId);
+    }
   }
 
   private writeStreaks(
@@ -839,6 +975,8 @@ export class ProjectileVfx {
     alpha: number,
     widthScale: number,
     tailBrightness: number,
+    targetsById?: ReadonlyMap<number, ProjectileVisualTarget>,
+    verticalLaunchOwnerIds?: ReadonlySet<number>,
   ): void {
     const positions = mesh.geometry.getAttribute("position") as THREE.BufferAttribute;
     const colors = mesh.geometry.getAttribute("color") as THREE.BufferAttribute;
@@ -846,7 +984,14 @@ export class ProjectileVfx {
     for (let projectileIndex = 0; projectileIndex < projectileCount; projectileIndex += 1) {
       const projectile = projectiles[projectileIndex]!;
       const style = WEAPON_STYLE[projectile.weaponTypeId];
-      const pose = projectileVisualPose(projectile, alpha, style);
+      const verticalLaunch = projectile.weaponTypeId === "torpedo"
+        && (verticalLaunchOwnerIds?.has(projectile.ownerShipId) ?? true);
+      const pose = projectileVisualPose(
+        projectile,
+        alpha,
+        style,
+        verticalLaunch ? this.verticalLaunchFlights.get(projectile.id) : undefined,
+      );
       const tailX = pose.x - pose.directionX * style.trailLength;
       const tailY = pose.y - pose.directionY * style.trailLength;
       const tailZ = pose.z - pose.directionZ * style.trailLength;

@@ -17,6 +17,24 @@ afterAll(() => {
 });
 
 describe("authoritative asteroid physics", () => {
+  it("lets ships phase through production structures", () => {
+    const simulation = createCombatScenario({ seed: 0x51a7, enemyCommander: false });
+    const ship = simulation.state.ships.find((candidate) => candidate.ownerPlayerId === "pilot-blue")!;
+    const yard = simulation.state.structures.find(
+      (structure) => structure.ownerPlayerId === "pilot-blue" && structure.type === "shipyard",
+    )!;
+    simulation.state.ships = [ship];
+    simulation.state.obstacles = [];
+    ship.x = yard.x;
+    ship.z = yard.z;
+    ship.vx = 0;
+    ship.vz = 0;
+    ship.orders = [];
+    simulation.step();
+    expect(ship.x).toBe(yard.x);
+    expect(ship.z).toBe(yard.z);
+  });
+
   it("keeps obstacle state deterministic and blocks construction overlap", () => {
     const first = createCombatScenario({ seed: 0x51a7, enemyCommander: false });
     const second = createCombatScenario({ seed: 0x51a7, enemyCommander: false });
@@ -125,6 +143,40 @@ describe("authoritative asteroid physics", () => {
     expect(simulation.step().events).toContainEqual(expect.objectContaining({
       type: "projectileDetonated", weaponTypeId: "plasma", x: 0, z: 0,
     }));
+  });
+
+  it("detonates non-fighter projectiles at the resolved target contact point", () => {
+    const simulation = createCombatScenario({ seed: 0x51a7, enemyCommander: false });
+    const owner = simulation.state.ships.find((ship) => ship.ownerPlayerId === "pilot-blue")!;
+    const target = simulation.state.ships.find((ship) => ship.ownerPlayerId === "pilot-red")!;
+    simulation.state.obstacles = [];
+    simulation.state.ships = [owner, target];
+    owner.class = "destroyer";
+    owner.turrets = [];
+    target.turrets = [];
+    owner.x = 0;
+    owner.z = 0;
+    target.x = 0;
+    target.z = 30;
+    const projectileId = simulation.state.nextEntityId++;
+    simulation.state.projectiles = [{
+      id: projectileId, ownerShipId: owner.id, ownerTeamId: owner.teamId,
+      weaponTypeId: "heavyRail", targetEntityId: target.id,
+      x: 0, z: 0, previousX: 0, previousZ: 0,
+      vx: 0, vz: 510, radius: 2.5, damage: 42, lifetimeTicks: 32,
+    }];
+
+    const events = simulation.step().events;
+    const detonation = events.find(
+      (event) => event.type === "projectileDetonated" && event.projectileId === projectileId,
+    );
+    expect(events).toContainEqual(expect.objectContaining({ type: "hit", projectileId, targetId: target.id }));
+    expect(detonation).toEqual(expect.objectContaining({
+      type: "projectileDetonated", weaponTypeId: "heavyRail", x: 0,
+    }));
+    if (!detonation || detonation.type !== "projectileDetonated") throw new Error("Missing detonation");
+    expect(detonation.z).toBeLessThan(target.z);
+    expect(detonation.z).toBeGreaterThan(0);
   });
 
   it.each(["fighter", "bomber"] as const)("lets a %s fly through a capital ship", async (shipClass) => {

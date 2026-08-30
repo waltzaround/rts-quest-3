@@ -34,6 +34,8 @@ export type StructureType =
   | "capitalInfrastructure"
   | "capitalShipyard"
   | "radarArray"
+  | "phasedRadarArray"
+  | "deepSpaceRadarArray"
   | "pointDefenseBattery"
   | "missileBattery"
   | "railBattery"
@@ -204,6 +206,7 @@ export type EconomyCommand =
       type: "buildStructure";
       structureType: Exclude<StructureType, "commandCore">;
       position: Vec2;
+      yaw?: number;
       resourceNodeId?: EntityId;
       builderUnitIds?: EntityId[];
       queued: boolean;
@@ -292,10 +295,12 @@ export interface ResourceNodeState {
 
 export interface ObstacleState {
   id: number;
-  type: "asteroid";
+  type: "asteroid" | "barrier";
   x: number;
   z: number;
   radius: number;
+  width?: number;
+  depth?: number;
   visualSeed: number;
 }
 
@@ -346,6 +351,7 @@ export type SimulationEvent =
 export interface SimulationState {
   version: 7;
   seed: number;
+  mapPreset?: "orbital-ring" | "crossfire" | "open-expanse" | "asteroid-belt" | "spiral-arms" | "shattered-core" | "amazon-tunnel" | "core-rush" | "star-fortress";
   tick: number;
   nextEntityId: number;
   nextTurretId: number;

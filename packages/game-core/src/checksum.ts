@@ -130,6 +130,8 @@ export function calculateChecksum(state: SimulationState): number {
     hash = hashUint(hash, quantize(obstacle.x));
     hash = hashUint(hash, quantize(obstacle.z));
     hash = hashUint(hash, quantize(obstacle.radius));
+    hash = hashUint(hash, quantize(obstacle.width ?? 0));
+    hash = hashUint(hash, quantize(obstacle.depth ?? 0));
     hash = hashUint(hash, obstacle.visualSeed);
   }
   for (const visibility of state.visibility) {

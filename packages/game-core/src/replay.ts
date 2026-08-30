@@ -227,8 +227,7 @@ export class ReplayRecorder {
 
   recordCheckpoint(): void {
     this.assertRecording();
-    const checksum = calculateChecksum(this.simulation.state);
-    this.simulation.state.checksum = checksum;
+    const checksum = this.simulation.refreshChecksum();
     const checkpoint: ReplayChecksumCheckpoint = {
       tick: this.simulation.state.tick,
       afterActionOrder: this.nextActionOrder - 1,
@@ -623,6 +622,7 @@ function isGameCommandShape(value: unknown): value is GameCommand {
   if (value.type === "buildStructure") {
     return BUILDABLE_STRUCTURE_TYPES.includes(value.structureType as never)
       && isVec2(value.position)
+      && (value.yaw === undefined || (typeof value.yaw === "number" && Number.isFinite(value.yaw)))
       && (value.resourceNodeId === undefined || isPositiveInteger(value.resourceNodeId))
       && (value.builderUnitIds === undefined || (Array.isArray(value.builderUnitIds)
         && value.builderUnitIds.length <= 32 && value.builderUnitIds.every(isPositiveInteger)))

@@ -23,7 +23,7 @@ const PROTOCOL_BUILDABLE_STRUCTURE_TYPES = {
   solarArray: true, storage: true, quantumStorage: true, fabricator: true, shipyard: true,
   advancedFabrication: true, fusionReactor: true, fleetShipyard: true,
   antimatterReactor: true, capitalInfrastructure: true, capitalShipyard: true,
-  radarArray: true,
+  radarArray: true, phasedRadarArray: true, deepSpaceRadarArray: true,
   pointDefenseBattery: true, missileBattery: true, railBattery: true,
   plasmaBattery: true, beamBattery: true,
 } satisfies Record<Exclude<StructureType, "commandCore">, true>;
@@ -48,7 +48,10 @@ export type MapPreset =
   | "open-expanse"
   | "asteroid-belt"
   | "spiral-arms"
-  | "shattered-core";
+  | "shattered-core"
+  | "amazon-tunnel"
+  | "core-rush"
+  | "star-fortress";
 export type MapSize = "small" | "medium" | "large" | "huge" | "colossal";
 export type StartingResources = "low" | "standard" | "high";
 export type ResourceDensity = "scarce" | "standard" | "rich";
@@ -145,6 +148,7 @@ export type ServerMessage =
   | { type: "view"; tick: number; checksum: number; view: ProjectedViewState }
   | { type: "lockstep_state"; tick: number; checksum: number; state: SimulationState; reason: "start" | "join" | "reconnect" | "checksum" | "manual" }
   | { type: "lockstep_commands"; commands: GameCommand[] }
+  | { type: "lockstep_player_state"; tick: number; playerId: string; state: "playing" | "disconnected" }
   | { type: "lockstep_frame"; tick: number; checksum: number }
   | { type: "command_results"; tick: number; outcomes: CommandOutcome[] }
   | { type: "checksum"; tick: number; checksum: number }
@@ -181,7 +185,10 @@ function isLobbyPlayerSlot(value: unknown): value is LobbyPlayerSlot {
 
 function isLobbySettings(value: unknown): value is LobbySettings {
   return isRecord(value)
-    && ["orbital-ring", "crossfire", "open-expanse", "asteroid-belt", "spiral-arms", "shattered-core"].includes(String(value.mapPreset))
+    && [
+      "orbital-ring", "crossfire", "open-expanse", "asteroid-belt", "spiral-arms", "shattered-core",
+      "amazon-tunnel", "core-rush", "star-fortress",
+    ].includes(String(value.mapPreset))
     && ["small", "medium", "large", "huge", "colossal"].includes(String(value.mapSize))
     && ["low", "standard", "high"].includes(String(value.startingResources))
     && ["scarce", "standard", "rich"].includes(String(value.resourceDensity))
@@ -278,6 +285,7 @@ function isGameCommand(value: unknown): value is GameCommand {
   if (value.type === "buildStructure") {
     return hasOwn(PROTOCOL_BUILDABLE_STRUCTURE_TYPES, value.structureType)
       && isVec2(value.position)
+      && (value.yaw === undefined || (typeof value.yaw === "number" && Number.isFinite(value.yaw)))
       && (value.resourceNodeId === undefined || (isInteger(value.resourceNodeId) && value.resourceNodeId > 0))
       && (value.builderUnitIds === undefined || (Array.isArray(value.builderUnitIds)
         && value.builderUnitIds.length <= 32
@@ -406,6 +414,12 @@ export function parseServerMessage(raw: string): ServerMessage | null {
   if (value.type === "lockstep_commands") {
     return Array.isArray(value.commands) && value.commands.length >= 1
       && value.commands.length <= MAX_COMMAND_BATCH && value.commands.every(isGameCommand)
+      ? value as ServerMessage : null;
+  }
+  if (value.type === "lockstep_player_state") {
+    return isInteger(value.tick) && value.tick >= 0
+      && isString(value.playerId, 80)
+      && ["playing", "disconnected"].includes(String(value.state))
       ? value as ServerMessage : null;
   }
   if (value.type === "lockstep_frame") {

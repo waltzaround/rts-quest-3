@@ -347,8 +347,20 @@ export const STRUCTURES: Readonly<Record<StructureType, StructureDefinition>> = 
   radarArray: {
     type: "radarArray", radius: 19, maxHealth: 1_250, maxShield: 420,
     alloyCost: 420, energyCost: 360, buildTicks: 240,
-    alloyIncome: 0, energyIncome: 0, energyUpkeep: 9, alloyStorage: 0, energyStorage: 0,
+    alloyIncome: 0, energyIncome: 0, energyUpkeep: 0, alloyStorage: 0, energyStorage: 0,
     requiredStructures: ["commandCore", "shipyard"], buildPower: 0, assistRange: 0, sensorRange: 1_050,
+  },
+  phasedRadarArray: {
+    type: "phasedRadarArray", radius: 25, maxHealth: 2_500, maxShield: 900,
+    alloyCost: 1_250, energyCost: 1_050, buildTicks: 540,
+    alloyIncome: 0, energyIncome: 0, energyUpkeep: 0, alloyStorage: 0, energyStorage: 0,
+    requiredStructures: ["fleetShipyard", "fusionReactor", "radarArray"], buildPower: 0, assistRange: 0, sensorRange: 1_750,
+  },
+  deepSpaceRadarArray: {
+    type: "deepSpaceRadarArray", radius: 34, maxHealth: 4_800, maxShield: 2_100,
+    alloyCost: 3_200, energyCost: 2_900, buildTicks: 980,
+    alloyIncome: 0, energyIncome: 0, energyUpkeep: 0, alloyStorage: 0, energyStorage: 0,
+    requiredStructures: ["capitalShipyard", "antimatterReactor", "phasedRadarArray"], buildPower: 0, assistRange: 0, sensorRange: 2_800,
   },
   pointDefenseBattery: {
     type: "pointDefenseBattery", radius: 23, maxHealth: 2_600, maxShield: 620,
@@ -447,5 +459,6 @@ export const BUILDABLE_STRUCTURE_TYPES = [
   "alloyRefinery",
   "antimatterReactor", "singularityHarvester", "matterForge", "quantumStorage",
   "radarArray",
+  "phasedRadarArray", "deepSpaceRadarArray",
   ...DEFENSIVE_STRUCTURE_TYPES,
 ] as const satisfies readonly Exclude<StructureType, "commandCore">[];

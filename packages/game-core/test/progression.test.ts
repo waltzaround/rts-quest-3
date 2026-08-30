@@ -32,6 +32,27 @@ function addCompletedStructure(
 }
 
 describe("horizontal infrastructure progression", () => {
+  it("preserves player-selected construction rotation", () => {
+    const simulation = createCombatScenario({ enemyCommander: false });
+    const core = simulation.state.structures.find(
+      (structure) => structure.ownerPlayerId === "pilot-blue" && structure.type === "commandCore",
+    )!;
+    const position = Array.from({ length: 16 }, (_, index) => ({
+      x: core.x + Math.sin(index * Math.PI / 8) * 180,
+      z: core.z + Math.cos(index * Math.PI / 8) * 180,
+    })).find((candidate) => simulation.canPlaceStructure("pilot-blue", "fabricator", candidate))!;
+    const yaw = 1.234;
+    expect(simulation.submitCommand({
+      type: "buildStructure", playerId: "pilot-blue", sequence: 1, requestedTick: 1,
+      structureType: "fabricator", position, yaw, builderUnitIds: [], queued: false,
+    }).accepted).toBe(true);
+    simulation.step();
+    const fabricator = simulation.state.structures.find(
+      (structure) => structure.ownerPlayerId === "pilot-blue" && structure.type === "fabricator",
+    );
+    expect(fabricator?.yaw).toBeCloseTo(yaw);
+  });
+
   it("starts normal matches with economy and production infrastructure but no free army", () => {
     const simulation = createCombatScenario({ enemyCommander: false });
     expect(simulation.state.ships).toHaveLength(0);
@@ -43,6 +64,16 @@ describe("horizontal infrastructure progression", () => {
     expect(simulation.getAvailableStructureTypes("pilot-blue")).not.toContain("capitalInfrastructure");
     expect(simulation.getAvailableStructureTypes("pilot-blue")).toContain("radarArray");
     expect(STRUCTURES.radarArray.sensorRange).toBeGreaterThan(STRUCTURES.commandCore.sensorRange);
+  });
+
+  it("provides upkeep-free radar tiers with progressively wider coverage", () => {
+    expect(STRUCTURES.radarArray.energyUpkeep).toBe(0);
+    expect(STRUCTURES.phasedRadarArray.energyUpkeep).toBe(0);
+    expect(STRUCTURES.deepSpaceRadarArray.energyUpkeep).toBe(0);
+    expect(STRUCTURES.phasedRadarArray.sensorRange).toBeGreaterThan(STRUCTURES.radarArray.sensorRange);
+    expect(STRUCTURES.deepSpaceRadarArray.sensorRange).toBeGreaterThan(STRUCTURES.phasedRadarArray.sensorRange);
+    expect(STRUCTURES.phasedRadarArray.requiredStructures).toContain("radarArray");
+    expect(STRUCTURES.deepSpaceRadarArray.requiredStructures).toContain("phasedRadarArray");
   });
 
   it("binds each role to a physical yard while preserving light-unit production", () => {

@@ -69,6 +69,7 @@ describe("RTS scenario settings", () => {
   it("offers distinct seeded layouts across every map family", () => {
     const presets = [
       "orbital-ring", "crossfire", "open-expanse", "asteroid-belt", "spiral-arms", "shattered-core",
+      "amazon-tunnel", "core-rush", "star-fortress",
     ] as const;
     const signatures = presets.map((mapPreset) => {
       const scenario = createCombatScenario({ seed: 4_242, players: PLAYERS, mapPreset });
@@ -84,5 +85,52 @@ describe("RTS scenario settings", () => {
     expect(repeated.snapshot()).toEqual(first.snapshot());
     expect(rerolled.state.resourceNodes).not.toEqual(first.state.resourceNodes);
     expect(rerolled.state.obstacles).not.toEqual(first.state.obstacles);
+  });
+
+  it("builds Amazon Tunnel as blocked fields around a broad, resource-rich central basin", () => {
+    const baseRadius = 2_400;
+    const scenario = createCombatScenario({ seed: 4_242, players: PLAYERS, mapPreset: "amazon-tunnel" });
+    const alphaCore = scenario.state.structures.find(
+      (structure) => structure.ownerPlayerId === "alpha" && structure.type === "commandCore",
+    )!;
+    const betaCore = scenario.state.structures.find(
+      (structure) => structure.ownerPlayerId === "beta" && structure.type === "commandCore",
+    )!;
+
+    expect(alphaCore.x).toBeLessThan(0);
+    expect(betaCore.x).toBeGreaterThan(0);
+    expect(Math.abs(alphaCore.z)).toBeLessThan(baseRadius * 0.01);
+    expect(Math.abs(betaCore.z)).toBeLessThan(baseRadius * 0.01);
+    expect(scenario.state.obstacles).toHaveLength(6);
+    expect(scenario.state.obstacles.every((obstacle) => obstacle.type === "barrier")).toBe(true);
+    expect(scenario.state.resourceNodes.filter((node) => (
+      Math.abs(node.x) < baseRadius * 0.65 && Math.abs(node.z) < baseRadius * 0.075
+    )).length).toBeGreaterThanOrEqual(4);
+    expect(scenario.state.resourceNodes.some((node) => (
+      Math.hypot(node.x, node.z) < baseRadius * 0.02 && node.richness >= 3.2
+    ))).toBe(true);
+    // The inaccessible upper and lower fields are enclosed by their perimeter
+    // walls instead of being packed with hundreds of redundant collision bodies.
+    expect(scenario.state.obstacles.filter((obstacle) => (
+      obstacle.width === baseRadius * 1.4 && (obstacle.depth ?? 0) > baseRadius * 0.7
+    ))).toHaveLength(2);
+  });
+
+  it("gives the new economy and defended-start maps distinct strategic pressure", () => {
+    const baseRadius = 2_400;
+    const coreRush = createCombatScenario({ seed: 8_181, players: PLAYERS, mapPreset: "core-rush" });
+    const starFortress = createCombatScenario({ seed: 8_181, players: PLAYERS, mapPreset: "star-fortress" });
+    const centralRiches = coreRush.state.resourceNodes.filter((node) => Math.hypot(node.x, node.z) < baseRadius * 0.4);
+    expect(centralRiches.length).toBeGreaterThanOrEqual(5);
+
+    for (const player of PLAYERS) {
+      const core = starFortress.state.structures.find(
+        (structure) => structure.ownerPlayerId === player.id && structure.type === "commandCore",
+      )!;
+      const nearbyRampart = starFortress.state.obstacles.filter(
+        (obstacle) => Math.hypot(obstacle.x - core.x, obstacle.z - core.z) < baseRadius * 0.28,
+      );
+      expect(nearbyRampart.length).toBeGreaterThanOrEqual(7);
+    }
   });
 });

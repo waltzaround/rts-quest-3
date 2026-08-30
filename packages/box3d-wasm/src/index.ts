@@ -145,6 +145,7 @@ class WasmPlanarCirclePhysicsWorld implements PlanarCirclePhysicsWorld {
   readonly #module: Box3DModule;
   readonly #worldId: b3WorldId;
   readonly #bodies = new Map<string, BodyRecord>();
+  #sortedDynamicBodies: readonly BodyRecord[] | null = null;
   #disposed = false;
 
   constructor(module: Box3DModule) {
@@ -199,10 +200,10 @@ class WasmPlanarCirclePhysicsWorld implements PlanarCirclePhysicsWorld {
     }
 
     this.#module.b3World_Step(this.#worldId, timeStep, subStepCount);
-    return [...this.#bodies.values()]
+    this.#sortedDynamicBodies ??= [...this.#bodies.values()]
       .filter((record) => record.kind === "dynamic")
-      .sort((left, right) => compareStrings(left.id, right.id))
-      .map((record) => {
+      .sort((left, right) => compareStrings(left.id, right.id));
+    return this.#sortedDynamicBodies.map((record) => {
         const position = this.#module.b3Body_GetPosition([0, 0, 0], record.bodyId);
         const velocity = this.#module.b3Body_GetLinearVelocity([0, 0, 0], record.bodyId);
         return {
@@ -322,6 +323,7 @@ class WasmPlanarCirclePhysicsWorld implements PlanarCirclePhysicsWorld {
     });
     const record: BodyRecord = { id, kind, radius, density, collisionCategory, collisionMask, bodyId };
     this.#bodies.set(id, record);
+    this.#sortedDynamicBodies = null;
     return record;
   }
 
@@ -332,6 +334,7 @@ class WasmPlanarCirclePhysicsWorld implements PlanarCirclePhysicsWorld {
     }
     this.#module.b3DestroyBody(record.bodyId);
     this.#bodies.delete(id);
+    this.#sortedDynamicBodies = null;
   }
 
   #assertActive(): void {

@@ -130,13 +130,20 @@ try {
 
   const reconnectCredentials = wing.credentials;
   wing.close();
+  const disconnected = await host.waitFor(
+    (message) => message.type === "lockstep_player_state" && message.playerId === wingWelcome.playerId,
+  );
+  if (disconnected.state !== "disconnected") throw new Error("Disconnect did not use the lightweight state transition");
   rejoined = new Peer("Lockstep Wing", reconnectCredentials);
   const reconnectWelcome = await rejoined.connect();
+  const resumed = await host.waitFor(
+    (message) => message.type === "lockstep_player_state" && message.playerId === wingWelcome.playerId,
+  );
   const reconnectState = await rejoined.waitFor(
     (message) => message.type === "lockstep_state" && message.reason === "reconnect",
   );
   assertLockstepState(reconnectState, "Reconnect state");
-  if (reconnectWelcome.playerId !== wingWelcome.playerId || reconnectState.tick < recovery.tick) {
+  if (resumed.state !== "playing" || reconnectWelcome.playerId !== wingWelcome.playerId || reconnectState.tick < recovery.tick) {
     throw new Error("Reconnect did not restore the original player at the current tick");
   }
 

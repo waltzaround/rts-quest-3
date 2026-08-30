@@ -8,6 +8,7 @@
     "build": "wrangler deploy --dry-run --outdir dist",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "verify:multiplayer": "node scripts/verify-lockstep.mjs",
+    "verify:multiplayer:soak": "node scripts/verify-high-load.mjs",
     "verify:multiplayer:legacy": "node scripts/verify-multiplayer.mjs"
   },
   "dependencies": {

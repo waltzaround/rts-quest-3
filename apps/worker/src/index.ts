@@ -5,10 +5,12 @@ import {
 } from "@space-rts/box3d-wasm";
 import { loadPhysicsRuntimeFromModule } from "@space-rts/box3d-wasm/worker";
 import {
+  calculateChecksum,
   createCombatScenario,
   projectTeamView,
   ReplayRecorder,
   restoreSimulation,
+  SHIPS,
   type GameCommand,
   type GameSimulation,
   type PlayerViewState,
@@ -33,6 +35,8 @@ import { SIMULATION_HZ } from "@space-rts/shared";
 
 interface Env {
   MATCH: DurableObjectNamespace;
+  /** Local-only opt-in used by the sustained multiplayer load verifier. */
+  VOIDFRONT_SOAK_UNITS_PER_PLAYER?: string;
 }
 
 interface SocketAttachment {
@@ -62,10 +66,39 @@ interface PersistedMatch {
   aiCounter: number;
 }
 
+interface PersistedCheckpointPayload {
+  simulation: SimulationState | null;
+  replay: ReplayFile | null;
+}
+
+interface PersistedCheckpointManifest {
+  generation: string;
+  chunkCount: number;
+  byteLength: number;
+  sha256: string;
+}
+
+interface PersistedMatchMetadata {
+  version: 2;
+  lobby: LobbyState;
+  seed: number;
+  reconnectTokens: Record<string, string>;
+  spectatorGrants: Record<string, SpectatorGrant>;
+  replayCompletedAt: number | null;
+  aiCounter: number;
+  checkpoint: PersistedCheckpointManifest | null;
+}
+
 const PLAYER_COLORS = [0x59a7ff, 0xff5576, 0x62e6a7, 0xf3b65b, 0xb886ff, 0x55e1e8, 0xff8b55, 0xd8e65b];
 const PHYSICS_BACKEND = "box3d-wasm-precompiled";
-const PERSIST_INTERVAL_TICKS = SIMULATION_HZ;
+const PERSIST_INTERVAL_TICKS = SIMULATION_HZ * 10;
 const REPLAY_CHECKPOINT_INTERVAL_TICKS = SIMULATION_HZ * 5;
+const MATCH_METADATA_KEY = "match:metadata:v2";
+const LEGACY_MATCH_KEY = "match";
+const CHECKPOINT_CHUNK_PREFIX = "match:checkpoint:v2:";
+const CHECKPOINT_CHUNK_BYTES = 128 * 1024;
+const CHECKPOINT_STORAGE_BATCH = 16;
+const MAX_CHECKPOINT_CHUNKS = 2_048;
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -106,14 +139,26 @@ export class Match implements DurableObject {
   private aiCounter = 0;
   private viewCacheTick = -1;
   private readonly viewCache = new Map<string, PlayerViewState | TeamViewState>();
+  private lockstepStateCache: {
+    tick: number;
+    checksum: number;
+    messages: Map<Extract<ServerMessage, { type: "lockstep_state" }>["reason"], string>;
+  } | null = null;
   private persistChain: Promise<void> = Promise.resolve();
+  private checkpointManifest: PersistedCheckpointManifest | null = null;
+  private readonly soakUnitsPerPlayer: number;
 
-  constructor(private readonly ctx: DurableObjectState, _env: Env) {
+  constructor(private readonly ctx: DurableObjectState, private readonly env: Env) {
+    const requestedSoakUnits = Number(this.env.VOIDFRONT_SOAK_UNITS_PER_PLAYER ?? 0);
+    this.soakUnitsPerPlayer = Number.isInteger(requestedSoakUnits)
+      && requestedSoakUnits >= 2 && requestedSoakUnits <= 1_000
+      ? requestedSoakUnits
+      : 0;
     this.lobby = this.createLobby("pending");
     this.ctx.blockConcurrencyWhile(async () => {
       const physicsRuntime = await loadPhysicsRuntimeFromModule(box3dModule);
       this.physicsWorld = createPlanarCirclePhysicsWorld(physicsRuntime);
-      const persisted = await this.ctx.storage.get<PersistedMatch>("match");
+      const persisted = await this.loadPersistedMatch();
       if (!persisted) return;
       const legacySeed = (persisted.lobby as LobbyState & { seed?: unknown }).seed;
       this.seed = persisted.seed ?? (typeof legacySeed === "number" ? legacySeed : this.seed);
@@ -147,7 +192,7 @@ export class Match implements DurableObject {
             this.replayRecorder = null;
             this.replayCompletedAt ??= Date.now();
             this.lobby.phase = "finished";
-            await this.persist();
+            await this.persistCheckpoint();
           }
         }
         if (this.lobby.phase === "playing" && this.ctx.getWebSockets().length > 0) {
@@ -162,7 +207,7 @@ export class Match implements DurableObject {
     const routeMatchId = url.pathname.match(/^\/matches\/([a-zA-Z0-9_-]+)/)?.[1];
     if (routeMatchId && this.lobby.matchId === "pending") {
       this.lobby.matchId = routeMatchId;
-      this.ctx.waitUntil(this.persist());
+      this.ctx.waitUntil(this.persistMetadata());
     }
 
     const upgrade = request.headers.get("Upgrade");
@@ -314,7 +359,8 @@ export class Match implements DurableObject {
       if (this.replayRecorder) this.replayRecorder.setPlayerState(slot.playerId, "playing");
       else simPlayer.state = "playing";
       this.invalidatePlayerViews();
-      this.broadcastLockstepState("manual");
+      this.invalidateLockstepState();
+      this.broadcastPlayerState(slot.playerId, "playing", socket);
     }
     this.sortSlots();
     this.send(socket, {
@@ -642,6 +688,9 @@ export class Match implements DurableObject {
     this.simulation = createCombatScenario({
       seed: this.seed,
       ...this.lobby.settings,
+      startingFleet: this.soakUnitsPerPlayer > 0,
+      fightersPerTeam: Math.max(0, this.soakUnitsPerPlayer - 2),
+      bombersPerTeam: 0,
       players: this.lobby.slots.map((slot) => ({
         id: slot.playerId,
         name: slot.name,
@@ -652,7 +701,8 @@ export class Match implements DurableObject {
         aiPersonality: slot.aiPersonality ?? "balanced",
       })),
     });
-    if (this.simulation.state.ships.length !== 0) {
+    if (this.soakUnitsPerPlayer > 0) this.configureSoakBattle(this.soakUnitsPerPlayer);
+    if (this.soakUnitsPerPlayer === 0 && this.simulation.state.ships.length !== 0) {
       throw new Error("Authoritative matches must begin without free ships");
     }
     if (this.physicsWorld) this.simulation.attachPhysicsWorld(this.physicsWorld);
@@ -666,7 +716,80 @@ export class Match implements DurableObject {
     this.broadcastLockstepState("start");
     this.broadcastLobby();
     this.ensureTicking();
-    this.ctx.waitUntil(this.persist());
+    this.ctx.waitUntil(this.persistCheckpoint());
+  }
+
+  private configureSoakBattle(unitsPerPlayer: number): void {
+    if (!this.simulation || this.simulation.state.players.length < 2) {
+      throw new Error("The multiplayer soak fixture requires at least two players");
+    }
+    const state = this.simulation.state;
+    const shipClassForIndex = (index: number): keyof typeof SHIPS => {
+      const progress = index / unitsPerPlayer;
+      if (progress < 0.75) return "fighter";
+      if (progress < 0.85) return "frigate";
+      if (progress < 0.9) return "flakFrigate";
+      if (progress < 0.9375) return "torpedoFrigate";
+      if (progress < 0.9625) return "destroyer";
+      if (progress < 0.9825) return "cruiser";
+      if (progress < 0.9925) return "carrier";
+      return "battleship";
+    };
+
+    const teamIds = [...new Set(state.players.map((player) => player.teamId))].sort((left, right) => left - right);
+    if (teamIds.length !== 2) throw new Error("The multiplayer soak fixture requires exactly two opposing teams");
+    state.nextTurretId = 1;
+    for (let playerIndex = 0; playerIndex < state.players.length; playerIndex += 1) {
+      const player = state.players[playerIndex]!;
+      const teamIndex = teamIds.indexOf(player.teamId);
+      const teammates = state.players.filter((candidate) => candidate.teamId === player.teamId);
+      const teammateIndex = teammates.findIndex((candidate) => candidate.id === player.id);
+      const side = teamIndex === 0 ? -1 : 1;
+      const laneOffset = (teammateIndex - (teammates.length - 1) / 2) * 1_250;
+      const fleet = state.ships.filter((ship) => ship.ownerPlayerId === player.id);
+      if (fleet.length !== unitsPerPlayer) {
+        throw new Error(`Soak fixture created ${fleet.length} of ${unitsPerPlayer} units for ${player.id}`);
+      }
+      for (let index = 0; index < fleet.length; index += 1) {
+        const ship = fleet[index]!;
+        const shipClass = shipClassForIndex(index);
+        const definition = SHIPS[shipClass];
+        const capitalRankStart = Math.ceil(unitsPerPlayer * 0.9375);
+        const isCapitalRank = index >= capitalRankStart;
+        const localIndex = isCapitalRank ? index - capitalRankStart : index;
+        const columns = isCapitalRank ? 8 : 32;
+        const spacing = isCapitalRank ? 120 : 32;
+        const row = Math.floor(localIndex / columns);
+        const column = localIndex % columns;
+        ship.class = shipClass;
+        ship.x = laneOffset + (column - (columns - 1) / 2) * spacing;
+        ship.z = side * ((isCapitalRank ? 1_250 : 125) + row * spacing);
+        ship.yaw = side < 0 ? 0 : Math.PI;
+        ship.vx = 0;
+        ship.vz = 0;
+        ship.health = definition.maxHealth * 20;
+        ship.shields = definition.maxShield * 20;
+        ship.focusTargetEntityId = null;
+        ship.orders = [{ type: "attackMove", destination: { x: 0, z: 0 }, facing: ship.yaw }];
+        ship.turrets = definition.hardpoints.map((hardpoint) => {
+          const turretId = state.nextTurretId++;
+          return {
+            id: turretId,
+            parentShipId: ship.id,
+            weaponTypeId: hardpoint.weaponTypeId,
+            localX: hardpoint.localX,
+            localZ: hardpoint.localZ,
+            yawCenter: hardpoint.yawCenter,
+            yawHalfArc: hardpoint.yawHalfArc,
+            currentYaw: hardpoint.yawCenter,
+            targetEntityId: null,
+            cooldownRemaining: turretId * 7 % SHIPS[shipClass].hardpoints.length,
+            fireSequence: 0,
+          };
+        });
+      }
+    }
+    state.checksum = calculateChecksum(state);
   }
 
   private handleCommands(
@@ -678,11 +801,6 @@ export class Match implements DurableObject {
       this.fail(socket, "match_not_playing", "Commands are accepted only during an active match");
       return;
     }
-    if (message.clientChecksum !== undefined
-      && message.clientTick === this.simulation.state.tick) {
-      if (message.clientChecksum !== this.simulation.state.checksum) this.sendSnapshot(socket, "checksum");
-    }
-
     const accepted: GameCommand[] = [];
     const outcomes = message.commands.map((command) => {
       const authoritative = { ...command, playerId } as GameCommand;
@@ -696,7 +814,7 @@ export class Match implements DurableObject {
     if (accepted.length > 0) {
       this.broadcast({ type: "lockstep_commands", commands: accepted });
       this.invalidatePlayerViews();
-      this.ctx.waitUntil(this.persist());
+      this.invalidateLockstepState();
     }
   }
 
@@ -735,7 +853,8 @@ export class Match implements DurableObject {
       if (this.replayRecorder) this.replayRecorder.setPlayerState(playerId, "disconnected");
       else simPlayer.state = "disconnected";
       this.invalidatePlayerViews();
-      this.broadcastLockstepState("manual");
+      this.invalidateLockstepState();
+      this.broadcastPlayerState(playerId, "disconnected");
     }
     this.broadcastLobby();
     this.ctx.waitUntil(this.persist());
@@ -752,7 +871,7 @@ export class Match implements DurableObject {
       tick: this.simulation.state.tick,
       checksum: this.simulation.state.checksum,
     });
-    if (debug.tick % PERSIST_INTERVAL_TICKS === 0) this.ctx.waitUntil(this.persist());
+    if (debug.tick % PERSIST_INTERVAL_TICKS === 0) this.ctx.waitUntil(this.persistCheckpoint());
     if (finished) {
       this.lobby.phase = "finished";
       if (this.replayRecorder) {
@@ -761,7 +880,7 @@ export class Match implements DurableObject {
         this.replayCompletedAt = Date.now();
       }
       this.broadcastLobby();
-      this.ctx.waitUntil(this.persist());
+      this.ctx.waitUntil(this.persistCheckpoint());
       this.stopTicking();
     }
   }
@@ -828,26 +947,58 @@ export class Match implements DurableObject {
   private sendSnapshot(socket: WebSocket, reason: Extract<ServerMessage, { type: "snapshot" }>["reason"]): void {
     if (!this.simulation) return;
     const lockstepReason = reason === "periodic" ? "manual" : reason;
-    this.send(socket, {
-      type: "lockstep_state",
-      tick: this.simulation.state.tick,
-      checksum: this.simulation.state.checksum,
-      state: this.simulation.snapshot(),
-      reason: lockstepReason,
-    });
+    this.sendRaw(socket, this.serializedLockstepState(lockstepReason));
   }
 
   private broadcastLockstepState(reason: "start" | "manual"): void {
     if (!this.simulation) return;
+    const serialized = this.serializedLockstepState(reason);
+    for (const socket of this.ctx.getWebSockets()) this.sendRaw(socket, serialized);
+  }
+
+  private broadcastPlayerState(
+    playerId: string,
+    state: "playing" | "disconnected",
+    excludedSocket?: WebSocket,
+  ): void {
+    if (!this.simulation) return;
+    const message: ServerMessage = {
+      type: "lockstep_player_state",
+      tick: this.simulation.state.tick,
+      playerId,
+      state,
+    };
     for (const socket of this.ctx.getWebSockets()) {
-      this.send(socket, {
-        type: "lockstep_state",
-        tick: this.simulation.state.tick,
-        checksum: this.simulation.state.checksum,
-        state: this.simulation.snapshot(),
-        reason,
-      });
+      if (socket !== excludedSocket) this.send(socket, message);
     }
+  }
+
+  private serializedLockstepState(
+    reason: Extract<ServerMessage, { type: "lockstep_state" }>["reason"],
+  ): string {
+    if (!this.simulation) throw new Error("Cannot serialize a missing simulation");
+    this.simulation.refreshChecksum();
+    const { tick, checksum } = this.simulation.state;
+    if (!this.lockstepStateCache
+      || this.lockstepStateCache.tick !== tick
+      || this.lockstepStateCache.checksum !== checksum) {
+      this.lockstepStateCache = { tick, checksum, messages: new Map() };
+    }
+    const cached = this.lockstepStateCache.messages.get(reason);
+    if (cached) return cached;
+    const serialized = JSON.stringify({
+      type: "lockstep_state",
+      tick,
+      checksum,
+      state: this.simulation.snapshot(),
+      reason,
+    } satisfies ServerMessage);
+    this.lockstepStateCache.messages.set(reason, serialized);
+    return serialized;
+  }
+
+  private invalidateLockstepState(): void {
+    this.lockstepStateCache = null;
   }
 
   private playerView(playerId: string): PlayerViewState | null {
@@ -985,21 +1136,145 @@ export class Match implements DurableObject {
     return socket.deserializeAttachment() as SocketAttachment ?? { playerId: null };
   }
 
-  private persist(): Promise<void> {
-    if (this.replayRecorder) this.replay = this.replayRecorder.archive();
-    const persisted: PersistedMatch = {
-      lobby: this.publicLobby(),
-      seed: this.seed,
-      simulation: this.simulation?.snapshot() ?? null,
-      reconnectTokens: { ...this.reconnectTokens },
-      spectatorGrants: structuredClone(this.spectatorGrants),
-      replay: this.replay,
-      replayCompletedAt: this.replayCompletedAt,
-      aiCounter: this.aiCounter,
+  private async loadPersistedMatch(): Promise<PersistedMatch | undefined> {
+    const metadata = await this.ctx.storage.get<PersistedMatchMetadata>(MATCH_METADATA_KEY);
+    const legacy = await this.ctx.storage.get<PersistedMatch>(LEGACY_MATCH_KEY);
+    if (!metadata || metadata.version !== 2) return legacy;
+
+    this.checkpointManifest = metadata.checkpoint;
+    let checkpoint: PersistedCheckpointPayload | null = null;
+    if (metadata.checkpoint) {
+      try {
+        checkpoint = await this.loadCheckpoint(metadata.checkpoint);
+      } catch (error) {
+        console.error("Failed to load the current match checkpoint; trying legacy state", error);
+      }
+    }
+    return {
+      lobby: metadata.lobby,
+      seed: metadata.seed,
+      simulation: checkpoint?.simulation ?? legacy?.simulation ?? null,
+      reconnectTokens: metadata.reconnectTokens,
+      spectatorGrants: metadata.spectatorGrants,
+      replay: checkpoint?.replay ?? legacy?.replay ?? null,
+      replayCompletedAt: metadata.replayCompletedAt,
+      aiCounter: metadata.aiCounter,
     };
-    const write = (): Promise<void> => this.ctx.storage.put("match", persisted);
+  }
+
+  private async loadCheckpoint(manifest: PersistedCheckpointManifest): Promise<PersistedCheckpointPayload> {
+    if (!Number.isInteger(manifest.chunkCount)
+      || manifest.chunkCount < 1
+      || manifest.chunkCount > MAX_CHECKPOINT_CHUNKS
+      || !Number.isInteger(manifest.byteLength)
+      || manifest.byteLength < 1) {
+      throw new Error("Invalid checkpoint manifest");
+    }
+    const bytes = new Uint8Array(manifest.byteLength);
+    let offset = 0;
+    const keys = Array.from(
+      { length: manifest.chunkCount },
+      (_, index) => this.checkpointChunkKey(manifest.generation, index),
+    );
+    for (let start = 0; start < keys.length; start += CHECKPOINT_STORAGE_BATCH) {
+      const batchKeys = keys.slice(start, start + CHECKPOINT_STORAGE_BATCH);
+      const chunks = await this.ctx.storage.get<Uint8Array>(batchKeys);
+      for (const key of batchKeys) {
+        const chunk = chunks.get(key);
+        if (!(chunk instanceof Uint8Array) || offset + chunk.byteLength > bytes.byteLength) {
+          throw new Error(`Checkpoint chunk ${key} is missing or invalid`);
+        }
+        bytes.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+    }
+    if (offset !== bytes.byteLength || await sha256Hex(bytes) !== manifest.sha256) {
+      throw new Error("Checkpoint integrity verification failed");
+    }
+    const parsed = JSON.parse(new TextDecoder().decode(bytes)) as Partial<PersistedCheckpointPayload>;
+    if (!("simulation" in parsed) || !("replay" in parsed)) throw new Error("Checkpoint payload is incomplete");
+    return parsed as PersistedCheckpointPayload;
+  }
+
+  private persist(): Promise<void> {
+    return this.persistMetadata();
+  }
+
+  private persistMetadata(): Promise<void> {
+    const write = (): Promise<void> => this.ctx.storage.put(MATCH_METADATA_KEY, this.currentMetadata());
     this.persistChain = this.persistChain.then(write, write);
     return this.persistChain;
+  }
+
+  private persistCheckpoint(): Promise<void> {
+    const write = (): Promise<void> => this.writeCheckpoint();
+    this.persistChain = this.persistChain.then(write, write);
+    return this.persistChain;
+  }
+
+  private currentMetadata(checkpoint = this.checkpointManifest): PersistedMatchMetadata {
+    return {
+      version: 2,
+      lobby: this.publicLobby(),
+      seed: this.seed,
+      reconnectTokens: { ...this.reconnectTokens },
+      spectatorGrants: structuredClone(this.spectatorGrants),
+      replayCompletedAt: this.replayCompletedAt,
+      aiCounter: this.aiCounter,
+      checkpoint,
+    };
+  }
+
+  private async writeCheckpoint(): Promise<void> {
+    if (this.replayRecorder) this.replay = this.replayRecorder.archive();
+    const payload: PersistedCheckpointPayload = {
+      simulation: this.simulation?.snapshot() ?? null,
+      replay: this.replay,
+    };
+    const bytes = new TextEncoder().encode(JSON.stringify(payload));
+    const chunkCount = Math.ceil(bytes.byteLength / CHECKPOINT_CHUNK_BYTES);
+    if (chunkCount < 1 || chunkCount > MAX_CHECKPOINT_CHUNKS) {
+      throw new Error(`Checkpoint requires ${chunkCount} chunks; maximum is ${MAX_CHECKPOINT_CHUNKS}`);
+    }
+
+    const generation = `${this.simulation?.state.tick ?? 0}-${crypto.randomUUID()}`;
+    for (let startIndex = 0; startIndex < chunkCount; startIndex += CHECKPOINT_STORAGE_BATCH) {
+      const entries: Record<string, Uint8Array> = {};
+      for (let index = startIndex; index < Math.min(startIndex + CHECKPOINT_STORAGE_BATCH, chunkCount); index += 1) {
+        const start = index * CHECKPOINT_CHUNK_BYTES;
+        entries[this.checkpointChunkKey(generation, index)] = bytes.slice(
+          start,
+          Math.min(start + CHECKPOINT_CHUNK_BYTES, bytes.byteLength),
+        );
+      }
+      await this.ctx.storage.put(entries);
+    }
+
+    const previous = this.checkpointManifest;
+    const manifest: PersistedCheckpointManifest = {
+      generation,
+      chunkCount,
+      byteLength: bytes.byteLength,
+      sha256: await sha256Hex(bytes),
+    };
+    await this.ctx.storage.put(MATCH_METADATA_KEY, this.currentMetadata(manifest));
+    this.checkpointManifest = manifest;
+    await this.ctx.storage.delete(LEGACY_MATCH_KEY);
+    if (previous && previous.generation !== generation) await this.deleteCheckpoint(previous);
+  }
+
+  private async deleteCheckpoint(manifest: PersistedCheckpointManifest): Promise<void> {
+    const keys = Array.from(
+      { length: manifest.chunkCount },
+      (_, index) => this.checkpointChunkKey(manifest.generation, index),
+    );
+    for (let start = 0; start < keys.length; start += 64) {
+      await this.ctx.storage.delete(keys.slice(start, start + 64));
+    }
+  }
+
+  private checkpointChunkKey(generation: string, index: number): string {
+    return `${CHECKPOINT_CHUNK_PREFIX}${generation}:${index}`;
   }
 
   private broadcast(message: ServerMessage): void {
@@ -1011,7 +1286,11 @@ export class Match implements DurableObject {
   }
 
   private send(socket: WebSocket, message: ServerMessage): void {
-    if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+    this.sendRaw(socket, JSON.stringify(message));
+  }
+
+  private sendRaw(socket: WebSocket, message: string): void {
+    if (socket.readyState === WebSocket.OPEN) socket.send(message);
   }
 }
 
@@ -1022,4 +1301,10 @@ function bytesToBase64(bytes: Uint8Array): string {
     binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + batchSize, bytes.length)));
   }
   return btoa(binary);
+}
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const digestInput = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", digestInput));
+  return Array.from(digest, (value) => value.toString(16).padStart(2, "0")).join("");
 }

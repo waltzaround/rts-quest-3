@@ -454,7 +454,7 @@ export class VisualStressScenario implements RenderSource {
         x: this.baseX[index]!, z: this.baseZ[index]!, y: (index % 7 - 3) * 1.2,
         yaw: side < 0 ? Math.PI / 2 : -Math.PI / 2,
         vx: side * 12, vz: 0,
-        health: SHIPS[shipClass].maxHealth,
+        health: SHIPS[shipClass].maxHealth * (index % 3 === 0 ? 0.15 + (index * 17 % 50) / 100 : 1),
         shields: SHIPS[shipClass].maxShield,
         orders: [], focusTargetEntityId: null, turrets,
       });
