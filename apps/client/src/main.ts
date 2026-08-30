@@ -952,7 +952,13 @@ function setClientViewMode(mode: ClientViewMode, teamId: number | null = null): 
 }
 
 function nextCommandTick(): number {
-  return networkMode ? Math.max(currentState().tick, serverTick) + 4 : simulation.state.tick + 1;
+  if (!networkMode) return simulation.state.tick + 1;
+  // A frame's server tick is already roughly half an RTT old when it reaches us,
+  // and the command needs the other half of the RTT to get back. Keep a small
+  // four-tick execution cushion on top of the measured round trip. The authority
+  // remains the final safeguard if a transient spike still makes the command late.
+  const networkLeadTicks = Math.min(32, 4 + Math.ceil(networkLatency / (FIXED_DT * 1_000)));
+  return Math.max(currentState().tick, serverTick) + networkLeadTicks;
 }
 
 function submitPlayerCommand(command: GameCommand): ClientCommandResult {
@@ -1844,6 +1850,8 @@ function handleServerMessage(message: ServerMessage): void {
 
 function installLockstepState(state: SimulationState, notice?: string): void {
   simulation = restoreSimulation(state, physicsWorld ?? undefined);
+  const localPlayer = state.players.find((player) => player.id === localPlayerId);
+  if (localPlayer) commandSequence = Math.max(commandSequence, localPlayer.lastCommandSequence);
   lockstepTargetTick = state.tick;
   lockstepTargetChecksum = state.checksum;
   lockstepResyncPending = false;
@@ -4696,11 +4704,15 @@ function canPlaceStructureInView(
   const upgradeSource = resourceExtractorUpgradeSourceInView(structureType, resourceNodeId);
   const hasAssignedMobileBuilder = getSelectedMobileBuilderIds().length > 0;
   if (isDefensiveStructureType(structureType) && !hasAssignedMobileBuilder) return false;
+  // Legacy medium/large matches placed their initial expansion nodes just past
+  // the normal 360-unit construction radius. Preserve those live matches while
+  // keeping the standard range for every non-extractor structure.
+  const staticBuildRange = isResourceExtractorType(structureType) ? 420 : 360;
   const inBuildRange = clientView.structures.some((structure) =>
     structure.ownerPlayerId === localPlayerId
       && structure.buildProgress >= 1
       && (structure.type === "commandCore" || structure.type === "fabricator")
-      && Math.hypot(structure.x - position.x, structure.z - position.z) <= 360,
+      && Math.hypot(structure.x - position.x, structure.z - position.z) <= staticBuildRange,
   ) || hasAssignedMobileBuilder;
   if (!inBuildRange) return false;
   for (const structure of clientView.structures) {

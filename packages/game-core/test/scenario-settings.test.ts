@@ -133,4 +133,44 @@ describe("RTS scenario settings", () => {
       expect(nearbyRampart.length).toBeGreaterThanOrEqual(7);
     }
   });
+
+  it("gives every human spawn a visible valid extractor expansion", () => {
+    const players: readonly ScenarioPlayerConfig[] = [
+      { id: "alpha", name: "Alpha", teamId: 1 },
+      { id: "beta", name: "Beta", teamId: 1 },
+      { id: "gamma", name: "Gamma", teamId: 2 },
+      { id: "delta", name: "Delta", teamId: 2 },
+    ];
+    const presets = [
+      "orbital-ring", "crossfire", "open-expanse", "asteroid-belt", "spiral-arms", "shattered-core",
+      "amazon-tunnel", "core-rush", "star-fortress",
+    ] as const;
+    const spawnModes = ["together", "interleaved", "random"] as const;
+    for (const mapPreset of presets) {
+      for (const teamSpawnMode of spawnModes) {
+        const scenario = createCombatScenario({ seed: 7_233, players, mapPreset, teamSpawnMode });
+        for (const player of scenario.state.players) {
+          const startingShipyard = scenario.state.structures.find((structure) =>
+            structure.ownerPlayerId === player.id && structure.type === "shipyard",
+          );
+          expect(startingShipyard, `${mapPreset}/${teamSpawnMode}/${player.id} starting shipyard`).toBeDefined();
+          expect(
+            scenario.canStructureProduceShipClass(player.id, startingShipyard!.id, "fighter"),
+            `${mapPreset}/${teamSpawnMode}/${player.id} fighter production`,
+          ).toBe(true);
+          const validNodes = scenario.state.resourceNodes.filter((node) =>
+            node.claimedByStructureId === null
+              && scenario.canPlaceStructure(player.id, "extractor", node, node.id),
+          );
+          const core = scenario.state.structures.find((structure) =>
+            structure.ownerPlayerId === player.id && structure.type === "commandCore",
+          )!;
+          const nearby = scenario.state.resourceNodes.filter((node) =>
+            node.claimedByStructureId === null && Math.hypot(node.x - core.x, node.z - core.z) <= 360,
+          ).map((node) => ({ id: node.id, x: node.x, z: node.z }));
+          expect(validNodes.length, `${mapPreset}/${teamSpawnMode}/${player.id} nearby=${JSON.stringify(nearby)}`).toBeGreaterThan(0);
+        }
+      }
+    }
+  });
 });
