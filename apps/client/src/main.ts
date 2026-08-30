@@ -859,6 +859,7 @@ let lockstepTargetChecksum = 0;
 let lockstepResyncPending = false;
 let lockstepResyncCooldownUntil = 0;
 let lockstepChecksumGraceTick = 0;
+let networkInterpolationStartedAt = performance.now();
 let lastDebug: DebugSnapshot = simulation.debugSnapshot();
 let accumulator = 0;
 let lastTime = performance.now();
@@ -1858,6 +1859,7 @@ function installLockstepState(state: SimulationState, notice?: string): void {
   lockstepChecksumGraceTick = state.tick + 20;
   networkView = null;
   accumulator = 0;
+  networkInterpolationStartedAt = performance.now();
   lastDebug = simulation.debugSnapshot();
   clientView = buildClientVisibilityView();
   clearWorldVisuals();
@@ -3245,7 +3247,7 @@ function updateVisuals(alpha: number, now: number): void {
     now,
     camera,
     innerHeight,
-    Math.max(1, cameraRig.distance / STRATEGIC_ZOOM_DISTANCE),
+    Math.pow(Math.max(1, cameraRig.distance / STRATEGIC_ZOOM_DISTANCE), 0.35),
     visualTick,
     !landingLobbyActive && !benchmarkActive,
   );
@@ -3465,7 +3467,7 @@ function updateTacticalWorldMarkers(visible: boolean): void {
   }
   tacticalIconRotation.copy(camera.quaternion);
   const strategicScale = Math.max(1, cameraRig.distance / STRATEGIC_ZOOM_DISTANCE);
-  const distantStructureScale = Math.pow(strategicScale, 0.72);
+  const distantStructureScale = Math.pow(strategicScale, 0.35);
   let obstacleCount = 0;
   const obstacleLimit = Math.min(1_024, clientView.state.obstacles.length);
   const smallestObstacleRadius = clientView.state.obstacles.reduce(
@@ -3526,11 +3528,12 @@ function updateTacticalWorldMarkers(visible: boolean): void {
   const resourceLimit = Math.min(1_024, clientView.resourceNodes.length);
   for (let index = 0; index < resourceLimit; index += 1) {
     const node = clientView.resourceNodes[index]!;
+    const knownClaim = node.claimedByStructureId !== null && clientView.visibleEntityIds.has(node.claimedByStructureId);
+    if (knownClaim && strategicScale >= 1.8) continue;
     tacticalIconPosition.set(node.x, 1.2, node.z);
-    tacticalIconScale.setScalar((13 + node.richness * 3) * strategicScale);
+    tacticalIconScale.setScalar((13 + node.richness * 3) * Math.pow(strategicScale, 0.35));
     tacticalIconMatrix.compose(tacticalIconPosition, tacticalIconRotation, tacticalIconScale);
     tacticalResourceIcons.setMatrixAt(resourceCount, tacticalIconMatrix);
-    const knownClaim = node.claimedByStructureId !== null && clientView.visibleEntityIds.has(node.claimedByStructureId);
     tacticalResourceIcons.setColorAt(resourceCount, tacticalIconColor.setHex(knownClaim ? 0x76633d : 0xf2bd5c));
     resourceCount += 1;
   }
@@ -5146,8 +5149,10 @@ function animate(now: number): void {
     }
   } else if (!paused && networkMode && !networkView && !pendingLockstepState && physicsWorld) {
     const ticksBehind = lockstepTargetTick - simulation.state.tick;
-    const tickBudget = ticksBehind > 6 ? 2 : 1;
-    for (let tick = 0; tick < Math.min(ticksBehind, tickBudget); tick += 1) tickSimulation();
+    if (ticksBehind > 0) {
+      tickSimulation();
+      networkInterpolationStartedAt = now;
+    }
     verifyLockstepFrame();
   }
   updateCamera(delta);
@@ -5157,7 +5162,7 @@ function animate(now: number): void {
     : networkMode
       ? networkView
         ? Math.min(1, Math.max(0, (now - networkViewReceivedAt) / networkViewInterpolationMs))
-        : 1
+        : Math.min(1, Math.max(0, (now - networkInterpolationStartedAt) / (FIXED_DT * 1_000)))
       : paused ? 1 : accumulator / FIXED_DT;
   updateVisuals(interpolationAlpha, now);
   renderPreparationMs = performance.now() - preparationStartedAt;
