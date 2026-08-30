@@ -43,6 +43,7 @@ const MAX_COMBAT_TARGET_RADIUS = Math.max(
 const MAX_SHIP_RADIUS = Math.max(...Object.values(SHIPS).map((definition) => definition.radius));
 const MAX_COMMAND_LEAD_TICKS = 40;
 const BUILD_RANGE = 360;
+const EXTRACTOR_BUILD_RANGE = 420;
 const PLACEMENT_PADDING = 8;
 const AI_THINK_TICKS = 40;
 const BASE_CONSTRUCTION_BUILD_POWER = 1;
@@ -366,7 +367,11 @@ export class GameSimulation {
       : undefined;
     const placementPosition = resourceNode ?? position;
     const upgradeSource = this.getResourceExtractorUpgradeSource(playerId, structureType, resourceNodeId);
-    const inStaticBuildRange = this.hasStaticBuildAnchorInRange(playerId, placementPosition);
+    const inStaticBuildRange = this.hasStaticBuildAnchorInRange(
+      playerId,
+      placementPosition,
+      isExtractor ? EXTRACTOR_BUILD_RANGE : BUILD_RANGE,
+    );
     const hasAssignedMobileBuilder = this.getAssignedMobileBuilders(playerId, builderUnitIds).length > 0;
     if (DEFENSIVE_STRUCTURE_TYPES.includes(structureType as (typeof DEFENSIVE_STRUCTURE_TYPES)[number])
       && !hasAssignedMobileBuilder) return false;
@@ -426,12 +431,13 @@ export class GameSimulation {
   private hasStaticBuildAnchorInRange(
     playerId: string,
     position: Readonly<{ x: number; z: number }>,
+    range = BUILD_RANGE,
   ): boolean {
     return this.state.structures.some((structure) =>
       structure.ownerPlayerId === playerId
         && structure.buildProgress >= 1
         && (structure.type === "commandCore" || structure.type === "fabricator")
-        && Math.hypot(structure.x - position.x, structure.z - position.z) <= BUILD_RANGE,
+        && Math.hypot(structure.x - position.x, structure.z - position.z) <= range,
     );
   }
 
@@ -2111,6 +2117,9 @@ export function createCombatScenario(options: ScenarioOptions = {}): GameSimulat
       const baseZ = tunnelSpawn?.z ?? outwardZ * baseRadius;
       const yaw = Math.atan2(inwardX, inwardZ);
       const clusterScale = Math.min(1.2, Math.max(0.9, mapScale));
+      // Static construction range does not scale with map size. Keep each
+      // player's two initial expansion nodes reachable from their Command Core.
+      const expansionScale = Math.min(1, clusterScale);
       const rally = { x: baseX + inwardX * 145 * clusterScale, z: baseZ + inwardZ * 145 * clusterScale };
       const safeNode = addNode(
         baseX + inwardX * 105 * clusterScale + tangentX * 55 * clusterScale,
@@ -2118,10 +2127,10 @@ export function createCombatScenario(options: ScenarioOptions = {}): GameSimulat
         density.richness,
       );
       for (let localNode = 1; localNode < STARTING_RESOURCE_NODES_PER_PLAYER; localNode += 1) {
-        const tangent = (localNode === 1 ? -1 : 1) * 220 * clusterScale;
+        const tangent = (localNode === 1 ? -1 : 1) * 220 * expansionScale;
         addNode(
-          baseX + inwardX * 260 * clusterScale + tangentX * tangent,
-          baseZ + inwardZ * 260 * clusterScale + tangentZ * tangent,
+          baseX + inwardX * 260 * expansionScale + tangentX * tangent,
+          baseZ + inwardZ * 260 * expansionScale + tangentZ * tangent,
           density.richness,
         );
       }

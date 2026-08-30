@@ -803,7 +803,16 @@ export class Match implements DurableObject {
     }
     const accepted: GameCommand[] = [];
     const outcomes = message.commands.map((command) => {
-      const authoritative = { ...command, playerId } as GameCommand;
+      // The command must have enough lead time not only to reach the authority,
+      // but also to be rebroadcast to every lockstep mirror before execution.
+      // Use the sender's observed tick lag as a conservative return-trip estimate.
+      const observedLagTicks = Math.max(0, this.simulation!.state.tick - message.clientTick);
+      const deliveryLeadTicks = Math.min(32, Math.max(4, observedLagTicks + 4));
+      const requestedTick = Math.max(
+        command.requestedTick,
+        this.simulation!.state.tick + deliveryLeadTicks,
+      );
+      const authoritative = { ...command, playerId, requestedTick } as GameCommand;
       const result = this.replayRecorder
         ? this.replayRecorder.submitCommand(authoritative)
         : this.simulation!.submitCommand(authoritative);
