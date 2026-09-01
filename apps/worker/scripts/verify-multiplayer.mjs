@@ -1,4 +1,5 @@
 const authority = process.env.VOIDFRONT_AUTHORITY ?? "ws://127.0.0.1:8787";
+const lockstepVersion = 2;
 const authorityBase = new URL(authority);
 const authorityBasePath = authorityBase.pathname.replace(/\/+$/, "");
 const matchId = `verify-${Date.now()}`;
@@ -79,7 +80,9 @@ class Peer {
   }
 
   async connect() {
-    const welcome = await this.open({ type: "hello", name: this.name, ...(this.credentials ?? {}) }, "welcome");
+    const welcome = await this.open({
+      type: "hello", name: this.name, lockstepVersion, ...(this.credentials ?? {}),
+    }, "welcome");
     this.credentials = { playerId: welcome.playerId, reconnectToken: welcome.reconnectToken };
     return welcome;
   }
@@ -136,7 +139,7 @@ class SpectatorPeer extends Peer {
 
   async connect() {
     const welcome = await this.open({
-      type: "spectate",
+      type: "spectate", lockstepVersion,
       name: this.name,
       mode: "team",
       token: this.token,
@@ -295,7 +298,7 @@ try {
 
   unauthorizedSpectator = new Peer("Unauthorized Observer");
   const unauthorizedResult = await unauthorizedSpectator.open({
-    type: "spectate", name: "Unauthorized Observer", mode: "replay",
+    type: "spectate", name: "Unauthorized Observer", mode: "replay", lockstepVersion,
   }, "error");
   if (unauthorizedResult.code !== "spectator_unauthorized") {
     throw new Error("Unauthenticated live omniscient spectator was not rejected");

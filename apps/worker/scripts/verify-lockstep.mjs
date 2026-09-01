@@ -1,4 +1,5 @@
 const authority = process.env.VOIDFRONT_AUTHORITY ?? "ws://127.0.0.1:8787";
+const lockstepVersion = 2;
 const base = new URL(authority);
 const basePath = base.pathname.replace(/\/+$/, "");
 const matchId = `lockstep-${Date.now()}`;
@@ -32,8 +33,9 @@ class Peer {
         waiter.resolve(message);
       } else this.queue.push(message);
     });
-    await this.waitFor((message) => message.type === "hello_required");
-    this.send({ type: "hello", name: this.name, ...(this.credentials ?? {}) });
+    const hello = await this.waitFor((message) => message.type === "hello_required");
+    if (hello.lockstepVersion !== lockstepVersion) throw new Error("Authority advertised incompatible lockstep rules");
+    this.send({ type: "hello", name: this.name, lockstepVersion, ...(this.credentials ?? {}) });
     const welcome = await this.waitFor((message) => message.type === "welcome");
     this.credentials = { playerId: welcome.playerId, reconnectToken: welcome.reconnectToken };
     return welcome;
@@ -122,6 +124,30 @@ try {
   if (verifiedFrame.checksum !== wingFrame.checksum) throw new Error("Frame checksums differed between peers");
   if (verifiedFrame.checksum !== 0) throw new Error("Relay frame unexpectedly carried an authoritative checksum");
 
+  const syncTick = verifiedFrame.tick - verifiedFrame.tick % 20;
+  host.send({ type: "checksum", tick: syncTick, checksum: 0x11111111 });
+  wing.send({ type: "checksum", tick: syncTick, checksum: 0x22222222 });
+  const hostDesync = await host.waitFor((message) => message.type === "error" && message.code === "lockstep_desync");
+  const wingDesync = await wing.waitFor((message) => message.type === "error" && message.code === "lockstep_desync");
+  if (!hostDesync.message.includes(String(syncTick)) || !wingDesync.message.includes(String(syncTick))) {
+    throw new Error("Lockstep mismatch did not identify the divergent tick");
+  }
+  const hostAutoRecovery = await host.waitFor(
+    (message) => message.type === "lockstep_state" && message.reason === "checksum",
+  );
+  const wingAutoRecovery = await wing.waitFor(
+    (message) => message.type === "lockstep_state" && message.reason === "checksum",
+  );
+  assertLockstepState(hostAutoRecovery, "Host automatic recovery");
+  assertLockstepState(wingAutoRecovery, "Wing automatic recovery");
+  if (JSON.stringify(hostAutoRecovery.state) !== JSON.stringify(wingAutoRecovery.state)) {
+    throw new Error("Peers did not receive the same automatic recovery bootstrap");
+  }
+  await host.waitFor((message) => message.type === "lockstep_commands");
+  await wing.waitFor((message) => message.type === "lockstep_commands");
+  await host.waitFor((message) => message.type === "lockstep_frame" && message.tick >= verifiedFrame.tick);
+  await wing.waitFor((message) => message.type === "lockstep_frame" && message.tick >= verifiedFrame.tick);
+
   host.send({ type: "request_snapshot", reason: "manual" });
   const recovery = await host.waitFor((message) => message.type === "lockstep_state" && message.reason === "manual");
   assertLockstepState(recovery, "Recovery state");
@@ -164,6 +190,7 @@ try {
     verifiedTick: verifiedFrame.tick,
     checksum: verifiedFrame.checksum,
     commandBroadcast: "passed",
+    automaticDesyncRecovery: "passed",
     recovery: "bootstrap-plus-command-journal passed",
     reconnect: "passed",
   }));

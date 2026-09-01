@@ -15,6 +15,7 @@ import {
 } from "@space-rts/game-core";
 import {
   DEFAULT_LOBBY_SETTINGS,
+  LOCKSTEP_PROTOCOL_VERSION,
   MAX_REPLAY_BYTES,
   MAX_PLAYERS,
   REPLAY_CHUNK_BYTES,
@@ -105,6 +106,10 @@ const REPLAY_CHECKPOINT_INTERVAL_TICKS = SIMULATION_HZ * 5;
 // pulses contain no world data; the expensive traffic was resync snapshots.
 const RELAY_FRAME_BATCH_TICKS = 1;
 const RELAY_SYNC_INTERVAL_TICKS = SIMULATION_HZ;
+// Spring suppresses repeated sync warnings for several hundred frames. A much
+// shorter window is enough here because recovery is automatic, but it still
+// prevents a broken peer from causing a snapshot storm while it is replaying.
+const RELAY_RECOVERY_COOLDOWN_TICKS = SIMULATION_HZ * 4;
 const MATCH_METADATA_KEY = "match:metadata:v2";
 const LEGACY_MATCH_KEY = "match";
 const CHECKPOINT_CHUNK_PREFIX = "match:checkpoint:v2:";
@@ -164,6 +169,7 @@ export class Match implements DurableObject {
   private readonly relaySequences = new Map<string, number>();
   private readonly syncReports = new Map<number, Map<string, number>>();
   private readonly peerReportedTicks = new Map<string, number>();
+  private lastRecoveryTick = -RELAY_RECOVERY_COOLDOWN_TICKS;
   private relayIntervalMs = 1000 / SIMULATION_HZ;
   private relayClockAt = 0;
   private relayClockAccumulatorMs = 0;
@@ -253,7 +259,12 @@ export class Match implements DurableObject {
     const server = pair[1];
     this.ctx.acceptWebSocket(server);
     server.serializeAttachment({ playerId: null } satisfies SocketAttachment);
-    this.send(server, { type: "hello_required", matchId: this.lobby.matchId, lobby: this.publicLobby() });
+    this.send(server, {
+      type: "hello_required",
+      matchId: this.lobby.matchId,
+      lobby: this.publicLobby(),
+      lockstepVersion: LOCKSTEP_PROTOCOL_VERSION,
+    });
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -273,12 +284,20 @@ export class Match implements DurableObject {
         this.fail(socket, "already_authenticated", "This connection already has a match role");
         return;
       }
+      if (message.lockstepVersion !== LOCKSTEP_PROTOCOL_VERSION) {
+        this.fail(socket, "client_update_required", "Game rules changed; reload the page before joining this match");
+        return;
+      }
       this.handleHello(socket, message);
       return;
     }
     if (message.type === "spectate") {
       if (attachment.playerId || attachment.spectatorId) {
         this.fail(socket, "already_authenticated", "This connection already has a match role");
+        return;
+      }
+      if (message.lockstepVersion !== LOCKSTEP_PROTOCOL_VERSION) {
+        this.fail(socket, "client_update_required", "Game rules changed; reload the page before joining this match");
         return;
       }
       this.handleSpectate(socket, message);
@@ -532,7 +551,7 @@ export class Match implements DurableObject {
         });
         return;
       case "request_snapshot":
-        if (this.simulation && message.reason !== "checksum") {
+        if (this.simulation) {
           this.sendSnapshot(socket, message.reason);
           this.sendRelayHistory(socket);
         }
@@ -747,6 +766,8 @@ export class Match implements DurableObject {
     this.relayPlayerStates = [];
     this.relaySequences.clear();
     this.syncReports.clear();
+    this.peerReportedTicks.clear();
+    this.lastRecoveryTick = -RELAY_RECOVERY_COOLDOWN_TICKS;
     this.invalidatePlayerViews();
     this.lobby.phase = "playing";
     this.broadcastLockstepState("start");
@@ -945,18 +966,56 @@ export class Match implements DurableObject {
     if (tick <= 0 || tick > this.relayTick || tick % RELAY_SYNC_INTERVAL_TICKS !== 0) return;
     const reports = this.syncReports.get(tick) ?? new Map<string, number>();
     reports.set(playerId, checksum);
-    this.peerReportedTicks.set(playerId, tick);
+    this.peerReportedTicks.set(playerId, Math.max(this.peerReportedTicks.get(playerId) ?? 0, tick));
     this.syncReports.set(tick, reports);
     const connectedHumans = this.lobby.slots.filter((slot) => !slot.isAi && slot.connected);
     if (connectedHumans.length > 1 && connectedHumans.every((slot) => reports.has(slot.playerId))) {
-      if (new Set(reports.values()).size > 1) {
+      const checksumGroups = new Map<number, string[]>();
+      for (const slot of connectedHumans) {
+        const peerChecksum = reports.get(slot.playerId)!;
+        const members = checksumGroups.get(peerChecksum) ?? [];
+        members.push(slot.playerId);
+        checksumGroups.set(peerChecksum, members);
+      }
+      if (checksumGroups.size > 1) {
+        const orderedGroups = [...checksumGroups.entries()].sort((left, right) => {
+          const countDifference = right[1].length - left[1].length;
+          return countDifference !== 0 ? countDifference : left[0] - right[0];
+        });
+        const majority = orderedGroups[0]!;
+        const hasStrictMajority = majority[1].length > connectedHumans.length / 2;
+        // A dedicated Spring server uses the checksum held by most players as
+        // its baseline. We can go one step further and rebuild only that
+        // minority from our immutable bootstrap and ordered command journal.
+        // With a tied result (especially 1v1), there is no trustworthy peer,
+        // so every client is rebuilt from the common deterministic history.
+        const recoveryIds = hasStrictMajority
+          ? new Set(connectedHumans
+            .map((slot) => slot.playerId)
+            .filter((id) => reports.get(id) !== majority[0]))
+          : new Set(connectedHumans.map((slot) => slot.playerId));
+        if (tick - this.lastRecoveryTick < RELAY_RECOVERY_COOLDOWN_TICKS) {
+          this.syncReports.delete(tick);
+          return;
+        }
+        this.lastRecoveryTick = tick;
+        for (const id of recoveryIds) {
+          this.peerReportedTicks.set(id, this.simulation?.state.tick ?? 0);
+        }
         for (const candidate of this.ctx.getWebSockets()) {
           const id = this.attachment(candidate).playerId;
-          if (id && reports.has(id)) {
-            this.fail(candidate, "lockstep_desync", `Simulation mismatch detected at tick ${tick}`);
+          if (id && recoveryIds.has(id)) {
+            const recoveryScope = hasStrictMajority ? "this peer" : "all peers";
+            this.fail(candidate, "lockstep_desync", `Simulation mismatch at tick ${tick}; rebuilding ${recoveryScope}`);
+            this.sendSnapshot(candidate, "checksum");
+            this.sendRelayHistory(candidate);
           }
         }
+        this.syncReports.clear();
+        this.adjustRelayPacing();
+        return;
       }
+      this.syncReports.delete(tick);
     }
     for (const reportTick of this.syncReports.keys()) {
       if (reportTick < this.relayTick - RELAY_SYNC_INTERVAL_TICKS * 4) this.syncReports.delete(reportTick);
@@ -968,7 +1027,10 @@ export class Match implements DurableObject {
     const connected = this.lobby.slots.filter((slot) => !slot.isAi && slot.connected);
     if (connected.length === 0) return;
     const worstLag = connected.reduce((largest, slot) => {
-      const reported = this.peerReportedTicks.get(slot.playerId) ?? this.relayTick;
+      // A peer that has not produced a sync response is not assumed healthy.
+      // Starting it at the bootstrap tick makes the relay naturally slow down
+      // while a joining or recovering browser catches up.
+      const reported = this.peerReportedTicks.get(slot.playerId) ?? this.simulation?.state.tick ?? 0;
       return Math.max(largest, this.relayTick - reported);
     }, 0);
     const intervalMs = worstLag > SIMULATION_HZ ? 100

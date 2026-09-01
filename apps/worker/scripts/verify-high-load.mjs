@@ -1,4 +1,5 @@
 const authority = process.env.VOIDFRONT_AUTHORITY ?? "ws://127.0.0.1:8788";
+const lockstepVersion = 2;
 const unitsPerPlayer = Number(process.env.VOIDFRONT_SOAK_UNITS ?? 400);
 const playerCount = Number(process.env.VOIDFRONT_SOAK_PLAYERS ?? 2);
 const durationMs = Number(process.env.VOIDFRONT_SOAK_DURATION_MS ?? 180_000);
@@ -74,7 +75,7 @@ class Peer {
       if (!this.expectedClose) this.unexpectedClose = { code: -1, reason: "websocket error" };
     });
     await this.waitFor((message) => message.type === "hello_required", 60_000);
-    this.send({ type: "hello", name: this.name, ...(this.credentials ?? {}) });
+    this.send({ type: "hello", name: this.name, lockstepVersion, ...(this.credentials ?? {}) });
     const welcome = await this.waitFor((message) => message.type === "welcome", 60_000);
     this.credentials = { playerId: welcome.playerId, reconnectToken: welcome.reconnectToken };
     return welcome;

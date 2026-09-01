@@ -103,6 +103,8 @@ export interface PlanarDynamicCircleState {
 
 export interface PlanarCirclePhysicsWorld {
   readonly bodyCount: number;
+  /** Clears solver, body, contact, and allocation history for a new deterministic timeline. */
+  reset(): void;
   /**
    * Makes the Box3D world match an authoritative simulation snapshot.
    * Input order is ignored; new bodies are always created in stable ID order.
@@ -143,28 +145,43 @@ export function createPlanarCirclePhysicsWorld(runtime: PhysicsRuntime): PlanarC
 
 class WasmPlanarCirclePhysicsWorld implements PlanarCirclePhysicsWorld {
   readonly #module: Box3DModule;
-  readonly #worldId: b3WorldId;
+  #worldId: b3WorldId;
   readonly #bodies = new Map<string, BodyRecord>();
   #sortedDynamicBodies: readonly BodyRecord[] | null = null;
   #disposed = false;
 
   constructor(module: Box3DModule) {
     this.#module = module;
-    const worldDefinition = module.b3DefaultWorldDef();
+    this.#worldId = this.#createWorld();
+  }
+
+  #createWorld(): b3WorldId {
+    const worldDefinition = this.#module.b3DefaultWorldDef();
     worldDefinition.gravity = [0, 0, 0];
     worldDefinition.enableContinuous = true;
     worldDefinition.enableSleep = false;
     // A single Box3D worker avoids scheduler-dependent solver ordering.
     worldDefinition.workerCount = 1;
-    this.#worldId = module.b3CreateWorld(worldDefinition);
+    const worldId = this.#module.b3CreateWorld(worldDefinition);
     // Authoritative snapshots overwrite body transforms and velocities before
     // every step, so cached impulses would only add hidden history and work.
-    module.b3World_EnableWarmStarting(this.#worldId, false);
+    this.#module.b3World_EnableWarmStarting(worldId, false);
+    return worldId;
   }
 
   get bodyCount(): number {
     this.#assertActive();
     return this.#bodies.size;
+  }
+
+  reset(): void {
+    this.#assertActive();
+    for (const id of [...this.#bodies.keys()].sort(compareStrings)) {
+      this.#destroyBody(id);
+    }
+    this.#module.b3DestroyWorld(this.#worldId);
+    this.#worldId = this.#createWorld();
+    this.#sortedDynamicBodies = null;
   }
 
   syncBodies(bodies: PlanarCircleBodies): void {

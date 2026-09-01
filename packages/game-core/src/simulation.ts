@@ -151,6 +151,10 @@ export class GameSimulation {
   ) {
     this.state = state;
     this.physicsWorld = physicsWorld ?? null;
+    // A restored snapshot begins a new deterministic timeline. Box2D keeps
+    // contact and allocator history outside our serialized state, so it must
+    // not leak in from a menu battle, replay seek, or earlier multiplayer run.
+    this.physicsWorld?.reset();
     this.productionRateMultiplier = Math.max(1, productionRateMultiplier);
     for (const structure of this.state.structures) {
       structure.repeatProduction ??= false;
@@ -180,6 +184,7 @@ export class GameSimulation {
   }
 
   attachPhysicsWorld(physicsWorld: PlanarCirclePhysicsWorld): void {
+    physicsWorld.reset();
     this.physicsWorld = physicsWorld;
     this.physicsBodyCount = 0;
   }

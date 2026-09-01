@@ -4,6 +4,7 @@ import {
   createPlanarCirclePhysicsWorld,
   loadPhysicsRuntime,
   runPhysicsProbe,
+  type PhysicsRuntime,
   type PlanarCirclePhysicsWorld,
 } from "@space-rts/box3d-wasm";
 import {
@@ -49,6 +50,7 @@ import {
 } from "@space-rts/game-core";
 import {
   MAX_REPLAY_BYTES,
+  LOCKSTEP_PROTOCOL_VERSION,
   parseServerMessage,
   type ClientMessage,
   type LobbySettings,
@@ -1053,7 +1055,15 @@ function createPlayableScenario(): ReturnType<typeof createCombatScenario> {
 
 let simulation = createPlayableScenario();
 let physicsWorld: PlanarCirclePhysicsWorld | null = null;
+let physicsRuntime: PhysicsRuntime | null = null;
 let pendingLockstepState: { state: SimulationState; notice?: string; focusStartingBase: boolean } | null = null;
+let pendingLockstepCommands: GameCommand[] = [];
+let pendingLockstepPlayerStates: Array<{
+  tick: number;
+  playerId: string;
+  state: "playing" | "disconnected";
+}> = [];
+let pendingLockstepTargetTick = 0;
 let lockstepTargetTick = 0;
 let lockstepTargetChecksum = 0;
 let lockstepResyncPending = false;
@@ -1065,6 +1075,13 @@ const sharedSimulationTrialEnabled = new URLSearchParams(location.search).get("s
 let sharedSimulationWorker: Worker | null = null;
 let sharedRenderReader: SharedRenderReader | null = null;
 let sharedSimulationBuffers: SharedRenderBuffers | null = null;
+
+function replacePhysicsWorld(): PlanarCirclePhysicsWorld {
+  if (!physicsRuntime) throw new Error("Box3D runtime is not ready");
+  physicsWorld?.dispose();
+  physicsWorld = createPlanarCirclePhysicsWorld(physicsRuntime);
+  return physicsWorld;
+}
 
 function initializeSharedSimulationTrial(state: SimulationState): void {
   sharedSimulationWorker?.terminate();
@@ -1117,6 +1134,7 @@ for (const ship of simulation.state.ships) previousTransforms.set(ship.id, captu
 loadPhysicsRuntime()
   .then((runtime) => {
     const probe = runPhysicsProbe(runtime);
+    physicsRuntime = runtime;
     physicsWorld = createPlanarCirclePhysicsWorld(runtime);
     if (replayPlayer?.replay.physicsBackend !== "deterministic-fallback") {
       simulation.attachPhysicsWorld(physicsWorld);
@@ -1129,8 +1147,29 @@ loadPhysicsRuntime()
     }
     if (pendingLockstepState) {
       const pending = pendingLockstepState;
+      const pendingCommands = pendingLockstepCommands;
+      const pendingPlayerStates = pendingLockstepPlayerStates;
+      const pendingTargetTick = pendingLockstepTargetTick;
       pendingLockstepState = null;
+      pendingLockstepCommands = [];
+      pendingLockstepPlayerStates = [];
+      pendingLockstepTargetTick = 0;
       installLockstepState(pending.state, pending.notice, pending.focusStartingBase);
+      for (const command of pendingCommands) {
+        simulation.submitCommand(command);
+      }
+      sharedSimulationWorker?.postMessage({ type: "commands", commands: pendingCommands });
+      for (const transition of pendingPlayerStates) {
+        while (simulation.state.tick < transition.tick) simulation.step();
+        const player = simulation.state.players.find((candidate) => candidate.id === transition.playerId);
+        if (player && player.state !== "defeated") player.state = transition.state;
+        sharedSimulationWorker?.postMessage({ type: "player_state", ...transition });
+      }
+      simulation.refreshChecksum();
+      lockstepTargetTick = Math.max(lockstepTargetTick, pendingTargetTick, simulation.state.tick);
+      sharedSimulationWorker?.postMessage({ type: "advance", targetTick: lockstepTargetTick });
+      lastDebug = simulation.debugSnapshot();
+      installClientView(buildClientVisibilityView(), false);
     }
   })
   .catch((error: unknown) => {
@@ -2150,6 +2189,10 @@ function connectToMatch(matchId: string, pilotName: string, role: RequestedNetwo
 function handleServerMessage(message: ServerMessage): void {
   switch (message.type) {
     case "hello_required": {
+      if (message.lockstepVersion !== LOCKSTEP_PROTOCOL_VERSION) {
+        showNetworkError("This page uses different game rules from the match authority. Reload both players before joining.");
+        return;
+      }
       if (requestedNetworkRole === "team") {
         const stored = readSpectatorCredentials(networkMatchId);
         const reconnecting = stored?.token === spectatorToken;
@@ -2157,6 +2200,7 @@ function handleServerMessage(message: ServerMessage): void {
           type: "spectate",
           name: networkPilotName,
           mode: "team",
+          lockstepVersion: LOCKSTEP_PROTOCOL_VERSION,
           token: spectatorToken,
           ...(reconnecting && stored.spectatorId ? { spectatorId: stored.spectatorId } : {}),
           ...(reconnecting && stored.reconnectToken ? { reconnectToken: stored.reconnectToken } : {}),
@@ -2164,13 +2208,17 @@ function handleServerMessage(message: ServerMessage): void {
         return;
       }
       if (requestedNetworkRole === "replay") {
-        sendNetworkMessage({ type: "spectate", name: networkPilotName, mode: "replay" });
+        sendNetworkMessage({
+          type: "spectate", name: networkPilotName, mode: "replay",
+          lockstepVersion: LOCKSTEP_PROTOCOL_VERSION,
+        });
         return;
       }
       const stored = readMatchCredentials(networkMatchId);
       sendNetworkMessage({
         type: "hello",
         name: networkPilotName,
+        lockstepVersion: LOCKSTEP_PROTOCOL_VERSION,
         ...(stored?.playerId ? { playerId: stored.playerId } : {}),
         ...(stored?.reconnectToken ? { reconnectToken: stored.reconnectToken } : {}),
       });
@@ -2232,6 +2280,9 @@ function handleServerMessage(message: ServerMessage): void {
           notice: message.reason === "checksum" ? "LOCKSTEP RESYNCHRONIZED" : "LOCKSTEP SYNCHRONIZED",
           focusStartingBase: message.reason === "start",
         };
+        pendingLockstepCommands = [];
+        pendingLockstepPlayerStates = [];
+        pendingLockstepTargetTick = message.tick;
         return;
       }
       installLockstepState(
@@ -2245,12 +2296,23 @@ function handleServerMessage(message: ServerMessage): void {
       }
       return;
     case "lockstep_commands":
+      if (pendingLockstepState) {
+        pendingLockstepCommands.push(...message.commands);
+        return;
+      }
       for (const command of message.commands) simulation.submitCommand(command);
       sharedSimulationWorker?.postMessage({ type: "commands", commands: message.commands });
       return;
     case "lockstep_player_state": {
       serverTick = Math.max(serverTick, message.tick);
-      if (pendingLockstepState || networkView) return;
+      if (pendingLockstepState) {
+        pendingLockstepPlayerStates.push({
+          tick: message.tick, playerId: message.playerId, state: message.state,
+        });
+        pendingLockstepTargetTick = Math.max(pendingLockstepTargetTick, message.tick);
+        return;
+      }
+      if (networkView) return;
       while (simulation.state.tick < message.tick) tickSimulation();
       const player = simulation.state.players.find((candidate) => candidate.id === message.playerId);
       if (player && player.state !== "defeated") player.state = message.state;
@@ -2261,7 +2323,11 @@ function handleServerMessage(message: ServerMessage): void {
     }
     case "lockstep_frame":
       serverTick = Math.max(serverTick, message.tick);
-      if (pendingLockstepState || networkView) return;
+      if (pendingLockstepState) {
+        pendingLockstepTargetTick = Math.max(pendingLockstepTargetTick, message.tick);
+        return;
+      }
+      if (networkView) return;
       if (message.tick >= lockstepTargetTick) {
         lockstepTargetTick = message.tick;
         lockstepTargetChecksum = message.checksum;
@@ -2339,7 +2405,7 @@ function focusCameraOnLocalBase(): boolean {
 }
 
 function installLockstepState(state: SimulationState, notice?: string, focusStartingBase = false): void {
-  simulation = restoreSimulation(state, physicsWorld ?? undefined);
+  simulation = restoreSimulation(state, replacePhysicsWorld());
   initializeSharedSimulationTrial(state);
   const localPlayer = state.players.find((player) => player.id === localPlayerId);
   if (localPlayer) commandSequence = Math.max(commandSequence, localPlayer.lastCommandSequence);
@@ -2364,6 +2430,7 @@ function installLockstepState(state: SimulationState, notice?: string, focusStar
     ? "DETERMINISTIC LOCKSTEP // COMMAND YOUR FLEET"
     : "LOCKSTEP OBSERVER // LOCAL SIMULATION";
   if (notice) {
+    showNetworkError("");
     eventLines = [`<b>NET</b> ${escapeHtml(notice.toLowerCase())}`];
     showToast(notice);
   }

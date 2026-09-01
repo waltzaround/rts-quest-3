@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  box3d.js@0.1.1:
+    hash: 697b007e4edba35fd5d62526a38bb2bbc67d4a824dcaae9cf92abd5319d64eeb
+    path: patches/box3d.js@0.1.1.patch
+
 importers:
 
   .:
@@ -69,7 +74,7 @@ importers:
     dependencies:
       box3d.js:
         specifier: ^0.1.1
-        version: 0.1.1(patch_hash=js4bmhiwjr64yioidwtxwnri7a)
+        version: 0.1.1(patch_hash=697b007e4edba35fd5d62526a38bb2bbc67d4a824dcaae9cf92abd5319d64eeb)
 
   packages/game-core:
     dependencies:
@@ -1366,7 +1371,7 @@ snapshots:
 
   blake3-wasm@2.1.5: {}
 
-  box3d.js@0.1.1(patch_hash=js4bmhiwjr64yioidwtxwnri7a): {}
+  box3d.js@0.1.1(patch_hash=697b007e4edba35fd5d62526a38bb2bbc67d4a824dcaae9cf92abd5319d64eeb): {}
 
   chai@6.2.2: {}
 

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createPlanarCirclePhysicsWorld, loadPhysicsRuntime } from "@space-rts/box3d-wasm";
 import { createCombatScenario, restoreSimulation, type GameCommand } from "../src";
 
 describe("deterministic lockstep mirror", () => {
@@ -51,6 +52,36 @@ describe("deterministic lockstep mirror", () => {
       authority.step();
       recovered.step();
       expect(recovered.state.checksum).toBe(authority.state.checksum);
+    }
+  });
+
+  it("clears different WASM histories before restoring the same lockstep state", async () => {
+    const runtime = await loadPhysicsRuntime();
+    const firstWorld = createPlanarCirclePhysicsWorld(runtime);
+    const secondWorld = createPlanarCirclePhysicsWorld(runtime);
+    try {
+      const firstHistory = restoreSimulation(createCombatScenario({
+        seed: 0x1111, startingFleet: true, fightersPerTeam: 24, bombersPerTeam: 8,
+      }).snapshot(), firstWorld);
+      const secondHistory = restoreSimulation(createCombatScenario({
+        seed: 0x2222, startingFleet: true, fightersPerTeam: 8, bombersPerTeam: 2,
+      }).snapshot(), secondWorld);
+      firstHistory.stepMany(180);
+      secondHistory.stepMany(45);
+      const bootstrap = createCombatScenario({
+        seed: 0xdecafbad, startingFleet: true, fightersPerTeam: 32, bombersPerTeam: 10,
+        enemyCommander: false,
+      }).snapshot();
+      const first = restoreSimulation(bootstrap, firstWorld);
+      const second = restoreSimulation(bootstrap, secondWorld);
+      for (let tick = 0; tick < 500; tick += 1) {
+        first.step();
+        second.step();
+        expect(second.state.checksum, `WASM checksum at tick ${first.state.tick}`).toBe(first.state.checksum);
+      }
+    } finally {
+      firstWorld.dispose();
+      secondWorld.dispose();
     }
   });
 });

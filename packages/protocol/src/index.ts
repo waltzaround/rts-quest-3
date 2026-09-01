@@ -34,6 +34,8 @@ const hasOwn = (record: object, key: unknown): key is string =>
   typeof key === "string" && Object.prototype.hasOwnProperty.call(record, key);
 
 export const MAX_PLAYERS = 8;
+/** Bump whenever deterministic rules, unit data, or the lockstep bootstrap contract changes. */
+export const LOCKSTEP_PROTOCOL_VERSION = 2;
 export const MAX_COMMAND_BATCH = 32;
 export const MAX_FLEET_COMMAND_UNITS = 2_048;
 export const MAX_MESSAGE_BYTES = 64 * 1024;
@@ -101,8 +103,8 @@ export interface LobbyState {
 }
 
 export type ClientMessage =
-  | { type: "hello"; playerId?: string; name: string; reconnectToken?: string }
-  | { type: "spectate"; name: string; mode: SpectatorMode; token?: string; spectatorId?: string; reconnectToken?: string }
+  | { type: "hello"; playerId?: string; name: string; reconnectToken?: string; lockstepVersion: number }
+  | { type: "spectate"; name: string; mode: SpectatorMode; token?: string; spectatorId?: string; reconnectToken?: string; lockstepVersion: number }
   | { type: "ping"; clientTime: number }
   | { type: "request_snapshot"; reason: "join" | "reconnect" | "checksum" | "manual" }
   | { type: "set_ready"; ready: boolean }
@@ -143,7 +145,7 @@ export interface CommandOutcome {
 }
 
 export type ServerMessage =
-  | { type: "hello_required"; matchId: string; lobby: LobbyState }
+  | { type: "hello_required"; matchId: string; lobby: LobbyState; lockstepVersion: number }
   | { type: "welcome"; playerId: string; reconnectToken: string; lobby: LobbyState; tick: number }
   | { type: "spectator_authorized"; token: string; mode: "team"; teamId: number }
   | { type: "spectator_welcome"; spectatorId: string; reconnectToken: string | null; mode: SpectatorMode; teamId: number | null; lobby: LobbyState; tick: number }
@@ -339,9 +341,11 @@ export function parseClientMessage(raw: string): ClientMessage | null {
       return isString(value.name, 32)
         && (value.playerId === undefined || isString(value.playerId, 80))
         && (value.reconnectToken === undefined || isString(value.reconnectToken, 160))
+        && (value.lockstepVersion === undefined || isInteger(value.lockstepVersion))
         ? value as ClientMessage : null;
     case "spectate": {
-      if (!isString(value.name, 32)) return null;
+      if (!isString(value.name, 32)
+        || (value.lockstepVersion !== undefined && !isInteger(value.lockstepVersion))) return null;
       if (value.mode === "replay") {
         return value.token === undefined && value.spectatorId === undefined && value.reconnectToken === undefined
           ? value as ClientMessage : null;
@@ -452,7 +456,9 @@ export function parseServerMessage(raw: string): ServerMessage | null {
       ? value as ServerMessage : null;
   }
   if (value.type === "hello_required") {
-    return isString(value.matchId, 80) && isLobbyState(value.lobby) ? value as ServerMessage : null;
+    return isString(value.matchId, 80) && isLobbyState(value.lobby)
+      && (value.lockstepVersion === undefined || isInteger(value.lockstepVersion))
+      ? value as ServerMessage : null;
   }
   if (value.type === "welcome") {
     return isString(value.playerId, 80) && isString(value.reconnectToken, 160)
