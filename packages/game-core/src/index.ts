@@ -1,9 +1,12 @@
 export {
   ALL_SHIP_CLASSES,
   BUILDABLE_STRUCTURE_TYPES,
+  DAMAGE_PROFILE_MULTIPLIERS,
+  calculateProfiledDamage,
   DEFENSIVE_STRUCTURE_TYPES,
   FIGHTER_SQUAD_OFFSETS,
   getFighterSquadMemberPose,
+  getWeaponArmorMultiplier,
   SHIPS,
   SHIP_TURRET_SCALES,
   SHIP_ECONOMY,

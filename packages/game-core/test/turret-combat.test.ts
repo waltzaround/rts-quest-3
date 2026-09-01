@@ -66,11 +66,13 @@ describe("moving multi-turret combat", () => {
     const fired = snapshot.events.find((event) => event.type === "weaponFired" && event.turretId === turret.id);
     expect(fired?.type).toBe("weaponFired");
     if (!fired || fired.type !== "weaponFired") throw new Error("Beam did not fire");
-    expect(snapshot.events).toContainEqual({
-      type: "hit", tick: snapshot.tick, projectileId: fired.projectileId, targetId: target.id, damage: WEAPONS.beam.damage,
-    });
+    expect(snapshot.events).toContainEqual(expect.objectContaining({
+      type: "hit", tick: snapshot.tick, projectileId: fired.projectileId, targetId: target.id,
+      rawDamage: WEAPONS.beam.damage, shieldDamage: WEAPONS.beam.damage * WEAPONS.beam.shieldMultiplier,
+      hullDamage: 0,
+    }));
     expect(simulation.state.projectiles.some((projectile) => projectile.id === fired.projectileId)).toBe(false);
-    expect(target.shields).toBe(shieldBefore - WEAPONS.beam.damage);
+    expect(target.shields).toBe(shieldBefore - WEAPONS.beam.damage * WEAPONS.beam.shieldMultiplier);
   });
 
   it("keeps fighter squadrons faster than bombers", () => {

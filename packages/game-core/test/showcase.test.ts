@@ -10,15 +10,15 @@ describe("battle showcase scenario", () => {
     expect(first.state.players).toHaveLength(4);
     expect(first.state.teams).toHaveLength(2);
     expect(first.state.aiPlayerIds).toHaveLength(4);
-    expect(first.state.ships).toHaveLength(144);
+    expect(first.state.ships).toHaveLength(148);
     const visibleCraftCount = first.state.ships.reduce(
       (total, ship) => total + (ship.class === "fighter" ? 5 : 1),
       0,
     );
-    expect(visibleCraftCount).toBe(288);
+    expect(visibleCraftCount).toBe(292);
     expect(new Set(first.state.ships.map((ship) => ship.class))).toEqual(new Set([
       "fighter", "bomber", "frigate", "flakFrigate", "torpedoFrigate",
-      "destroyer", "cruiser", "carrier", "battleship",
+      "destroyer", "artilleryDestroyer", "cruiser", "carrier", "battleship",
     ]));
     expect(first.state.ships.every((ship) => ship.orders[0]?.type === "attackMove")).toBe(true);
 
@@ -26,7 +26,7 @@ describe("battle showcase scenario", () => {
       SHIPYARD_TYPES.includes(structure.type as ShipyardType),
     );
     expect(yards).toHaveLength(16);
-    expect(yards.every((yard) => yard.productionQueue.length === 3)).toBe(true);
+    expect(yards.every((yard) => yard.productionQueue.length === (yard.type === "fleetShipyard" ? 4 : 3))).toBe(true);
     expect(yards.every((yard) => yard.rallyPoint.x === 0 && yard.rallyPoint.z === 0)).toBe(true);
 
     let sawWeaponsFire = false;

@@ -38,29 +38,34 @@
       <div id="command-mode" aria-live="polite"></div>
 
       <header class="topbar panel-edge">
-        <div class="brand">
-          <span class="brand-mark">CP</span>
-          <div><strong>COMMAND PROMPT</strong><small>TACTICAL COMMAND</small></div>
-        </div>
-        <div class="resource alloy"><span>ALLOY</span><strong id="alloy-value">900</strong><small id="alloy-rate">+14 / −0</small></div>
-        <div class="resource energy"><span>ENERGY</span><strong id="energy-value">900</strong><small id="energy-rate">+34 / −0</small></div>
+        <div class="resource storage-resource alloy" id="alloy-resource"><span>ALLOY</span><strong id="alloy-value">900</strong><small id="alloy-rate">+14 / −0</small></div>
+        <div class="resource storage-resource energy" id="energy-resource"><span>ENERGY</span><strong id="energy-value">900</strong><small id="energy-rate">+34 / −0</small></div>
         <div class="resource efficiency"><span>GRID FLOW</span><strong id="economy-efficiency">100%</strong><small>ECONOMY</small></div>
+        <div class="topbar-spacer" aria-hidden="true"></div>
         <div class="clock"><span>SIM TIME</span><strong id="sim-time">00:00</strong></div>
         <button class="connection online" id="network-open" type="button" title="Open multiplayer lobby">
           <i></i><span><strong id="connection-title">MULTIPLAYER</strong><small id="connection-detail">LAN LOBBY</small></span>
         </button>
-        <button class="system-button active" id="audio-toggle" type="button" title="Mute battle audio" aria-pressed="true">SND</button>
-        <button class="system-button" id="reset" title="Restart engagement (R)">R</button>
+        <div class="game-menu" id="game-menu">
+          <button class="game-menu-toggle" id="game-menu-toggle" type="button" aria-expanded="false" aria-controls="game-menu-panel" aria-label="Open game menu"><i></i><i></i><i></i><span>MENU</span></button>
+          <div class="game-menu-panel panel-edge" id="game-menu-panel" role="menu" hidden>
+            <div class="game-menu-heading"><span>GAME OPTIONS</span><kbd>ESC</kbd></div>
+            <button id="game-menu-pause" type="button" role="menuitem">PAUSE SIMULATION</button>
+            <button id="audio-toggle" type="button" role="menuitem" title="Mute battle audio" aria-pressed="true">AUDIO ON</button>
+            <button id="game-menu-fullscreen" type="button" role="menuitem">ENTER FULLSCREEN</button>
+            <button id="reset" type="button" role="menuitem" title="Restart engagement (R)">RESTART ENGAGEMENT</button>
+            <button id="game-menu-main" type="button" role="menuitem">RETURN TO MAIN MENU</button>
+            <div class="game-menu-hint"><kbd>`</kbd><span>SIM TELEMETRY</span></div>
+          </div>
+        </div>
       </header>
 
       <aside class="left-rail panel-edge">
-        <div class="eyebrow">BATTLESPACE</div>
-        <canvas id="minimap" width="180" height="180"></canvas>
-        <div class="legend"><span><i class="ally"></i>ALLY</span><span><i class="hostile"></i>HOSTILE</span></div>
+        <canvas id="minimap" width="256" height="256" aria-label="Tactical minimap"></canvas>
         <div class="event-feed" id="event-feed"></div>
       </aside>
 
-      <aside class="debug panel-edge">
+      <aside class="debug panel-edge" id="sim-telemetry">
         <div class="panel-title"><span>SIM TELEMETRY</span><button id="collapse-debug">−</button></div>
         <div id="debug-content">
           <dl>
@@ -110,7 +115,7 @@
           <div class="selection-copy"><div class="eyebrow" id="selection-eyebrow">TACTICAL CONTROL</div><h2 id="selection-title">NO SELECTION</h2><p id="selection-summary">Select a vessel or structure</p><div class="selection-bars" id="selection-bars"></div></div>
         </section>
         <section class="selection-detail" id="selection-detail">
-          <span id="directive" class="hidden" aria-hidden="true">SELECT FLEET // BREAK CRIMSON LINE</span>
+          <span id="directive" class="hidden" aria-hidden="true">SELECT FLEET // ENGAGE HOSTILE FORCES</span>
           <div class="selection-roster hidden" id="selection-roster" role="group" aria-label="Selected units"></div>
           <div class="production-console hidden" id="selection-queue">
             <div class="production-heading"><span id="production-label">SHIPYARD IDLE</span><small id="queue-count">QUEUE 0</small></div>
@@ -175,17 +180,23 @@
               <button id="build-rail-battery"><b>R2</b><span>T2 RAIL FORTRESS</span><small>1750A · 1350E · ANTI-CAPITAL</small><em class="command-lock"></em></button>
               <button id="build-plasma-battery"><b>P2</b><span>T2 PLASMA FORTRESS</span><small>2150A · 1900E · AREA CONTROL</small><em class="command-lock"></em></button>
               <button id="build-beam-battery"><b>B3</b><span>T3 BEAM CITADEL</span><small>5200A · 4800E · FLEET DENIAL</small><em class="command-lock"></em></button>
+              <button id="build-artillery-battery"><b>A1</b><span>T1 ARTILLERY BATTERY</span><small>650A · 450E · SIEGE</small><em class="command-lock"></em></button>
+              <button id="build-heavy-artillery-battery"><b>A2</b><span>T2 HEAVY ARTILLERY</span><small>1800A · 1350E · SIEGE</small><em class="command-lock"></em></button>
+              <button id="build-strategic-artillery-array"><b>A3</b><span>T3 STRATEGIC ARRAY</span><small>5500A · 5200E · LONG-RANGE</small><em class="command-lock"></em></button>
             </div>
           </div>
           <div class="command-grid progression-grid hidden" id="production-controls">
-            <button id="queue-fighter"><b>F1</b><span>FIGHTER SQUAD ×5</span><small>450A · 225E</small><em class="command-lock"></em></button>
+            <button id="queue-fighter"><b>F1</b><span>FIGHTER WING 5×5</span><small>380A · 200E</small><em class="command-lock"></em></button>
             <button id="queue-fabricator"><b>MF</b><span>MOBILE FAB</span><small>320A · 210E</small><em class="command-lock"></em></button>
             <button id="queue-frigate"><b>F2</b><span>FRIGATE</span><small>260A · 150E</small><em class="command-lock"></em></button>
             <button id="queue-bomber"><b>BM</b><span>BOMBER ×5</span><small>1800A · 1300E</small><em class="command-lock"></em></button>
             <button id="queue-flak-frigate"><b>FF</b><span>FLAK FRIGATE</span><small>440A · 300E</small><em class="command-lock"></em></button>
             <button id="queue-torpedo-frigate"><b>TF</b><span>TORPEDO FRIGATE</span><small>520A · 360E</small><em class="command-lock"></em></button>
+            <button id="queue-artillery-frigate"><b>AF</b><span>ARTILLERY FRIGATE</span><small>420A · 280E</small><em class="command-lock"></em></button>
             <button id="queue-destroyer"><b>DD</b><span>DESTROYER</span><small>760A · 520E</small><em class="command-lock"></em></button>
+            <button id="queue-artillery-destroyer"><b>AD</b><span>ARTILLERY DESTROYER</span><small>1200A · 900E</small><em class="command-lock"></em></button>
             <button id="queue-cruiser"><b>CR</b><span>CRUISER</span><small>1550A · 1150E</small><em class="command-lock"></em></button>
+            <button id="queue-artillery-cruiser"><b>AC</b><span>ARTILLERY CRUISER</span><small>4200A · 3800E</small><em class="command-lock"></em></button>
             <button id="queue-carrier"><b>CV</b><span>CARRIER</span><small>3600A · 3100E</small><em class="command-lock"></em></button>
             <button id="queue-battleship"><b>BB</b><span>BATTLESHIP</span><small>4800A · 4200E</small><em class="command-lock"></em></button>
             <button id="set-rally"><b>RP</b><span>SET RALLY</span><kbd>RMB / Y</kbd></button>
@@ -362,7 +373,7 @@
       <div id="victory-overlay">
         <div class="victory-kicker">COMBAT RESOLUTION</div>
         <strong id="victory-title">VICTORY</strong>
-        <p id="victory-copy">Crimson fleet neutralized.</p>
+        <p id="victory-copy">All hostile command cores neutralized.</p>
         <button id="play-again">RESTART ENGAGEMENT <kbd>R</kbd></button>
       </div>
       <div id="toast" role="status">SIMULATION RUNNING</div>

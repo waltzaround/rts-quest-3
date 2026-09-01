@@ -20,6 +20,9 @@ describe("shared simulation render buffer", () => {
     });
     const writer = new SharedRenderWriter(buffers);
     const reader = new SharedRenderReader(buffers);
+    simulation.state.ships[0]!.vx = 1_000;
+    simulation.state.ships[0]!.artilleryDeploymentTicks = 42;
+    simulation.state.ships[0]!.revealedUntilTick = 177;
     const published = writer.publish(simulation.state);
     const observed = reader.frame();
     expect(observed).toEqual(published);
@@ -29,6 +32,9 @@ describe("shared simulation render buffer", () => {
     });
     expect(reader.shipIds[0]).toBe(simulation.state.ships[0]!.id);
     expect(reader.shipTransform[0]).toBeCloseTo(simulation.state.ships[0]!.x, 4);
+    expect(reader.shipVitals[2]).toBe(1);
+    expect(reader.shipVitals[3]).toBe(42);
+    expect(reader.shipVitals[4]).toBe(177);
   });
 
   it.runIf(RUN_BENCHMARK)("measures a 16,000-ship producer/consumer transport", () => {

@@ -2,6 +2,7 @@ import * as THREE from "three";
 import {
   ALL_SHIP_CLASSES,
   SHIPS,
+  WEAPONS,
   type PlayerId,
   type ProjectileState,
   type ShipClass,
@@ -37,6 +38,11 @@ export interface RenderSource {
   ships: readonly ShipState[];
 }
 
+export interface RenderVisibilityTransition {
+  readonly generation: number;
+  readonly appearedEntityIds: ReadonlySet<number>;
+}
+
 export interface RenderStateMetrics {
   sourceShips: number;
   visibleShips: number;
@@ -54,10 +60,13 @@ const CLASS_TO_ID: Readonly<Record<ShipClass, number>> = {
   bomber: 3,
   flakFrigate: 4,
   torpedoFrigate: 5,
-  destroyer: 6,
-  cruiser: 7,
-  carrier: 8,
-  battleship: 9,
+  artilleryFrigate: 6,
+  destroyer: 7,
+  artilleryDestroyer: 8,
+  cruiser: 9,
+  artilleryCruiser: 10,
+  carrier: 11,
+  battleship: 12,
 };
 const WEAPON_TO_ID: Readonly<Record<WeaponTypeId, number>> = {
   autocannon: 0,
@@ -65,18 +74,28 @@ const WEAPON_TO_ID: Readonly<Record<WeaponTypeId, number>> = {
   plasma: 2,
   heavyRail: 3,
   pointDefense: 4,
-  beam: 5,
+  flakCannon: 5,
+  beam: 6,
+  lightArtillery: 7,
+  siegeArtillery: 8,
+  strategicArtillery: 9,
 };
 
 export const SHIP_CLASSES: readonly ShipClass[] = ALL_SHIP_CLASSES;
-export const WEAPON_TYPES: readonly WeaponTypeId[] = ["autocannon", "torpedo", "plasma", "heavyRail", "pointDefense", "beam"];
-const PROJECTILE_WEAPON_TYPES: readonly WeaponTypeId[] = ["autocannon", "torpedo", "plasma", "heavyRail", "pointDefense"];
+export const WEAPON_TYPES: readonly WeaponTypeId[] = [
+  "autocannon", "torpedo", "plasma", "heavyRail", "pointDefense", "flakCannon", "beam",
+  "lightArtillery", "siegeArtillery", "strategicArtillery",
+];
+const PROJECTILE_WEAPON_TYPES: readonly WeaponTypeId[] = [
+  "autocannon", "torpedo", "plasma", "heavyRail", "pointDefense", "flakCannon",
+  "lightArtillery", "siegeArtillery", "strategicArtillery",
+];
 
 // A fighter state represents a five-craft squad. LOD selection follows the
 // size of an individual craft so distant squads collapse before their full
 // formation becomes more expensive than the pixels it occupies.
 const LOD_RADIUS_SCALE: Readonly<Partial<Record<ShipClass, number>>> = { fighter: 0.38 };
-const CAPITAL_SHIP_CLASSES: ReadonlySet<ShipClass> = new Set(["cruiser", "carrier", "battleship"]);
+const CAPITAL_SHIP_CLASSES: ReadonlySet<ShipClass> = new Set(["cruiser", "artilleryCruiser", "carrier", "battleship"]);
 const DOGFIGHT_GRID_SIZE = 40;
 
 function dogfightGridKey(cellX: number, cellZ: number): string {
@@ -157,11 +176,14 @@ export function turretVisualHeight(
     case "frigate": return localZ > 4 ? 6.45 : 3.5;
     case "flakFrigate": return localZ >= 3 ? 6.7 : 3.6;
     case "torpedoFrigate": return localZ >= 0 ? 6.75 : 5.55;
+    case "artilleryFrigate": return 7.1;
     case "destroyer": return 7.5;
+    case "artilleryDestroyer": return 8.2;
     case "cruiser":
       if (localZ >= 8) return 7.55;
       if (Math.abs(localX) <= 9 && localZ < 0) return 8.15;
       return 4.98;
+    case "artilleryCruiser": return 16.2;
     case "carrier": return 7.05;
     case "battleship":
       if (weaponTypeId === "beam") return 14.35;
@@ -181,6 +203,9 @@ export class InterpolatedRenderState {
   readonly shipHealth = new Float32Array(MAX_RENDER_SHIPS);
   readonly shipShield = new Float32Array(MAX_RENDER_SHIPS);
   readonly shipEngine = new Float32Array(MAX_RENDER_SHIPS);
+  readonly shipCruising = new Uint8Array(MAX_RENDER_SHIPS);
+  readonly shipRevealed = new Uint8Array(MAX_RENDER_SHIPS);
+  readonly shipNewlyVisible = new Uint8Array(MAX_RENDER_SHIPS);
   readonly shipSelected = new Uint8Array(MAX_RENDER_SHIPS);
   readonly shipLod = new Uint8Array(MAX_RENDER_SHIPS);
 
@@ -236,6 +261,9 @@ export class RenderStateBuilder {
   private readonly visualTurretYaw = new Float32Array(65_536);
   private readonly targetTurretYaw = new Float32Array(65_536);
   private readonly nextTurretUpdateAt = new Float64Array(65_536);
+  private visibleEntityIds = new Set<number>();
+  private currentVisibleEntityIds = new Set<number>();
+  private lastVisibilityGeneration = 0;
   private lastUpdateAt = 0;
 
   update(
@@ -248,12 +276,15 @@ export class RenderStateBuilder {
     quality: RenderQuality,
     now: number,
     forceTactical = false,
+    visibilityTransition?: RenderVisibilityTransition,
   ): InterpolatedRenderState {
     this.playerColors.clear();
     for (const player of source.players) this.playerColors.set(player.id, player.color);
     this.state.reset(source.ships.length, 0);
     const delta = Math.min(0.1, Math.max(0, (now - this.lastUpdateAt) / 1_000));
     this.lastUpdateAt = now;
+    this.currentVisibleEntityIds.clear();
+    for (const ship of source.ships) this.currentVisibleEntityIds.add(ship.id);
     camera.updateMatrixWorld();
     const focalPixels = viewportHeight / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
     const capitalShips = source.ships.filter((ship) => CAPITAL_SHIP_CLASSES.has(ship.class));
@@ -269,10 +300,20 @@ export class RenderStateBuilder {
       else smallCraftGrid.set(key, [ship]);
     }
 
+    const hasNewVisibilityTransition = visibilityTransition !== undefined
+      && visibilityTransition.generation !== this.lastVisibilityGeneration;
+
     for (const ship of source.ships) {
       if (this.state.shipCount >= MAX_RENDER_SHIPS) break;
       this.state.metrics.simulatedTurrets += ship.turrets.length;
-      const previous = previousTransforms.get(ship.id);
+      const newlyVisible = hasNewVisibilityTransition
+        ? visibilityTransition.appearedEntityIds.has(ship.id)
+        : !this.visibleEntityIds.has(ship.id);
+      if (newlyVisible) this.resetTurretHistory(ship);
+      // A ship that has just emerged from fog has no continuous visual path
+      // from its last observed position. Render its current authoritative pose
+      // immediately instead of interpolating across that hidden interval.
+      const previous = newlyVisible ? undefined : previousTransforms.get(ship.id);
       const x = THREE.MathUtils.lerp(previous?.x ?? ship.x, ship.x, alpha);
       const z = THREE.MathUtils.lerp(previous?.z ?? ship.z, ship.z, alpha);
       const dogfight = smallCraftDogfightPose(ship, x, z, smallCraftGrid);
@@ -310,6 +351,9 @@ export class RenderStateBuilder {
       this.state.shipHealth[index] = Math.max(0, ship.health / SHIPS[ship.class].maxHealth);
       this.state.shipShield[index] = SHIPS[ship.class].maxShield > 0 ? Math.max(0, ship.shields / SHIPS[ship.class].maxShield) : 0;
       this.state.shipEngine[index] = 0.35 + speedRatio * 0.65;
+      this.state.shipCruising[index] = Math.hypot(ship.vx, ship.vz) > SHIPS[ship.class].speed * 1.01 ? 1 : 0;
+      this.state.shipRevealed[index] = (ship.revealedUntilTick ?? 0) > 0 ? 1 : 0;
+      this.state.shipNewlyVisible[index] = newlyVisible ? 1 : 0;
       this.state.shipSelected[index] = selectedIds.has(ship.id) ? 1 : 0;
       this.state.shipLod[index] = lod;
       if (lod !== VisualLod.Culled) this.state.metrics.lod[lod] += 1;
@@ -318,9 +362,17 @@ export class RenderStateBuilder {
       // contacts are the only LOD that intentionally collapses a ship to an
       // icon; hiding mounts at Far made most combat look like bare hulls.
       if (lod === VisualLod.Close || lod === VisualLod.Far || (lod === VisualLod.Medium && source.ships.length <= 768)) {
-        this.appendTurrets(ship, index, previous, alpha, lod, now, delta);
+        this.appendTurrets(ship, index, previous, alpha, lod, now, delta, newlyVisible);
       }
     }
+
+    for (const entityId of this.lodByEntity.keys()) {
+      if (!this.currentVisibleEntityIds.has(entityId)) this.lodByEntity.delete(entityId);
+    }
+    const previousVisibleEntityIds = this.visibleEntityIds;
+    this.visibleEntityIds = this.currentVisibleEntityIds;
+    this.currentVisibleEntityIds = previousVisibleEntityIds;
+    if (hasNewVisibilityTransition) this.lastVisibilityGeneration = visibilityTransition.generation;
 
     this.state.metrics.visibleShips = this.state.shipCount;
     this.state.metrics.renderedTurrets = this.state.turretCount;
@@ -334,6 +386,18 @@ export class RenderStateBuilder {
     this.visualTurretYaw.fill(0);
     this.targetTurretYaw.fill(0);
     this.nextTurretUpdateAt.fill(0);
+    this.visibleEntityIds.clear();
+    this.currentVisibleEntityIds.clear();
+    this.lastVisibilityGeneration = 0;
+  }
+
+  private resetTurretHistory(ship: ShipState): void {
+    for (const turret of ship.turrets) {
+      if (turret.id >= this.visualTurretYaw.length) continue;
+      this.visualTurretYaw[turret.id] = turret.currentYaw;
+      this.targetTurretYaw[turret.id] = turret.currentYaw;
+      this.nextTurretUpdateAt[turret.id] = 0;
+    }
   }
 
   private resolveLod(entityId: number, projectedRadius: number, quality: RenderQuality): VisualLod {
@@ -360,6 +424,7 @@ export class RenderStateBuilder {
     lod: VisualLod,
     now: number,
     delta: number,
+    newlyVisible: boolean,
   ): void {
     const updateInterval = lod === VisualLod.Close ? 0 : lod === VisualLod.Medium ? 42 : 70;
     for (const turret of ship.turrets) {
@@ -369,7 +434,11 @@ export class RenderStateBuilder {
         : turret.currentYaw;
       let visualYaw = interpolated;
       if (turret.id < this.visualTurretYaw.length) {
-        if (this.nextTurretUpdateAt[turret.id]! <= now) {
+        if (newlyVisible) {
+          this.visualTurretYaw[turret.id] = interpolated;
+          this.targetTurretYaw[turret.id] = interpolated;
+          this.nextTurretUpdateAt[turret.id] = now + updateInterval;
+        } else if (this.nextTurretUpdateAt[turret.id]! <= now) {
           if (this.nextTurretUpdateAt[turret.id] === 0) this.visualTurretYaw[turret.id] = interpolated;
           this.nextTurretUpdateAt[turret.id] = now + updateInterval;
           this.targetTurretYaw[turret.id] = interpolated;
@@ -417,13 +486,16 @@ export class VisualStressScenario implements RenderSource {
       const shipClass: ShipClass = classRoll < 39
         ? "fighter"
         : classRoll < 42 ? "fabricator"
-          : classRoll < 57 ? "frigate"
-          : classRoll < 67 ? "bomber"
-            : classRoll < 75 ? "flakFrigate"
-              : classRoll < 82 ? "torpedoFrigate"
-                : classRoll < 90 ? "destroyer"
-                  : classRoll < 96 ? "cruiser"
-                    : classRoll < 98 ? "carrier" : "battleship";
+          : classRoll < 54 ? "frigate"
+          : classRoll < 64 ? "bomber"
+            : classRoll < 71 ? "flakFrigate"
+              : classRoll < 77 ? "torpedoFrigate"
+                : classRoll < 81 ? "artilleryFrigate"
+                  : classRoll < 87 ? "destroyer"
+                    : classRoll < 90 ? "artilleryDestroyer"
+                      : classRoll < 94 ? "cruiser"
+                        : classRoll < 96 ? "artilleryCruiser"
+                          : classRoll < 98 ? "carrier" : "battleship";
       const playerIndex = index % 8;
       const lane = Math.floor(index / 8);
       const column = lane % 32;
@@ -457,6 +529,10 @@ export class VisualStressScenario implements RenderSource {
         health: SHIPS[shipClass].maxHealth * (index % 3 === 0 ? 0.15 + (index * 17 % 50) / 100 : 1),
         shields: SHIPS[shipClass].maxShield,
         orders: [], focusTargetEntityId: null, turrets,
+        lastCombatTick: 0,
+        ...(SHIPS[shipClass].hardpoints.some((hardpoint) => WEAPONS[hardpoint.weaponTypeId].artillery)
+          ? { artilleryDeploymentTicks: 0, revealedUntilTick: 0 }
+          : {}),
       });
     }
     const projectileCount = Math.min(6_000, Math.floor(shipCount * 2.75));
@@ -465,6 +541,7 @@ export class VisualStressScenario implements RenderSource {
       this.projectiles.push({
         id: 500_000 + index, ownerShipId: 100_000 + index % Math.max(1, shipCount), ownerTeamId: index % 8 + 1,
         weaponTypeId, targetEntityId: 100_000 + (index * 17 + 3) % Math.max(1, shipCount),
+        targetX: 0, targetZ: 0, fixedTrajectory: WEAPONS[weaponTypeId].artillery !== undefined,
         x: 0, z: 0, previousX: 0, previousZ: 0,
         vx: index % 2 === 0 ? 240 : -240, vz: Math.sin(index * 0.7) * 80,
         radius: 1, damage: 1, lifetimeTicks: 999,

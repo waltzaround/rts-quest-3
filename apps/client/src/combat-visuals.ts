@@ -301,6 +301,55 @@ function destroyerGeometry(): HullGeometrySet {
   return { hull, armor, dark, accent, light, engine };
 }
 
+function artilleryDestroyerGeometry(): HullGeometrySet {
+  const set = scaleHullSet(destroyerGeometry(), 0.9, 0.88, 1.04);
+  set.armor = merge([
+    set.armor,
+    box([5.4, 2.4, 18], [-8.5, 7.4, 4]),
+    box([5.4, 2.4, 18], [8.5, 7.4, 4]),
+    box([25, 1.6, 4.2], [0, 3.1, -20]),
+  ]);
+  set.dark = merge([
+    set.dark,
+    box([3.2, 2.2, 34], [-5.5, 9.2, 6]),
+    box([3.2, 2.2, 34], [5.5, 9.2, 6]),
+  ]);
+  set.accent = merge([
+    set.accent,
+    box([0.55, 0.42, 29], [-5.5, 10.55, 7.5]),
+    box([0.55, 0.42, 29], [5.5, 10.55, 7.5]),
+  ]);
+  return set;
+}
+
+function artilleryFrigateGeometry(): HullGeometrySet {
+  const set = scaleHullSet(frigateGeometry(), 0.88, 0.9, 1.05);
+  set.armor = merge([set.armor, box([7.2, 2.2, 19], [0, 6.2, 2.5])]);
+  set.dark = merge([set.dark, box([2.6, 2, 27], [0, 8.1, 6])]);
+  set.accent = merge([set.accent, box([0.52, 0.4, 24], [0, 9.35, 6.5])]);
+  return set;
+}
+
+function artilleryCruiserGeometry(): HullGeometrySet {
+  const set = scaleHullSet(capitalGeometry("cruiser"), 1.02, 0.98, 1.08);
+  set.armor = merge([
+    set.armor,
+    box([7.8, 3.5, 31], [-10, 12.5, 8]),
+    box([7.8, 3.5, 31], [10, 12.5, 8]),
+  ]);
+  set.dark = merge([
+    set.dark,
+    box([3.8, 3, 49], [-9, 16, 9]),
+    box([3.8, 3, 49], [9, 16, 9]),
+  ]);
+  set.accent = merge([
+    set.accent,
+    box([0.7, 0.5, 43], [-9, 17.8, 10]),
+    box([0.7, 0.5, 43], [9, 17.8, 10]),
+  ]);
+  return set;
+}
+
 function scaleHullSet(set: HullGeometrySet, x: number, y: number, z: number): HullGeometrySet {
   for (const geometry of Object.values(set)) geometry.scale(x, y, z);
   return set;
@@ -489,10 +538,16 @@ export function getShipHullGeometries(shipClass: ShipClass): HullGeometrySet {
             ? specialistFrigateGeometry("flak")
             : shipClass === "torpedoFrigate"
               ? specialistFrigateGeometry("torpedo")
+              : shipClass === "artilleryFrigate"
+                ? artilleryFrigateGeometry()
               : shipClass === "destroyer"
                 ? destroyerGeometry()
+                : shipClass === "artilleryDestroyer"
+                  ? artilleryDestroyerGeometry()
                 : shipClass === "cruiser"
                   ? capitalGeometry("cruiser")
+                  : shipClass === "artilleryCruiser"
+                    ? artilleryCruiserGeometry()
                   : shipClass === "carrier"
                     ? capitalGeometry("carrier")
                     : capitalGeometry("battleship");
@@ -518,7 +573,9 @@ export function createShipHull(shipClass: ShipClass, teamId: number): ShipHullVi
 }
 
 function makeTurretGeometry(shipClass: ShipClass, weaponTypeId: WeaponTypeId): TurretGeometrySet {
-  const large = shipClass === "destroyer" || shipClass === "cruiser" || shipClass === "carrier" || shipClass === "battleship";
+  const large = shipClass === "destroyer" || shipClass === "artilleryDestroyer"
+    || shipClass === "cruiser" || shipClass === "artilleryCruiser"
+    || shipClass === "carrier" || shipClass === "battleship";
   const mountRadius = large ? 1.62 : shipClass === "fighter" ? 0.42 : shipClass === "bomber" ? 0.62 : 1.05;
   const housingScale = mountRadius / 1.45;
   const mount = merge([
@@ -545,10 +602,14 @@ function makeTurretGeometry(shipClass: ShipClass, weaponTypeId: WeaponTypeId): T
       box([0.48, 0.14, 0.62], [-0.58, 0.84, 0.58]),
       box([0.48, 0.14, 0.62], [0.58, 0.84, 0.58]),
     ]);
-  } else if (weaponTypeId === "heavyRail") {
+  } else if (weaponTypeId === "heavyRail" || weaponTypeId === "lightArtillery"
+    || weaponTypeId === "siegeArtillery" || weaponTypeId === "strategicArtillery") {
+    const length = weaponTypeId === "strategicArtillery" ? 18
+      : weaponTypeId === "siegeArtillery" ? 12.5
+        : weaponTypeId === "lightArtillery" ? 9.5 : 8.6;
     barrel = merge([
-      box([0.42, 0.5, 8.6], [-0.42, 0.78, 4.35]),
-      box([0.42, 0.5, 8.6], [0.42, 0.78, 4.35]),
+      box([0.42, 0.5, length], [-0.42, 0.78, length * 0.5]),
+      box([0.42, 0.5, length], [0.42, 0.78, length * 0.5]),
       box([1.45, 0.5, 2.2], [0, 0.66, 1.25]),
       box([1.8, 0.62, 1.05], [0, 0.56, -0.2]),
     ]);
@@ -673,7 +734,11 @@ const WEAPON_STYLE: Readonly<Record<WeaponTypeId, WeaponStyle>> = {
   plasma: weaponStyle(0x58ddff, 7.2, 14, 0.45, [0.55, 0.55, 0.9], 0.85),
   heavyRail: weaponStyle(0xfff0c2, 10.2, 40, 0.42, [0.38, 0.38, 3.2], 1.08),
   pointDefense: weaponStyle(0x8dffb0, 6.8, 5.5, 0.07, [0.12, 0.12, 0.65], 0.38),
+  flakCannon: weaponStyle(0xb7ff9a, 7.1, 6.5, 0.1, [0.16, 0.16, 0.8], 0.48),
   beam: weaponStyle(0xa8f7ff, 8.5, 54, 0.55, [0.4, 0.4, 3.2]),
+  lightArtillery: weaponStyle(0xffdf9b, 9.5, 44, 0.46, [0.44, 0.44, 3.4], 1.05),
+  siegeArtillery: weaponStyle(0xffd37a, 11, 58, 0.58, [0.56, 0.56, 4.2], 1.2),
+  strategicArtillery: weaponStyle(0xffbd6b, 14, 78, 0.76, [0.72, 0.72, 5.8], 1.4),
 };
 
 interface ProjectileVisualPose {
@@ -882,6 +947,7 @@ export class ProjectileVfx {
   private readonly direction = new THREE.Vector3();
   private readonly forward = new THREE.Vector3(0, 0, 1);
   private readonly verticalLaunchFlights = new Map<number, VerticalLaunchFlight>();
+  private readonly activeProjectileIds = new Set<number>();
 
   constructor(scene: THREE.Scene) {
     for (const weaponTypeId of Object.keys(WEAPON_STYLE) as WeaponTypeId[]) {
@@ -911,6 +977,11 @@ export class ProjectileVfx {
   }
 
   renderedCount = 0;
+
+  clearHistory(): void {
+    this.verticalLaunchFlights.clear();
+    this.activeProjectileIds.clear();
+  }
 
   update(
     projectiles: readonly ProjectileState[],
@@ -962,9 +1033,10 @@ export class ProjectileVfx {
     this.writeStreaks(
       this.coreStreaks, projectiles, visibleCount, alpha, 1, 0.025, targetsById, verticalLaunchOwnerIds,
     );
-    const activeProjectileIds = new Set(projectiles.map((projectile) => projectile.id));
+    this.activeProjectileIds.clear();
+    for (const projectile of projectiles) this.activeProjectileIds.add(projectile.id);
     for (const projectileId of this.verticalLaunchFlights.keys()) {
-      if (!activeProjectileIds.has(projectileId)) this.verticalLaunchFlights.delete(projectileId);
+      if (!this.activeProjectileIds.has(projectileId)) this.verticalLaunchFlights.delete(projectileId);
     }
   }
 

@@ -4,11 +4,6 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-patchedDependencies:
-  box3d.js@0.1.1:
-    hash: js4bmhiwjr64yioidwtxwnri7a
-    path: patches/box3d.js@0.1.1.patch
-
 importers:
 
   .:
@@ -44,6 +39,9 @@ importers:
       vite:
         specifier: ^8.2.2
         version: 8.2.2(@types/node@22.20.1)(esbuild@0.28.1)
+      vitest:
+        specifier: ^4.1.11
+        version: 4.1.11(@types/node@22.20.1)(vite@8.2.2(@types/node@22.20.1)(esbuild@0.28.1))
 
   apps/worker:
     dependencies:

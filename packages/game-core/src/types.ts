@@ -10,11 +10,26 @@ export type ShipClass =
   | "bomber"
   | "flakFrigate"
   | "torpedoFrigate"
+  | "artilleryFrigate"
   | "destroyer"
+  | "artilleryDestroyer"
   | "cruiser"
+  | "artilleryCruiser"
   | "carrier"
   | "battleship";
-export type WeaponTypeId = "autocannon" | "torpedo" | "plasma" | "heavyRail" | "pointDefense" | "beam";
+export type WeaponTypeId =
+  | "autocannon"
+  | "torpedo"
+  | "plasma"
+  | "heavyRail"
+  | "pointDefense"
+  | "flakCannon"
+  | "beam"
+  | "lightArtillery"
+  | "siegeArtillery"
+  | "strategicArtillery";
+export type ArmorType = "light" | "plated" | "heavy" | "fortified";
+export type DamageProfile = "rapid" | "flak" | "plasma" | "ordnance" | "penetrating" | "siege";
 export type StructureType =
   | "commandCore"
   | "extractor"
@@ -40,7 +55,10 @@ export type StructureType =
   | "missileBattery"
   | "railBattery"
   | "plasmaBattery"
-  | "beamBattery";
+  | "beamBattery"
+  | "artilleryBattery"
+  | "heavyArtilleryBattery"
+  | "strategicArtilleryArray";
 export type ShipyardType = "shipyard" | "fleetShipyard" | "capitalShipyard";
 export type ResourceType = "alloy";
 export type AiDifficulty = "easy" | "normal" | "hard";
@@ -89,6 +107,7 @@ export interface TurretHardpointDefinition {
 
 export interface ShipDefinition {
   class: ShipClass;
+  armorType: ArmorType;
   radius: number;
   mass: number;
   maxHealth: number;
@@ -96,6 +115,7 @@ export interface ShipDefinition {
   speed: number;
   turnRate: number;
   sensorRange: number;
+  cruiseMultiplier: number;
   buildPower: number;
   buildRange: number;
   hardpoints: readonly TurretHardpointDefinition[];
@@ -117,14 +137,24 @@ export interface WeaponDefinition {
   /** Half-spacing between paired barrels; zero for a single emitter. */
   muzzleSeparation: number;
   damage: number;
+  damageProfile: DamageProfile;
+  shieldMultiplier: number;
   traverseRate: number;
   alignmentTolerance: number;
   targetPreference: Readonly<Record<ShipClass, number>>;
   color: number;
+  /** Artillery-only timings. Their presence identifies a fixed-trajectory artillery weapon. */
+  artillery?: {
+    setupTicks: number;
+    mobileRevealTicks: number;
+    structureRevealTicks: number;
+    targetReevaluationTicks: number;
+  };
 }
 
 export interface StructureDefinition {
   type: StructureType;
+  armorType: ArmorType;
   radius: number;
   maxHealth: number;
   maxShield: number;
@@ -274,6 +304,12 @@ export interface ShipState {
   orders: NavigationOrder[];
   focusTargetEntityId: EntityId | null;
   turrets: TurretState[];
+  /** Last weapon fire or damage tick; cruise requires a quiet window after either. */
+  lastCombatTick: number;
+  /** Artillery-only live state; absent on ordinary ships. */
+  artilleryDeploymentTicks?: number;
+  /** Artillery-only live state; absent when the entity is not an artillery platform. */
+  revealedUntilTick?: number;
 }
 
 export interface ProjectileState {
@@ -282,6 +318,9 @@ export interface ProjectileState {
   ownerTeamId: TeamId;
   weaponTypeId: WeaponTypeId;
   targetEntityId: EntityId;
+  targetX: number;
+  targetZ: number;
+  fixedTrajectory: boolean;
   x: number;
   z: number;
   previousX: number;
@@ -347,6 +386,8 @@ export interface StructureState {
   upgradeSourceShields?: number;
   upgradeSourceYaw?: number;
   upgradeSourceRallyPoint?: Vec2;
+  /** Artillery-only live state; absent on ordinary structures. */
+  revealedUntilTick?: number;
 }
 
 export type CombatTargetState = ShipState | StructureState;
@@ -358,13 +399,14 @@ export type SimulationEvent =
   | { type: "unitQueued"; tick: number; playerId: PlayerId; structureId: EntityId; shipClass: ShipClass; queueItemId: EntityId }
   | { type: "unitProduced"; tick: number; playerId: PlayerId; structureId: EntityId; shipId: EntityId; shipClass: ShipClass }
   | { type: "weaponFired"; tick: number; turretId: number; shipId: number; targetId: number; projectileId: number; weaponTypeId: WeaponTypeId }
-  | { type: "hit"; tick: number; projectileId: number; targetId: number; damage: number }
+  | { type: "hit"; tick: number; projectileId: number; targetId: number; damage: number; rawDamage: number; shieldDamage: number; hullDamage: number }
+  | { type: "artilleryRevealed"; tick: number; entityId: number; untilTick: number }
   | { type: "projectileDetonated"; tick: number; projectileId: number; weaponTypeId: WeaponTypeId; x: number; z: number }
   | { type: "destroyed"; tick: number; entityId: number }
   | { type: "victory"; tick: number; winnerTeamId: TeamId };
 
 export interface SimulationState {
-  version: 7;
+  version: 9;
   seed: number;
   mapPreset?: "orbital-ring" | "crossfire" | "open-expanse" | "asteroid-belt" | "spiral-arms" | "shattered-core" | "amazon-tunnel" | "core-rush" | "star-fortress";
   tick: number;
@@ -430,6 +472,9 @@ export interface PlayerViewShipState {
   orders: NavigationOrder[];
   focusTargetEntityId: EntityId | null;
   turrets: PlayerViewTurretState[];
+  lastCombatTick: number;
+  artilleryDeploymentTicks?: number;
+  revealedUntilTick?: number;
 }
 
 export interface PlayerViewStructureState {
@@ -448,6 +493,7 @@ export interface PlayerViewStructureState {
   productionQueue: ProductionQueueItem[];
   repeatProduction: boolean;
   rallyPoint: Vec2 | null;
+  revealedUntilTick?: number;
 }
 
 export interface PlayerViewResourceNodeState extends ResourceNodeState {}
@@ -458,6 +504,9 @@ export interface PlayerViewProjectileState {
   ownerTeamId: TeamId;
   weaponTypeId: WeaponTypeId;
   targetEntityId: EntityId | null;
+  targetX: number;
+  targetZ: number;
+  fixedTrajectory: boolean;
   x: number;
   z: number;
   previousX: number;
@@ -471,7 +520,7 @@ export interface PlayerViewProjectileState {
 
 export interface PlayerViewState {
   version: 1;
-  simulationVersion: 7;
+  simulationVersion: 9;
   tick: number;
   viewerPlayerId: PlayerId;
   viewerTeamId: TeamId;
@@ -490,7 +539,7 @@ export interface PlayerViewState {
 
 export interface TeamViewState {
   version: 1;
-  simulationVersion: 7;
+  simulationVersion: 9;
   tick: number;
   viewerPlayerId: null;
   viewerTeamId: TeamId;
@@ -509,7 +558,7 @@ export interface TeamViewState {
 
 export interface OmniscientViewState {
   version: 1;
-  simulationVersion: 7;
+  simulationVersion: 9;
   tick: number;
   players: PlayerViewPlayerState[];
   teams: TeamState[];

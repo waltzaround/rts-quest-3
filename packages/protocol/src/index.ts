@@ -15,7 +15,8 @@ import type {
 // while making a new canonical union member a compile-time protocol decision.
 const PROTOCOL_SHIP_CLASSES = {
   fighter: true, fabricator: true, frigate: true, bomber: true, flakFrigate: true, torpedoFrigate: true,
-  destroyer: true, cruiser: true, carrier: true, battleship: true,
+  artilleryFrigate: true, destroyer: true, artilleryDestroyer: true, cruiser: true,
+  artilleryCruiser: true, carrier: true, battleship: true,
 } satisfies Record<ShipClass, true>;
 const PROTOCOL_BUILDABLE_STRUCTURE_TYPES = {
   extractor: true, deepCoreExtractor: true, singularityHarvester: true,
@@ -26,6 +27,7 @@ const PROTOCOL_BUILDABLE_STRUCTURE_TYPES = {
   radarArray: true, phasedRadarArray: true, deepSpaceRadarArray: true,
   pointDefenseBattery: true, missileBattery: true, railBattery: true,
   plasmaBattery: true, beamBattery: true,
+  artilleryBattery: true, heavyArtilleryBattery: true, strategicArtilleryArray: true,
 } satisfies Record<Exclude<StructureType, "commandCore">, true>;
 
 const hasOwn = (record: object, key: unknown): key is string =>
@@ -212,7 +214,7 @@ function isLobbyState(value: unknown): value is LobbyState {
 function isProjectedViewState(value: unknown): value is ProjectedViewState {
   if (!isRecord(value)
     || value.version !== 1
-    || value.simulationVersion !== 7
+    || value.simulationVersion !== 9
     || !isInteger(value.tick) || value.tick < 0
     || !isInteger(value.viewerTeamId) || value.viewerTeamId < 1
     || !Array.isArray(value.players)
@@ -413,7 +415,7 @@ export function parseServerMessage(raw: string): ServerMessage | null {
     const state = value.state;
     return isInteger(value.tick) && value.tick >= 0
       && isInteger(value.checksum)
-      && isRecord(state) && state.version === 7
+      && isRecord(state) && state.version === 9
       && state.tick === value.tick && state.checksum === value.checksum
       && isInteger(state.seed)
       && Array.isArray(state.players) && Array.isArray(state.teams)

@@ -60,6 +60,9 @@ export function calculateChecksum(state: SimulationState): number {
     hash = hashUint(hash, quantize(ship.health));
     hash = hashUint(hash, quantize(ship.shields));
     hash = hashUint(hash, ship.focusTargetEntityId ?? 0);
+    hash = hashUint(hash, ship.lastCombatTick);
+    hash = hashUint(hash, ship.artilleryDeploymentTicks ?? 0);
+    hash = hashUint(hash, ship.revealedUntilTick ?? 0);
     for (const order of ship.orders) {
       hash = hashUint(hash, order.type === "move" ? 1 : order.type === "attackMove" ? 2 : order.type === "hold" ? 3 : 4);
       hash = hashUint(hash, quantize(order.destination.x));
@@ -86,6 +89,9 @@ export function calculateChecksum(state: SimulationState): number {
     hash = hashUint(hash, projectile.ownerTeamId);
     hash = hashString(hash, projectile.weaponTypeId);
     hash = hashUint(hash, projectile.targetEntityId);
+    hash = hashUint(hash, quantize(projectile.targetX));
+    hash = hashUint(hash, quantize(projectile.targetZ));
+    hash = hashUint(hash, projectile.fixedTrajectory ? 1 : 0);
     hash = hashUint(hash, quantize(projectile.x));
     hash = hashUint(hash, quantize(projectile.z));
     hash = hashUint(hash, quantize(projectile.previousX));
@@ -109,6 +115,7 @@ export function calculateChecksum(state: SimulationState): number {
     hash = hashUint(hash, quantize(structure.buildProgress));
     hash = hashUint(hash, structure.resourceNodeId ?? 0);
     hash = hashUint(hash, structure.constructionSequence ?? 0);
+    hash = hashUint(hash, structure.revealedUntilTick ?? 0);
     hash = hashString(hash, structure.upgradeSourceType ?? "");
     hash = hashUint(hash, quantize(structure.upgradeSourceHealth ?? 0));
     hash = hashUint(hash, quantize(structure.upgradeSourceShields ?? 0));

@@ -523,7 +523,7 @@ export function validateReplay(input: unknown): ReplayValidationResult {
   if (input.format !== REPLAY_FORMAT || input.version !== REPLAY_FORMAT_VERSION) {
     return { valid: false, reason: "Unsupported replay format or version" };
   }
-  if (input.simulationVersion !== 7
+  if (input.simulationVersion !== 9
     || (input.physicsBackend !== "box3d-wasm" && input.physicsBackend !== "deterministic-fallback")
     || typeof input.finalized !== "boolean") {
     return { valid: false, reason: "Unsupported simulation version" };
@@ -667,7 +667,7 @@ function isReplayResult(value: unknown): value is ReplayResult {
 
 function isSimulationStateShape(value: unknown): value is SimulationState {
   return isRecord(value)
-    && value.version === 7
+    && value.version === 9
     && isNonNegativeInteger(value.tick)
     && Array.isArray(value.players)
     && Array.isArray(value.teams)

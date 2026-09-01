@@ -1,4 +1,6 @@
 import type {
+  ArmorType,
+  DamageProfile,
   ShipDefinition,
   ShipEconomyDefinition,
   ShipClass,
@@ -10,16 +12,47 @@ import type {
 
 const DEG = Math.PI / 180;
 
+export const DAMAGE_PROFILE_MULTIPLIERS: Readonly<Record<DamageProfile, Readonly<Record<ArmorType | "shields", number>>>> = {
+  rapid: { shields: 1, light: 1.3, plated: 0.7, heavy: 0.3, fortified: 0.25 },
+  flak: { shields: 0.9, light: 1.6, plated: 0.5, heavy: 0.25, fortified: 0.25 },
+  plasma: { shields: 1.3, light: 0.8, plated: 1.25, heavy: 0.8, fortified: 0.6 },
+  ordnance: { shields: 0.65, light: 0.45, plated: 0.95, heavy: 1.6, fortified: 1.25 },
+  penetrating: { shields: 1, light: 0.4, plated: 0.95, heavy: 1.25, fortified: 1.45 },
+  siege: { shields: 0.7, light: 0.3, plated: 0.8, heavy: 1.05, fortified: 1.6 },
+};
+
+export function getWeaponArmorMultiplier(weaponTypeId: WeaponTypeId, armorType: ArmorType): number {
+  return DAMAGE_PROFILE_MULTIPLIERS[WEAPONS[weaponTypeId].damageProfile][armorType];
+}
+
+export function calculateProfiledDamage(
+  weaponTypeId: WeaponTypeId,
+  rawDamage: number,
+  shields: number,
+  armorType: ArmorType,
+): { shieldDamage: number; hullDamage: number; rawDamage: number } {
+  const weapon = WEAPONS[weaponTypeId];
+  const shieldDamage = Math.min(Math.max(0, shields), rawDamage * weapon.shieldMultiplier);
+  const rawConsumedByShields = weapon.shieldMultiplier > 0 ? shieldDamage / weapon.shieldMultiplier : 0;
+  const remainingRawDamage = Math.max(0, rawDamage - rawConsumedByShields);
+  return {
+    rawDamage,
+    shieldDamage,
+    hullDamage: remainingRawDamage * DAMAGE_PROFILE_MULTIPLIERS[weapon.damageProfile][armorType],
+  };
+}
+
 export const WEAPONS: Readonly<Record<WeaponTypeId, WeaponDefinition>> = {
   autocannon: {
     id: "autocannon", delivery: "projectile", range: 230, minimumRange: 0,
     cooldownTicks: 16, burstSize: 4, burstIntervalTicks: 2,
     projectileSpeed: 240, projectileRadius: 2, projectileLifetimeTicks: 35,
     muzzleOffset: 4.6, muzzleSeparation: 0.3,
-    damage: 3, traverseRate: 190 * DEG, alignmentTolerance: 10 * DEG,
+    damage: 1, damageProfile: "rapid", shieldMultiplier: 1,
+    traverseRate: 190 * DEG, alignmentTolerance: 10 * DEG,
     targetPreference: {
       fighter: 0, fabricator: 14, bomber: 8, frigate: 20, flakFrigate: 24, torpedoFrigate: 26,
-      destroyer: 45, cruiser: 58, carrier: 72, battleship: 82,
+      artilleryFrigate: 5, destroyer: 4, artilleryDestroyer: 5, cruiser: 6, artilleryCruiser: 7, carrier: 7, battleship: 8,
     }, color: 0xffc15c,
   },
   torpedo: {
@@ -27,10 +60,11 @@ export const WEAPONS: Readonly<Record<WeaponTypeId, WeaponDefinition>> = {
     cooldownTicks: 46, burstSize: 2, burstIntervalTicks: 4,
     projectileSpeed: 108, projectileRadius: 4.2, projectileLifetimeTicks: 78,
     muzzleOffset: 0.35, muzzleSeparation: 0.58,
-    damage: 32, traverseRate: 72 * DEG, alignmentTolerance: 5 * DEG,
+    damage: 32, damageProfile: "ordnance", shieldMultiplier: 0.65,
+    traverseRate: 72 * DEG, alignmentTolerance: 5 * DEG,
     targetPreference: {
       fighter: 180, fabricator: 84, bomber: 120, frigate: 48, flakFrigate: 52, torpedoFrigate: 40,
-      destroyer: 20, cruiser: 6, carrier: 0, battleship: 2,
+      artilleryFrigate: 5, destroyer: 3, artilleryDestroyer: 4, cruiser: 1, artilleryCruiser: 1, carrier: 0, battleship: 0,
     }, color: 0xff766f,
   },
   plasma: {
@@ -38,10 +72,11 @@ export const WEAPONS: Readonly<Record<WeaponTypeId, WeaponDefinition>> = {
     cooldownTicks: 28, burstSize: 2, burstIntervalTicks: 5,
     projectileSpeed: 135, projectileRadius: 3.5, projectileLifetimeTicks: 55,
     muzzleOffset: 5.1, muzzleSeparation: 0.42,
-    damage: 18, traverseRate: 105 * DEG, alignmentTolerance: 7 * DEG,
+    damage: 18, damageProfile: "plasma", shieldMultiplier: 1.3,
+    traverseRate: 105 * DEG, alignmentTolerance: 7 * DEG,
     targetPreference: {
       fighter: 58, fabricator: 8, bomber: 32, frigate: 0, flakFrigate: 4, torpedoFrigate: 4,
-      destroyer: 8, cruiser: 12, carrier: 20, battleship: 18,
+      artilleryFrigate: 1, destroyer: 1, artilleryDestroyer: 1, cruiser: 3, artilleryCruiser: 3, carrier: 4, battleship: 4,
     }, color: 0x66ddff,
   },
   heavyRail: {
@@ -49,10 +84,11 @@ export const WEAPONS: Readonly<Record<WeaponTypeId, WeaponDefinition>> = {
     cooldownTicks: 39, burstSize: 1, burstIntervalTicks: 1,
     projectileSpeed: 510, projectileRadius: 2.5, projectileLifetimeTicks: 32,
     muzzleOffset: 8.7, muzzleSeparation: 0.42,
-    damage: 48, traverseRate: 65 * DEG, alignmentTolerance: 4 * DEG,
+    damage: 48, damageProfile: "penetrating", shieldMultiplier: 0.85,
+    traverseRate: 65 * DEG, alignmentTolerance: 4 * DEG,
     targetPreference: {
       fighter: 150, fabricator: 54, bomber: 92, frigate: 28, flakFrigate: 30, torpedoFrigate: 24,
-      destroyer: 8, cruiser: 3, carrier: 2, battleship: 0,
+      artilleryFrigate: 4, destroyer: 3, artilleryDestroyer: 2, cruiser: 1, artilleryCruiser: 1, carrier: 1, battleship: 0,
     }, color: 0xfff2c4,
   },
   pointDefense: {
@@ -60,22 +96,75 @@ export const WEAPONS: Readonly<Record<WeaponTypeId, WeaponDefinition>> = {
     cooldownTicks: 15, burstSize: 6, burstIntervalTicks: 1,
     projectileSpeed: 320, projectileRadius: 1.4, projectileLifetimeTicks: 22,
     muzzleOffset: 3.25, muzzleSeparation: 0.25,
-    damage: 4, traverseRate: 270 * DEG, alignmentTolerance: 13 * DEG,
+    damage: 4, damageProfile: "rapid", shieldMultiplier: 1,
+    traverseRate: 270 * DEG, alignmentTolerance: 13 * DEG,
     targetPreference: {
       fighter: 0, fabricator: 42, bomber: 8, frigate: 85, flakFrigate: 92, torpedoFrigate: 90,
-      destroyer: 120, cruiser: 135, carrier: 145, battleship: 150,
+      artilleryFrigate: 7, destroyer: 6, artilleryDestroyer: 7, cruiser: 8, artilleryCruiser: 9, carrier: 9, battleship: 10,
     }, color: 0x9affbb,
+  },
+  flakCannon: {
+    id: "flakCannon", delivery: "projectile", range: 205, minimumRange: 0,
+    cooldownTicks: 15, burstSize: 6, burstIntervalTicks: 1,
+    projectileSpeed: 330, projectileRadius: 1.7, projectileLifetimeTicks: 24,
+    muzzleOffset: 3.5, muzzleSeparation: 0.3,
+    damage: 5, damageProfile: "flak", shieldMultiplier: 0.9,
+    traverseRate: 285 * DEG, alignmentTolerance: 14 * DEG,
+    targetPreference: {
+      fighter: 0, fabricator: 2, bomber: 0, frigate: 5, flakFrigate: 6, torpedoFrigate: 6,
+      artilleryFrigate: 7, destroyer: 8, artilleryDestroyer: 8, cruiser: 9, artilleryCruiser: 9, carrier: 10, battleship: 10,
+    }, color: 0xb7ff9a,
   },
   beam: {
     id: "beam", delivery: "beam", range: 390, minimumRange: 30,
     cooldownTicks: 30, burstSize: 1, burstIntervalTicks: 1,
     projectileSpeed: 0, projectileRadius: 0, projectileLifetimeTicks: 0,
     muzzleOffset: 7.9, muzzleSeparation: 0,
-    damage: 36, traverseRate: 82 * DEG, alignmentTolerance: 3 * DEG,
+    damage: 36, damageProfile: "penetrating", shieldMultiplier: 1.35,
+    traverseRate: 82 * DEG, alignmentTolerance: 3 * DEG,
     targetPreference: {
       fighter: 120, fabricator: 38, bomber: 72, frigate: 18, flakFrigate: 20, torpedoFrigate: 16,
-      destroyer: 7, cruiser: 2, carrier: 0, battleship: 1,
+      artilleryFrigate: 4, destroyer: 3, artilleryDestroyer: 2, cruiser: 1, artilleryCruiser: 1, carrier: 0, battleship: 1,
     }, color: 0xa8f7ff,
+  },
+  lightArtillery: {
+    id: "lightArtillery", delivery: "projectile", range: 500, minimumRange: 140,
+    cooldownTicks: 60, burstSize: 1, burstIntervalTicks: 1,
+    projectileSpeed: 200, projectileRadius: 4, projectileLifetimeTicks: 62,
+    muzzleOffset: 7.5, muzzleSeparation: 0,
+    damage: 70, damageProfile: "siege", shieldMultiplier: 0.7,
+    traverseRate: 24 * DEG, alignmentTolerance: 3 * DEG,
+    targetPreference: {
+      fighter: 10, fabricator: 6, bomber: 10, frigate: 7, flakFrigate: 7, torpedoFrigate: 7,
+      artilleryFrigate: 3, destroyer: 5, artilleryDestroyer: 3, cruiser: 3, artilleryCruiser: 2, carrier: 2, battleship: 1,
+    }, color: 0xffdf9b,
+    artillery: { setupTicks: 40, mobileRevealTicks: 80, structureRevealTicks: 100, targetReevaluationTicks: 20 },
+  },
+  siegeArtillery: {
+    id: "siegeArtillery", delivery: "projectile", range: 680, minimumRange: 220,
+    cooldownTicks: 100, burstSize: 1, burstIntervalTicks: 1,
+    projectileSpeed: 180, projectileRadius: 5.2, projectileLifetimeTicks: 80,
+    muzzleOffset: 10.5, muzzleSeparation: 0,
+    damage: 180, damageProfile: "siege", shieldMultiplier: 0.7,
+    traverseRate: 18 * DEG, alignmentTolerance: 2.5 * DEG,
+    targetPreference: {
+      fighter: 10, fabricator: 6, bomber: 10, frigate: 7, flakFrigate: 7, torpedoFrigate: 7,
+      artilleryFrigate: 3, destroyer: 5, artilleryDestroyer: 3, cruiser: 3, artilleryCruiser: 2, carrier: 2, battleship: 1,
+    }, color: 0xffd37a,
+    artillery: { setupTicks: 60, mobileRevealTicks: 120, structureRevealTicks: 150, targetReevaluationTicks: 20 },
+  },
+  strategicArtillery: {
+    id: "strategicArtillery", delivery: "projectile", range: 900, minimumRange: 320,
+    cooldownTicks: 140, burstSize: 1, burstIntervalTicks: 1,
+    projectileSpeed: 160, projectileRadius: 7, projectileLifetimeTicks: 125,
+    muzzleOffset: 15, muzzleSeparation: 0,
+    damage: 420, damageProfile: "siege", shieldMultiplier: 0.7,
+    traverseRate: 12 * DEG, alignmentTolerance: 2 * DEG,
+    targetPreference: {
+      fighter: 12, fabricator: 6, bomber: 12, frigate: 8, flakFrigate: 8, torpedoFrigate: 8,
+      artilleryFrigate: 4, destroyer: 5, artilleryDestroyer: 3, cruiser: 3, artilleryCruiser: 2, carrier: 1, battleship: 0,
+    }, color: 0xffbd6b,
+    artillery: { setupTicks: 100, mobileRevealTicks: 160, structureRevealTicks: 200, targetReevaluationTicks: 30 },
   },
 };
 
@@ -121,51 +210,57 @@ export function getFighterSquadMemberPose(shipId: number, memberIndex: number, t
 
 export const SHIPS: Readonly<Record<ShipClass, ShipDefinition>> = {
   fighter: {
-    class: "fighter", radius: 12, mass: 40, maxHealth: 700, maxShield: 200, speed: 72.5,
-    turnRate: 150 * DEG, sensorRange: 270, buildPower: 0, buildRange: 0,
+    class: "fighter", armorType: "light", radius: 12, mass: 40, maxHealth: 700, maxShield: 200, speed: 72.5,
+    turnRate: 150 * DEG, sensorRange: 270, cruiseMultiplier: 1, buildPower: 0, buildRange: 0,
     hardpoints: FIGHTER_SQUAD_OFFSETS.map(([localX, localZ]) => hp(localX, localZ + 2.1, 0, 75, "autocannon")),
   },
   fabricator: {
-    class: "fabricator", radius: 9.5, mass: 58, maxHealth: 620, maxShield: 240, speed: 35,
-    turnRate: 82 * DEG, sensorRange: 340, buildPower: 1.35, buildRange: 150,
+    class: "fabricator", armorType: "light", radius: 9.5, mass: 58, maxHealth: 620, maxShield: 240, speed: 35,
+    turnRate: 82 * DEG, sensorRange: 340, cruiseMultiplier: 1, buildPower: 1.35, buildRange: 150,
     hardpoints: [hp(0, -3, 180, 150, "pointDefense")],
   },
   bomber: {
-    class: "bomber", radius: 6, mass: 30, maxHealth: 280, maxShield: 90, speed: 56.25,
-    turnRate: 105 * DEG, sensorRange: 290, buildPower: 0, buildRange: 0,
+    class: "bomber", armorType: "light", radius: 6, mass: 30, maxHealth: 280, maxShield: 90, speed: 56.25,
+    turnRate: 105 * DEG, sensorRange: 290, cruiseMultiplier: 1, buildPower: 0, buildRange: 0,
     hardpoints: [
       hp(-2.8, 4.2, 0, 48, "torpedo"), hp(2.8, 4.2, 0, 48, "torpedo"),
     ],
   },
   frigate: {
-    class: "frigate", radius: 13, mass: 95, maxHealth: 1_035, maxShield: 405, speed: 37.8,
-    turnRate: 58 * DEG, sensorRange: 370, buildPower: 0, buildRange: 0,
+    class: "frigate", armorType: "plated", radius: 13, mass: 95, maxHealth: 1_035, maxShield: 405, speed: 37.8,
+    turnRate: 58 * DEG, sensorRange: 370, cruiseMultiplier: 1.3, buildPower: 0, buildRange: 0,
     hardpoints: [
       hp(-5, 8, 0, 120, "plasma"), hp(5, 8, 0, 120, "plasma"),
       hp(-7, -1, -90, 115, "pointDefense"), hp(7, -1, 90, 115, "pointDefense"),
     ],
   },
   flakFrigate: {
-    class: "flakFrigate", radius: 14, mass: 112, maxHealth: 1_210, maxShield: 485, speed: 36,
-    turnRate: 54 * DEG, sensorRange: 410, buildPower: 0, buildRange: 0,
+    class: "flakFrigate", armorType: "plated", radius: 14, mass: 112, maxHealth: 1_210, maxShield: 485, speed: 36,
+    turnRate: 54 * DEG, sensorRange: 410, cruiseMultiplier: 1.3, buildPower: 0, buildRange: 0,
     hardpoints: [
       hp(0, 8, 0, 150, "plasma"),
-      hp(-7, 5, -55, 145, "pointDefense"), hp(7, 5, 55, 145, "pointDefense"),
-      hp(-8, -2, -105, 150, "pointDefense"), hp(8, -2, 105, 150, "pointDefense"),
+      hp(-7, 5, -55, 145, "flakCannon"), hp(7, 5, 55, 145, "flakCannon"),
+      hp(-8, -2, -105, 150, "flakCannon"), hp(8, -2, 105, 150, "flakCannon"),
     ],
   },
   torpedoFrigate: {
-    class: "torpedoFrigate", radius: 14.5, mass: 125, maxHealth: 1_130, maxShield: 415, speed: 33,
-    turnRate: 49 * DEG, sensorRange: 420, buildPower: 0, buildRange: 0,
+    class: "torpedoFrigate", armorType: "plated", radius: 14.5, mass: 125, maxHealth: 1_130, maxShield: 415, speed: 33,
+    turnRate: 49 * DEG, sensorRange: 420, cruiseMultiplier: 1.3, buildPower: 0, buildRange: 0,
     hardpoints: [
       hp(-5.5, 9, -18, 75, "torpedo"), hp(5.5, 9, 18, 75, "torpedo"),
       hp(-6.5, 2, -55, 90, "torpedo"), hp(6.5, 2, 55, 90, "torpedo"),
       hp(-7, -5, -120, 125, "pointDefense"), hp(7, -5, 120, 125, "pointDefense"),
     ],
   },
+  artilleryFrigate: {
+    class: "artilleryFrigate", armorType: "plated", radius: 14.5, mass: 135,
+    maxHealth: 900, maxShield: 300, speed: 32,
+    turnRate: 45 * DEG, sensorRange: 300, cruiseMultiplier: 1.3, buildPower: 0, buildRange: 0,
+    hardpoints: [hp(0, 8.5, 0, 28, "lightArtillery")],
+  },
   destroyer: {
-    class: "destroyer", radius: 23, mass: 420, maxHealth: 3_450, maxShield: 1_380, speed: 24,
-    turnRate: 32 * DEG, sensorRange: 500, buildPower: 0, buildRange: 0,
+    class: "destroyer", armorType: "plated", radius: 23, mass: 420, maxHealth: 3_450, maxShield: 1_380, speed: 24,
+    turnRate: 32 * DEG, sensorRange: 500, cruiseMultiplier: 1.5, buildPower: 0, buildRange: 0,
     hardpoints: [
       hp(-7, 13, 0, 105, "heavyRail"), hp(7, 13, 0, 105, "heavyRail"),
       hp(-11, 3, -90, 100, "plasma"), hp(11, 3, 90, 100, "plasma"),
@@ -173,9 +268,17 @@ export const SHIPS: Readonly<Record<ShipClass, ShipDefinition>> = {
       hp(-7, 8, -50, 130, "pointDefense"), hp(7, 8, 50, 130, "pointDefense"),
     ],
   },
+  artilleryDestroyer: {
+    class: "artilleryDestroyer", armorType: "plated", radius: 22, mass: 340,
+    maxHealth: 2_400, maxShield: 900, speed: 25,
+    turnRate: 28 * DEG, sensorRange: 370, cruiseMultiplier: 1.5, buildPower: 0, buildRange: 0,
+    hardpoints: [
+      hp(-5.5, 13, -8, 22, "siegeArtillery"), hp(5.5, 13, 8, 22, "siegeArtillery"),
+    ],
+  },
   cruiser: {
-    class: "cruiser", radius: 34, mass: 980, maxHealth: 7_820, maxShield: 3_680, speed: 18,
-    turnRate: 20 * DEG, sensorRange: 610, buildPower: 0, buildRange: 0,
+    class: "cruiser", armorType: "heavy", radius: 34, mass: 980, maxHealth: 7_820, maxShield: 3_680, speed: 18,
+    turnRate: 20 * DEG, sensorRange: 610, cruiseMultiplier: 1.75, buildPower: 0, buildRange: 0,
     hardpoints: [
       hp(-10, 20, -12, 105, "heavyRail"), hp(10, 20, 12, 105, "heavyRail"),
       hp(-15, 10, -65, 115, "plasma"), hp(15, 10, 65, 115, "plasma"),
@@ -185,9 +288,17 @@ export const SHIPS: Readonly<Record<ShipClass, ShipDefinition>> = {
       hp(-7, -18, -150, 140, "pointDefense"), hp(7, -18, 150, 140, "pointDefense"),
     ],
   },
+  artilleryCruiser: {
+    class: "artilleryCruiser", armorType: "heavy", radius: 38, mass: 1_250,
+    maxHealth: 7_800, maxShield: 3_000, speed: 15,
+    turnRate: 14 * DEG, sensorRange: 460, cruiseMultiplier: 1.75, buildPower: 0, buildRange: 0,
+    hardpoints: [
+      hp(-9, 21, -7, 18, "strategicArtillery"), hp(9, 21, 7, 18, "strategicArtillery"),
+    ],
+  },
   carrier: {
-    class: "carrier", radius: 46, mass: 2_100, maxHealth: 13_225, maxShield: 6_670, speed: 13.2,
-    turnRate: 12.75 * DEG, sensorRange: 760, buildPower: 0, buildRange: 0,
+    class: "carrier", armorType: "heavy", radius: 46, mass: 2_100, maxHealth: 13_225, maxShield: 6_670, speed: 13.2,
+    turnRate: 12.75 * DEG, sensorRange: 760, cruiseMultiplier: 2, buildPower: 0, buildRange: 0,
     hardpoints: [
       hp(-18, 24, -35, 115, "beam"), hp(18, 24, 35, 115, "beam"),
       hp(-22, 8, -80, 120, "plasma"), hp(22, 8, 80, 120, "plasma"),
@@ -199,8 +310,8 @@ export const SHIPS: Readonly<Record<ShipClass, ShipDefinition>> = {
     ],
   },
   battleship: {
-    class: "battleship", radius: 52, mass: 3_600, maxHealth: 19_550, maxShield: 8_625, speed: 10.8,
-    turnRate: 9.35 * DEG, sensorRange: 700, buildPower: 0, buildRange: 0,
+    class: "battleship", armorType: "heavy", radius: 52, mass: 3_600, maxHealth: 19_550, maxShield: 8_625, speed: 10.8,
+    turnRate: 9.35 * DEG, sensorRange: 700, cruiseMultiplier: 2, buildPower: 0, buildRange: 0,
     hardpoints: [
       hp(-5, 34, -18, 90, "heavyRail"), hp(5, 34, 18, 90, "heavyRail"),
       hp(-8, 22, -35, 100, "heavyRail"), hp(8, 22, 35, 100, "heavyRail"),
@@ -222,8 +333,11 @@ export const SHIP_TURRET_SCALES: Readonly<Record<ShipClass, number>> = {
   bomber: 0.3,
   flakFrigate: 0.6,
   torpedoFrigate: 0.62,
+  artilleryFrigate: 0.64,
   destroyer: 0.7,
+  artilleryDestroyer: 0.72,
   cruiser: 0.76,
+  artilleryCruiser: 0.78,
   carrier: 0.78,
   battleship: 0.82,
 };
@@ -235,13 +349,16 @@ export const SHIP_ECONOMY: Readonly<Record<ShipClass, ShipEconomyDefinition>> = 
   bomber: { alloyCost: 1_500, energyCost: 1_050, buildTicks: 380, batchSize: 5, yardType: "shipyard", requiredStructures: [] },
   flakFrigate: { alloyCost: 500, energyCost: 340, buildTicks: 250, batchSize: 1, yardType: "fleetShipyard", requiredStructures: [] },
   torpedoFrigate: { alloyCost: 600, energyCost: 420, buildTicks: 275, batchSize: 1, yardType: "fleetShipyard", requiredStructures: [] },
+  artilleryFrigate: { alloyCost: 420, energyCost: 280, buildTicks: 230, batchSize: 1, yardType: "shipyard", requiredStructures: [] },
   destroyer: { alloyCost: 760, energyCost: 520, buildTicks: 360, batchSize: 1, yardType: "fleetShipyard", requiredStructures: [] },
+  artilleryDestroyer: { alloyCost: 1_200, energyCost: 900, buildTicks: 520, batchSize: 1, yardType: "fleetShipyard", requiredStructures: [] },
   cruiser: { alloyCost: 1_750, energyCost: 1_300, buildTicks: 620, batchSize: 1, yardType: "fleetShipyard", requiredStructures: [] },
+  artilleryCruiser: { alloyCost: 4_200, energyCost: 3_800, buildTicks: 1_250, batchSize: 1, yardType: "capitalShipyard", requiredStructures: [] },
   carrier: { alloyCost: 3_600, energyCost: 3_100, buildTicks: 1_050, batchSize: 1, yardType: "capitalShipyard", requiredStructures: [] },
   battleship: { alloyCost: 4_800, energyCost: 4_200, buildTicks: 1_300, batchSize: 1, yardType: "capitalShipyard", requiredStructures: [] },
 };
 
-export const STRUCTURES: Readonly<Record<StructureType, StructureDefinition>> = {
+const STRUCTURE_BASE: Readonly<Record<StructureType, Omit<StructureDefinition, "armorType">>> = {
   commandCore: {
     type: "commandCore", radius: 38, maxHealth: 5_500, maxShield: 1_600,
     alloyCost: 0, energyCost: 0, buildTicks: 1,
@@ -444,17 +561,54 @@ export const STRUCTURES: Readonly<Record<StructureType, StructureDefinition>> = 
       { localX: 28, localZ: 15, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "pointDefense" },
     ],
   },
+  artilleryBattery: {
+    type: "artilleryBattery", radius: 20, maxHealth: 1_600, maxShield: 400,
+    alloyCost: 650, energyCost: 450, buildTicks: 330,
+    alloyIncome: 0, energyIncome: 0, energyUpkeep: 12, alloyStorage: 0, energyStorage: 0,
+    requiredStructures: ["commandCore"], buildPower: 0, assistRange: 0, sensorRange: 300,
+    weaponTypeId: "lightArtillery",
+    hardpoints: [
+      { localX: 0, localZ: 3, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "lightArtillery" },
+    ],
+  },
+  heavyArtilleryBattery: {
+    type: "heavyArtilleryBattery", radius: 28, maxHealth: 4_200, maxShield: 1_200,
+    alloyCost: 1_800, energyCost: 1_350, buildTicks: 680,
+    alloyIncome: 0, energyIncome: 0, energyUpkeep: 42, alloyStorage: 0, energyStorage: 0,
+    requiredStructures: ["fleetShipyard", "fusionReactor"], buildPower: 0, assistRange: 0, sensorRange: 420,
+    weaponTypeId: "siegeArtillery",
+    hardpoints: [
+      { localX: -8, localZ: 4, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "siegeArtillery" },
+      { localX: 8, localZ: 4, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "siegeArtillery" },
+    ],
+  },
+  strategicArtilleryArray: {
+    type: "strategicArtilleryArray", radius: 40, maxHealth: 9_000, maxShield: 3_000,
+    alloyCost: 5_500, energyCost: 5_200, buildTicks: 1_500,
+    alloyIncome: 0, energyIncome: 0, energyUpkeep: 120, alloyStorage: 0, energyStorage: 0,
+    requiredStructures: ["capitalShipyard", "antimatterReactor"], buildPower: 0, assistRange: 0, sensorRange: 540,
+    weaponTypeId: "strategicArtillery",
+    hardpoints: [
+      { localX: -12, localZ: 6, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "strategicArtillery" },
+      { localX: 12, localZ: 6, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "strategicArtillery" },
+    ],
+  },
 };
+
+export const STRUCTURES: Readonly<Record<StructureType, StructureDefinition>> = Object.fromEntries(
+  Object.entries(STRUCTURE_BASE).map(([type, definition]) => [type, { ...definition, armorType: "fortified" as const }]),
+) as unknown as Readonly<Record<StructureType, StructureDefinition>>;
 
 export const ALL_SHIP_CLASSES: readonly ShipClass[] = [
   "fighter", "fabricator", "frigate", "bomber", "flakFrigate", "torpedoFrigate",
-  "destroyer", "cruiser", "carrier", "battleship",
+  "artilleryFrigate", "destroyer", "artilleryDestroyer", "cruiser", "artilleryCruiser", "carrier", "battleship",
 ];
 
 export const SHIPYARD_TYPES = ["shipyard", "fleetShipyard", "capitalShipyard"] as const;
 
 export const DEFENSIVE_STRUCTURE_TYPES = [
   "pointDefenseBattery", "missileBattery", "railBattery", "plasmaBattery", "beamBattery",
+  "artilleryBattery", "heavyArtilleryBattery", "strategicArtilleryArray",
 ] as const;
 
 export const RESOURCE_EXTRACTOR_TYPES = ["extractor", "deepCoreExtractor", "singularityHarvester"] as const;

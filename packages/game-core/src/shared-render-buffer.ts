@@ -1,4 +1,4 @@
-import { ALL_SHIP_CLASSES, WEAPONS } from "./data";
+import { ALL_SHIP_CLASSES, SHIPS, WEAPONS } from "./data";
 import type { ProjectileState, ShipState, SimulationState, TurretState } from "./types";
 
 const HEADER_LENGTH = 8;
@@ -43,9 +43,9 @@ export interface SharedRenderFrame {
 }
 
 const SHIP_TRANSFORM_STRIDE = 7; // x, y, z, yaw, vx, vz, team
-const SHIP_VITALS_STRIDE = 2;
+const SHIP_VITALS_STRIDE = 5; // health, shields, cruise, artillery deployment, reveal expiry
 const TURRET_STATE_STRIDE = 3; // yaw, target, cooldown
-const PROJECTILE_STATE_STRIDE = 8; // x, z, previous x/z, vx/vz, target, weapon
+const PROJECTILE_STATE_STRIDE = 11; // x, z, previous x/z, vx/vz, target, weapon, fixed, target x/z
 
 const shipClassId = new Map(ALL_SHIP_CLASSES.map((shipClass, index) => [shipClass, index]));
 const weaponId = new Map(Object.keys(WEAPONS).map((weaponType, index) => [weaponType, index]));
@@ -138,6 +138,9 @@ export class SharedRenderWriter {
     const vitals = index * SHIP_VITALS_STRIDE;
     this.shipVitals[vitals] = ship.health;
     this.shipVitals[vitals + 1] = ship.shields;
+    this.shipVitals[vitals + 2] = Math.hypot(ship.vx, ship.vz) > SHIPS[ship.class].speed * 1.01 ? 1 : 0;
+    this.shipVitals[vitals + 3] = ship.artilleryDeploymentTicks ?? 0;
+    this.shipVitals[vitals + 4] = ship.revealedUntilTick ?? 0;
   }
 
   private writeTurret(index: number, turret: TurretState): void {
@@ -160,6 +163,9 @@ export class SharedRenderWriter {
     this.projectileState[offset + 5] = projectile.vz;
     this.projectileState[offset + 6] = projectile.targetEntityId;
     this.projectileState[offset + 7] = weaponId.get(projectile.weaponTypeId) ?? 0;
+    this.projectileState[offset + 8] = projectile.fixedTrajectory ? 1 : 0;
+    this.projectileState[offset + 9] = projectile.targetX;
+    this.projectileState[offset + 10] = projectile.targetZ;
   }
 
   private frame(version: number): SharedRenderFrame {

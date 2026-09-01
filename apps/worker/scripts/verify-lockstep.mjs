@@ -60,7 +60,7 @@ class Peer {
 
 function assertLockstepState(message, label) {
   const state = message.state;
-  if (message.type !== "lockstep_state" || state?.version !== 7 || state.tick !== message.tick
+  if (message.type !== "lockstep_state" || state?.version !== 9 || state.tick !== message.tick
     || state.checksum !== message.checksum || !Number.isInteger(state.seed)
     || !Array.isArray(state.commandQueue) || !Array.isArray(state.visibility)) {
     throw new Error(`${label} was not a complete deterministic bootstrap state`);

@@ -53,6 +53,11 @@ export function projectPlayerView(state: SimulationState, playerId: PlayerId): P
           && visibleEntityIds.has(ship.focusTargetEntityId)
           ? ship.focusTargetEntityId
           : null,
+        lastCombatTick: sharesPrivateState ? ship.lastCombatTick : 0,
+        ...(ship.artilleryDeploymentTicks !== undefined
+          ? { artilleryDeploymentTicks: ship.artilleryDeploymentTicks }
+          : {}),
+        ...(ship.revealedUntilTick !== undefined ? { revealedUntilTick: ship.revealedUntilTick } : {}),
         turrets: ship.turrets.map((turret) => ({
           id: turret.id,
           parentShipId: turret.parentShipId,
@@ -98,12 +103,15 @@ export function projectPlayerView(state: SimulationState, playerId: PlayerId): P
           : [],
         repeatProduction: sharesPrivateState && structure.repeatProduction,
         rallyPoint: sharesPrivateState ? { ...structure.rallyPoint } : null,
+        ...(structure.revealedUntilTick !== undefined
+          ? { revealedUntilTick: structure.revealedUntilTick }
+          : {}),
       };
     });
 
   const view: PlayerViewState = {
     version: 1,
-    simulationVersion: 7,
+    simulationVersion: 9,
     tick: state.tick,
     viewerPlayerId: viewer.id,
     viewerTeamId: viewer.teamId,
@@ -184,7 +192,7 @@ export function calculateTeamViewChecksum(view: TeamViewState): number {
 export function projectOmniscientView(state: SimulationState): OmniscientViewState {
   const view: OmniscientViewState = {
     version: 1,
-    simulationVersion: 7,
+    simulationVersion: 9,
     tick: state.tick,
     players: state.players.map((player) => ({
       id: player.id,
