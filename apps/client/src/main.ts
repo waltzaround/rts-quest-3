@@ -144,6 +144,46 @@ const worldRoot = new THREE.Group();
 scene.add(worldRoot);
 createEnvironment();
 
+const mapBoundaryGroup = new THREE.Group();
+const mapBoundaryGlowMaterial = new THREE.MeshBasicMaterial({
+  color: 0x3dbddd, transparent: true, opacity: 0.16, depthTest: false, depthWrite: false, fog: false,
+});
+const mapBoundaryCoreMaterial = new THREE.MeshBasicMaterial({
+  color: 0x72e2ff, transparent: true, opacity: 0.72, depthTest: false, depthWrite: false, fog: false,
+});
+const mapBoundaryGlow: THREE.Mesh[] = [];
+const mapBoundaryCore: THREE.Mesh[] = [];
+for (let index = 0; index < 4; index += 1) {
+  const glow = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), mapBoundaryGlowMaterial);
+  const core = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), mapBoundaryCoreMaterial);
+  glow.renderOrder = 31;
+  core.renderOrder = 32;
+  mapBoundaryGroup.add(glow, core);
+  mapBoundaryGlow.push(glow);
+  mapBoundaryCore.push(core);
+}
+mapBoundaryGroup.position.y = 1.5;
+scene.add(mapBoundaryGroup);
+let renderedMapBoundaryExtent = 0;
+
+function updateMapBoundary(halfExtent: number): void {
+  if (Math.abs(renderedMapBoundaryExtent - halfExtent) < 1) return;
+  renderedMapBoundaryExtent = halfExtent;
+  const length = halfExtent * 2;
+  const configure = (pieces: readonly THREE.Mesh[], thickness: number, height: number) => {
+    pieces[0]!.position.set(0, height, -halfExtent);
+    pieces[0]!.scale.set(length, 0.35, thickness);
+    pieces[1]!.position.set(0, height, halfExtent);
+    pieces[1]!.scale.set(length, 0.35, thickness);
+    pieces[2]!.position.set(-halfExtent, height, 0);
+    pieces[2]!.scale.set(thickness, 0.35, length);
+    pieces[3]!.position.set(halfExtent, height, 0);
+    pieces[3]!.scale.set(thickness, 0.35, length);
+  };
+  configure(mapBoundaryGlow, 12, 0);
+  configure(mapBoundaryCore, 2.5, 0.22);
+};
+
 interface StructureVisual {
   group: THREE.Group;
   shield: THREE.Mesh;
@@ -1248,8 +1288,8 @@ function localSensorDiscs(): Array<{ x: number; z: number; range: number }> {
 
 const FOG_TEXTURE_SIZE = 384;
 const FOG_UPDATE_INTERVAL_MS = 160;
-const FOG_UNEXPLORED_ALPHA = 0.985;
-const FOG_EXPLORED_REVEAL = 0.38;
+const FOG_UNEXPLORED_ALPHA = 0.995;
+const FOG_EXPLORED_REVEAL = 0.64;
 const FOG_VISIBLE_REVEAL = 0.985;
 const fogExploredCanvas = document.createElement("canvas");
 const fogVisibleCanvas = document.createElement("canvas");
@@ -4256,6 +4296,7 @@ function drawMinimap(): void {
   if (!context) return;
   const width = minimap.width;
   const halfExtent = minimapHalfExtent();
+  updateMapBoundary(halfExtent);
   context.clearRect(0, 0, width, width);
   context.fillStyle = "#04090e";
   context.fillRect(0, 0, width, width);
@@ -4316,6 +4357,9 @@ function drawMinimap(): void {
     context.fillRect(x - size / 2, y - size / 2, size, size);
   }
   context.shadowBlur = 0;
+  context.strokeStyle = "rgba(112,226,255,.78)";
+  context.lineWidth = 1.5;
+  context.strokeRect(1.25, 1.25, width - 2.5, width - 2.5);
   context.strokeStyle = "rgba(141,221,255,.65)";
   const viewSize = Math.min(width, (cameraRig.distance / (halfExtent * 2)) * width * 0.65);
   const viewX = minimapCoordinate(cameraRig.target.x, halfExtent, width);
@@ -6025,11 +6069,40 @@ element<HTMLSelectElement>("stress-count").addEventListener("change", (event) =>
   }
 });
 const minimapElement = element<HTMLCanvasElement>("minimap");
-minimapElement.addEventListener("click", (event) => {
+let minimapDragPointerId: number | null = null;
+const moveCameraFromMinimap = (event: PointerEvent) => {
   const rect = minimapElement.getBoundingClientRect();
   const halfExtent = minimapHalfExtent();
-  cameraRig.target.x = ((event.clientX - rect.left) / rect.width) * halfExtent * 2 - halfExtent;
-  cameraRig.target.z = ((event.clientY - rect.top) / rect.height) * halfExtent * 2 - halfExtent;
+  const x = THREE.MathUtils.clamp((event.clientX - rect.left) / rect.width, 0, 1);
+  const y = THREE.MathUtils.clamp((event.clientY - rect.top) / rect.height, 0, 1);
+  cameraRig.target.x = x * halfExtent * 2 - halfExtent;
+  cameraRig.target.z = y * halfExtent * 2 - halfExtent;
+};
+minimapElement.addEventListener("pointerdown", (event) => {
+  if (event.button !== 0) return;
+  minimapDragPointerId = event.pointerId;
+  minimapElement.setPointerCapture(event.pointerId);
+  minimapElement.classList.add("dragging");
+  moveCameraFromMinimap(event);
+  event.preventDefault();
+});
+minimapElement.addEventListener("pointermove", (event) => {
+  if (event.pointerId !== minimapDragPointerId || !minimapElement.hasPointerCapture(event.pointerId)) return;
+  moveCameraFromMinimap(event);
+  event.preventDefault();
+});
+const endMinimapDrag = (event: PointerEvent) => {
+  if (event.pointerId !== minimapDragPointerId) return;
+  if (minimapElement.hasPointerCapture(event.pointerId)) minimapElement.releasePointerCapture(event.pointerId);
+  minimapDragPointerId = null;
+  minimapElement.classList.remove("dragging");
+};
+minimapElement.addEventListener("pointerup", endMinimapDrag);
+minimapElement.addEventListener("pointercancel", endMinimapDrag);
+minimapElement.addEventListener("lostpointercapture", (event) => {
+  if (event.pointerId !== minimapDragPointerId) return;
+  minimapDragPointerId = null;
+  minimapElement.classList.remove("dragging");
 });
 
 element<HTMLInputElement>("pilot-name").value = localStorage.getItem("voidfront:pilot-name") ?? "Commander";

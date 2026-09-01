@@ -94,7 +94,8 @@ button, input { font: inherit; }
 
 .left-rail { position:fixed; z-index:5; left:18px; bottom:16px; width:224px; height:214px; padding:10px 12px; }
 .eyebrow { color:#66859b; font:8px "JetBrains Mono"; letter-spacing:.17em; }
-#minimap { display:block; width:196px; height:154px; margin:7px auto 4px; background:#04090e; border:1px solid rgba(111,179,218,.3); }
+#minimap { display:block; width:196px; height:154px; margin:7px auto 4px; background:#04090e; border:1px solid rgba(111,210,242,.62); box-shadow:inset 0 0 14px rgba(48,154,190,.08),0 0 10px rgba(48,154,190,.06); cursor:crosshair; touch-action:none; }
+#minimap.dragging { cursor:grabbing; border-color:rgba(126,231,255,.92); }
 .legend { display:flex; gap:18px; font:8px "JetBrains Mono"; color:#6f899c; padding:4px 2px 0; }
 .legend i { display:inline-block; width:6px; height:6px; border-radius:50%; margin-right:5px; }.legend .ally{background:var(--blue)}.legend .hostile{background:var(--red)}
 .event-feed { position: fixed; left: 18px; bottom: 238px; width: 224px; height: 54px; padding: 7px 10px; overflow:hidden; font:8px/1.7 "JetBrains Mono"; color:#88a2b4; background: rgba(4,10,16,.72); border-left: 1px solid rgba(98,220,255,.28); }
