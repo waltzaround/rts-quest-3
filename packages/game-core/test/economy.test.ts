@@ -80,7 +80,7 @@ describe("continuous economy and production", () => {
     expect(simulation.getAvailableStructureTypes("pilot-blue")).not.toContain("advancedFabrication");
     expect(simulation.getAvailableStructureTypes("pilot-blue")).not.toContain("fusionReactor");
     expect(simulation.getAvailableStructureTypes("pilot-blue")).not.toContain("capitalInfrastructure");
-    expect(simulation.getAvailableShipClasses("pilot-blue")).toEqual(["fighter", "fabricator", "frigate", "bomber"]);
+    expect(simulation.getAvailableShipClasses("pilot-blue")).toEqual(["fighter", "fabricator", "frigate", "bomber", "artilleryFrigate"]);
     const lightYard = simulation.state.structures.find(
       (structure) => structure.ownerPlayerId === "pilot-blue" && structure.type === "shipyard",
     )!;

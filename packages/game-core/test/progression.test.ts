@@ -58,7 +58,7 @@ describe("horizontal infrastructure progression", () => {
     expect(simulation.state.ships).toHaveLength(0);
     expect(simulation.state.structures.filter((structure) => structure.type === "commandCore")).toHaveLength(2);
     expect(simulation.state.structures.filter((structure) => structure.type === "shipyard")).toHaveLength(2);
-    expect(simulation.getAvailableShipClasses("pilot-blue")).toEqual(["fighter", "fabricator", "frigate", "bomber"]);
+    expect(simulation.getAvailableShipClasses("pilot-blue")).toEqual(["fighter", "fabricator", "frigate", "bomber", "artilleryFrigate"]);
     expect(simulation.getAvailableStructureTypes("pilot-blue")).not.toContain("advancedFabrication");
     expect(simulation.getAvailableStructureTypes("pilot-blue")).not.toContain("fusionReactor");
     expect(simulation.getAvailableStructureTypes("pilot-blue")).not.toContain("capitalInfrastructure");
@@ -122,8 +122,11 @@ describe("horizontal infrastructure progression", () => {
       bomber: "shipyard",
       flakFrigate: "fleetShipyard",
       torpedoFrigate: "fleetShipyard",
+      artilleryFrigate: "shipyard",
       destroyer: "fleetShipyard",
+      artilleryDestroyer: "fleetShipyard",
       cruiser: "fleetShipyard",
+      artilleryCruiser: "capitalShipyard",
       carrier: "capitalShipyard",
       battleship: "capitalShipyard",
     };

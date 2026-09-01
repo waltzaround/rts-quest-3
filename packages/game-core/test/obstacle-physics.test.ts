@@ -103,6 +103,7 @@ describe("authoritative asteroid physics", () => {
       ownerTeamId: attacker.teamId,
       weaponTypeId: "heavyRail",
       targetEntityId: target.id,
+      targetX: target.x, targetZ: target.z, fixedTrajectory: false,
       x: attacker.x,
       z: attacker.z,
       previousX: attacker.x,
@@ -131,7 +132,8 @@ describe("authoritative asteroid physics", () => {
     owner.class = "fighter";
     const addExpiringProjectile = (id: number) => simulation.state.projectiles.push({
       id, ownerShipId: owner.id, ownerTeamId: owner.teamId, weaponTypeId: "plasma",
-      targetEntityId: 999_999, x: 0, z: 0, previousX: 0, previousZ: 0,
+      targetEntityId: 999_999, targetX: 0, targetZ: 0, fixedTrajectory: false,
+      x: 0, z: 0, previousX: 0, previousZ: 0,
       vx: 0, vz: 0, radius: 1, damage: 1, lifetimeTicks: 1,
     });
 
@@ -162,6 +164,7 @@ describe("authoritative asteroid physics", () => {
     simulation.state.projectiles = [{
       id: projectileId, ownerShipId: owner.id, ownerTeamId: owner.teamId,
       weaponTypeId: "heavyRail", targetEntityId: target.id,
+      targetX: target.x, targetZ: target.z, fixedTrajectory: false,
       x: 0, z: 0, previousX: 0, previousZ: 0,
       vx: 0, vz: 510, radius: 2.5, damage: 42, lifetimeTicks: 32,
     }];

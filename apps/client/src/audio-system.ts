@@ -93,10 +93,14 @@ export interface BattleAudioMetrics {
 
 const CUE_BASE_PRIORITY: Readonly<Record<CueKind, number>> = {
   pointDefense: 0.65,
+  flakCannon: 0.82,
   autocannon: 0.8,
   torpedo: 1.3,
   plasma: 1.05,
   heavyRail: 1.45,
+  lightArtillery: 1.55,
+  siegeArtillery: 1.8,
+  strategicArtillery: 2.1,
   beam: 1.4,
   impact: 0.72,
   explosion: 1.8,
@@ -108,10 +112,14 @@ const CUE_BASE_PRIORITY: Readonly<Record<CueKind, number>> = {
 
 const CUE_GAIN: Readonly<Record<CueKind, number>> = {
   pointDefense: 0.16,
+  flakCannon: 0.2,
   autocannon: 0.28,
   torpedo: 0.3,
   plasma: 0.25,
   heavyRail: 0.36,
+  lightArtillery: 0.38,
+  siegeArtillery: 0.46,
+  strategicArtillery: 0.56,
   beam: 0.26,
   impact: 0.2,
   explosion: 0.4,
@@ -123,10 +131,14 @@ const CUE_GAIN: Readonly<Record<CueKind, number>> = {
 
 const CUE_TONE: Readonly<Record<CueKind, { highpass: number; presence: number; boost: number }>> = {
   pointDefense: { highpass: 330, presence: 2_650, boost: 3.2 },
+  flakCannon: { highpass: 285, presence: 2_450, boost: 3.5 },
   autocannon: { highpass: 125, presence: 1_550, boost: 3.2 },
   torpedo: { highpass: 125, presence: 1_350, boost: 2.3 },
   plasma: { highpass: 145, presence: 1_750, boost: 3.1 },
   heavyRail: { highpass: 92, presence: 1_450, boost: 3.8 },
+  lightArtillery: { highpass: 82, presence: 1_280, boost: 3.9 },
+  siegeArtillery: { highpass: 70, presence: 1_150, boost: 4.2 },
+  strategicArtillery: { highpass: 55, presence: 980, boost: 4.8 },
   beam: { highpass: 150, presence: 2_200, boost: 2.7 },
   impact: { highpass: 155, presence: 2_350, boost: 3.6 },
   explosion: { highpass: 86, presence: 1_650, boost: 3.1 },
@@ -143,8 +155,11 @@ const SHIP_ENGINE_WEIGHT: Readonly<Record<ShipState["class"], number>> = {
   bomber: 0.58,
   flakFrigate: 0.92,
   torpedoFrigate: 0.98,
+  artilleryFrigate: 0.96,
   destroyer: 1.55,
+  artilleryDestroyer: 1.45,
   cruiser: 2.2,
+  artilleryCruiser: 2.55,
   carrier: 3.1,
   battleship: 3.8,
 };
@@ -156,8 +171,11 @@ const SHIP_ENGINE_TONE: Readonly<Record<ShipState["class"], number>> = {
   frigate: 820,
   flakFrigate: 880,
   torpedoFrigate: 780,
+  artilleryFrigate: 740,
   destroyer: 650,
+  artilleryDestroyer: 610,
   cruiser: 540,
+  artilleryCruiser: 500,
   carrier: 460,
   battleship: 410,
 };
@@ -216,6 +234,11 @@ function createCueBuffers(context: AudioContext): Record<CueKind, AudioBuffer> {
       const mechanism = Math.sin(Math.PI * 2 * 2_150 * time) * Math.exp(-time * 175);
       return crack * 0.96 + report * 0.32 + mechanism * 0.2;
     }, 0x01de_fade),
+    flakCannon: makeBuffer(context, 0.085, (time, random) => {
+      const crack = noise(random) * Math.exp(-time * 280);
+      const report = noise(random) * Math.exp(-time * 82);
+      return crack + report * 0.42;
+    }, 0xf1a4_ca11),
     autocannon: makeBuffer(context, 0.205, (time, random) => {
       // One simulation cue represents several squad weapons. Give it an uneven,
       // overlapping heavy-cannon burst instead of one clean electronic pop.
@@ -253,6 +276,23 @@ function createCueBuffers(context: AudioContext): Record<CueKind, AudioBuffer> {
       const recoil = Math.sin(Math.PI * 2 * 720 * time) * Math.exp(-time * 44);
       return crack * 1.0 + blast * 0.44 + pressure * 0.5 + recoil * 0.2;
     }, 0x7a11_5eed),
+    lightArtillery: makeBuffer(context, 0.42, (time, random) => {
+      const crack = noise(random) * Math.exp(-time * 260);
+      const pressure = Math.sin(Math.PI * 2 * (190 * time - 24 * time * time)) * Math.exp(-time * 23);
+      return crack + pressure * 0.62;
+    }, 0x11a7_111e),
+    siegeArtillery: makeBuffer(context, 0.58, (time, random) => {
+      const crack = noise(random) * Math.exp(-time * 240);
+      const pressure = Math.sin(Math.PI * 2 * (155 * time - 18 * time * time)) * Math.exp(-time * 18);
+      const recoil = noise(random) * Math.exp(-time * 32);
+      return crack + pressure * 0.72 + recoil * 0.35;
+    }, 0x51e9_ea11),
+    strategicArtillery: makeBuffer(context, 0.78, (time, random) => {
+      const crack = noise(random) * Math.exp(-time * 210);
+      const pressure = Math.sin(Math.PI * 2 * (112 * time - 11 * time * time)) * Math.exp(-time * 13);
+      const recoil = noise(random) * Math.exp(-time * 21);
+      return crack + pressure * 0.88 + recoil * 0.42;
+    }, 0x57a7_39c0),
     beam: makeBuffer(context, 0.39, (time, random) => {
       const breaker = noise(random) * Math.exp(-time * 130);
       const power = noise(random) * Math.min(1, time * 110) * Math.exp(-time * 12);

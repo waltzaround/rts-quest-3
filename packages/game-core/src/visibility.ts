@@ -4,6 +4,7 @@ import type {
   CombatTargetState,
   EntityId,
   ProjectileState,
+  ResourceNodeState,
   SimulationState,
   TeamId,
   TeamVisibilityState,
@@ -83,16 +84,22 @@ export function initializeTeamVisibility(state: SimulationState): void {
     }));
 }
 
-export function updateTeamVisibility(state: SimulationState): void {
+export function updateTeamVisibility(
+  state: SimulationState,
+  existingTargetHash?: SpatialHash<CombatTargetState>,
+): void {
   const priorDiscovery = new Map(
     (state.visibility ?? []).map((visibility) => [visibility.teamId, visibility.discoveredResourceNodeIds]),
   );
   const teamIds = [...state.teams].sort((left, right) => left.id - right.id).map((team) => team.id);
-  const targets = [...state.ships, ...state.structures].filter((target) => target.health > 0);
-  const targetHash = new SpatialHash<CombatTargetState>(160);
-  targetHash.rebuild(targets);
+  const targetHash = existingTargetHash ?? new SpatialHash<CombatTargetState>(160);
+  if (!existingTargetHash) {
+    targetHash.rebuild([...state.ships, ...state.structures].filter((target) => target.health > 0));
+  }
   const projectileHash = new SpatialHash<ProjectileState>(160);
   projectileHash.rebuild(state.projectiles);
+  const resourceHash = state.resourceNodes.length > 32 ? new SpatialHash<ResourceNodeState>(160) : null;
+  resourceHash?.rebuild(state.resourceNodes);
 
   const ownedEntityIds = new Map<TeamId, Set<EntityId>>();
   const ownedProjectileIds = new Map<TeamId, Set<EntityId>>();
@@ -146,7 +153,8 @@ export function updateTeamVisibility(state: SimulationState): void {
       for (const projectile of projectileHash.query(source.x, source.z, source.range)) {
         if (distanceSquared(source, projectile) <= rangeSquared) detectedProjectiles.add(projectile.id);
       }
-      for (const resource of state.resourceNodes) {
+      const nearbyResources = resourceHash?.query(source.x, source.z, source.range) ?? state.resourceNodes;
+      for (const resource of nearbyResources) {
         if (distanceSquared(source, resource) <= rangeSquared) detectedResources.add(resource.id);
       }
     }
@@ -163,6 +171,18 @@ export function updateTeamVisibility(state: SimulationState): void {
       for (const projectileId of ownedProjectileIds.get(sourceTeamId)!) visibleProjectileIds.add(projectileId);
       for (const projectileId of detectedProjectileIds.get(sourceTeamId)!) visibleProjectileIds.add(projectileId);
       for (const resourceId of detectedResourceIds.get(sourceTeamId)!) discoveredResourceNodeIds.add(resourceId);
+    }
+    for (const ship of state.ships) {
+      if ((ship.revealedUntilTick ?? 0) > 0 && (ship.revealedUntilTick ?? 0) >= state.tick
+        && !areTeamsAllied(state, viewerTeamId, ship.teamId)) {
+        visibleEntityIds.add(ship.id);
+      }
+    }
+    for (const structure of state.structures) {
+      if ((structure.revealedUntilTick ?? 0) > 0 && (structure.revealedUntilTick ?? 0) >= state.tick
+        && !areTeamsAllied(state, viewerTeamId, structure.teamId)) {
+        visibleEntityIds.add(structure.id);
+      }
     }
     return {
       teamId: viewerTeamId,

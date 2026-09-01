@@ -249,6 +249,7 @@ describe("authoritative sensor visibility", () => {
     const alliedProjectile = {
       id: simulation.state.nextEntityId++, ownerShipId: scout.id, ownerTeamId: 1,
       weaponTypeId: "autocannon" as const, targetEntityId: 0,
+      targetX: 3_000, targetZ: 3_000, fixedTrajectory: false,
       x: 3_000, z: 3_000, previousX: 3_000, previousZ: 3_000,
       vx: 0, vz: 0, radius: 1, damage: 1, lifetimeTicks: 10,
     };
@@ -322,6 +323,7 @@ describe("secure player view projection", () => {
     const projectile = {
       id: simulation.state.nextEntityId++, ownerShipId: hiddenHostile.id, ownerTeamId: 2,
       weaponTypeId: "plasma" as const, targetEntityId: hiddenHostile.id,
+      targetX: 120, targetZ: 0, fixedTrajectory: false,
       x: 120, z: 0, previousX: 120, previousZ: 0,
       vx: 0, vz: 0, radius: 1, damage: 1, lifetimeTicks: 10,
     };
@@ -377,7 +379,7 @@ describe("secure player view projection", () => {
 
     const view = projectTeamView(simulation.state, 1)!;
     expect(view).toMatchObject({
-      simulationVersion: 7,
+      simulationVersion: 9,
       viewerPlayerId: null,
       viewerTeamId: 1,
       ownLastCommandSequence: null,
@@ -397,7 +399,7 @@ describe("secure player view projection", () => {
     enemy.focusTargetEntityId = simulation.state.ships.find((ship) => ship.teamId === 1)!.id;
     const view = projectOmniscientView(simulation.state);
 
-    expect(view.simulationVersion).toBe(7);
+    expect(view.simulationVersion).toBe(9);
     expect(view.ships).toHaveLength(simulation.state.ships.length);
     expect(view.structures).toHaveLength(simulation.state.structures.length);
     expect(view.resourceNodes).toHaveLength(simulation.state.resourceNodes.length);
@@ -448,7 +450,7 @@ describe("visibility serialization", () => {
     legacy.version = 4;
     delete legacy.visibility;
     const restored = restoreSimulation(legacy as unknown as SimulationState);
-    expect(restored.state.version).toBe(7);
+    expect(restored.state.version).toBe(9);
     expect(restored.state.visibility.map((visibility) => visibility.teamId)).toEqual([1, 2]);
     expect(restored.state.visibility.every((visibility) => visibility.visibleEntityIds.length > 0)).toBe(true);
   });

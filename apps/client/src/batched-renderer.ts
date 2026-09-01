@@ -79,13 +79,15 @@ function createTacticalGeometry(classId: number): THREE.BufferGeometry {
 
   // Light craft share a compact military frame. Capital classes use distinct
   // silhouettes so they remain identifiable before their field marks resolve.
-  const framePoints: ReadonlyArray<readonly [number, number]> = classId === 6
+  const framePoints: ReadonlyArray<readonly [number, number]> = classId === 7
     ? [[0, 0.82], [1.08, 0], [0, -0.82], [-1.08, 0]] // Destroyer: diamond.
-    : classId === 7
+    : classId === 6 || classId === 8 || classId === 10
+      ? [[-0.72, 0.88], [0.72, 0.88], [0.9, -0.88], [-0.9, -0.88]] // Artillery: long fire-support hull.
+    : classId === 9
       ? [[-0.9, 0.7], [0.9, 0.7], [1.2, 0], [0.9, -0.7], [-0.9, -0.7], [-1.2, 0]] // Cruiser: hexagon.
-      : classId === 8
+      : classId === 11
         ? [[-1.28, 0.6], [1.28, 0.6], [1.28, -0.6], [-1.28, -0.6]] // Carrier: flight deck.
-        : classId === 9
+        : classId === 12
           ? [[-0.92, 0.8], [0.92, 0.8], [1.22, 0.5], [1.22, -0.5], [0.92, -0.8], [-0.92, -0.8], [-1.22, -0.5], [-1.22, 0.5]] // Battleship: heavy octagon.
           : [[-0.88, 0.72], [0.88, 0.72], [1.08, 0.52], [1.08, -0.52], [0.88, -0.72], [-0.88, -0.72], [-1.08, -0.52], [-1.08, 0.52]];
   const frameStroke = classId >= 6 ? 0.15 : BADGE_STROKE;
@@ -124,18 +126,23 @@ function createTacticalGeometry(classId: number): THREE.BufferGeometry {
       addBar(-0.62, 0.32, 0, -0.36, 0.15);
       addBar(0, -0.36, 0.62, 0.32, 0.15);
       break;
-    case 6: // Destroyer: medium-combat cross.
+    case 7: // Destroyer: medium-combat cross.
       addBar(-0.62, 0, 0.62, 0, 0.17);
       addBar(0, -0.44, 0, 0.44, 0.17);
       addBar(-0.26, 1.02, 0.26, 1.02, 0.14);
       break;
-    case 7: // Cruiser: twin heavy-combat bars.
+    case 6: case 8: case 10: // Artillery: long-range gun mark.
+      addBar(-0.28, -0.55, -0.28, 0.55, 0.14);
+      addBar(0.28, -0.55, 0.28, 0.55, 0.14);
+      addBar(-0.52, 1.02, 0.52, 1.02, 0.14);
+      break;
+    case 9: // Cruiser: twin heavy-combat bars.
       addBar(-0.62, 0.23, 0.62, 0.23, 0.16);
       addBar(-0.62, -0.23, 0.62, -0.23, 0.16);
       addBar(-0.5, 0.94, -0.08, 0.94, 0.14);
       addBar(0.08, 0.94, 0.5, 0.94, 0.14);
       break;
-    case 8: // Carrier: flight deck and embarked air wing.
+    case 11: // Carrier: flight deck and embarked air wing.
       addBar(0, -0.5, 0, 0.5, 0.16);
       addBar(-0.58, -0.2, 0, 0.3, 0.13);
       addBar(0, 0.3, 0.58, -0.2, 0.13);
@@ -250,10 +257,11 @@ const HEALTH_BAR_GREEN = new THREE.Color(0x63df8c);
 const HEALTH_BAR_AMBER = new THREE.Color(0xf1bd5a);
 const HEALTH_BAR_RED = new THREE.Color(0xff5674);
 const DAMAGE_SCORCH = new THREE.Color(0x24130d);
+const ARTILLERY_REVEAL = new THREE.Color(0xffb35c);
 const DAMAGE_EMBER = new THREE.Color(0xff6a24);
 const DAMAGE_EMBER_HOT = new THREE.Color(0xffc04f);
 const MAX_DAMAGE_INSTANCES = 256;
-const DAMAGE_VISIBLE_CLASS_IDS = new Set([2, 4, 5, 6, 7, 8, 9]);
+const DAMAGE_VISIBLE_CLASS_IDS = new Set([2, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
 
 export class BatchedShipRenderer {
   readonly group = new THREE.Group();
@@ -455,6 +463,11 @@ export class BatchedShipRenderer {
     (this.shieldBatch.mesh.material as THREE.MeshBasicMaterial).opacity = quality === "low" ? 0.045 : quality === "medium" ? 0.075 : 0.095;
   }
 
+  clearHistory(): void {
+    this.fighterFormations.clear();
+    this.lastUpdateAt = 0;
+  }
+
   update(
     state: InterpolatedRenderState,
     now: number,
@@ -494,6 +507,7 @@ export class BatchedShipRenderer {
       this.color.setHex(state.shipColor[index]!);
       const health = state.shipHealth[index]!;
       this.tint.copy(this.color).lerp(this.white, 0.58).multiplyScalar(0.62 + health * 0.38);
+      if (state.shipRevealed[index]) this.tint.lerp(ARTILLERY_REVEAL, 0.22 + Math.sin(now * 0.014) * 0.08);
       if (health < 0.7) this.tint.lerp(DAMAGE_SCORCH, Math.min(0.58, (0.7 - health) * 0.92));
       if (health < 0.3) this.color.multiplyScalar(0.62 + Math.abs(Math.sin(now * 0.012 + state.shipIds[index]!)) * 0.38);
       const lod = state.shipLod[index]! as VisualLod;
@@ -523,7 +537,7 @@ export class BatchedShipRenderer {
         let formationYaw = desiredYaw;
         if (classId === 0) {
           let formation = this.fighterFormations.get(shipId);
-          if (!formation) {
+          if (!formation || state.shipNewlyVisible[index]) {
             formation = { yaw: desiredYaw, lastSeen: now };
             this.fighterFormations.set(shipId, formation);
           }
@@ -612,7 +626,7 @@ export class BatchedShipRenderer {
       const turretScale = SHIP_TURRET_SCALES[shipClass] ?? 1.24;
       const verticalScale = shipClass === "cruiser" || shipClass === "carrier" || shipClass === "battleship"
         ? 0.62
-        : shipClass === "destroyer"
+        : shipClass === "destroyer" || shipClass === "artilleryDestroyer"
           ? 0.74
           : 0.86;
       this.localMatrix.makeRotationY(state.turretYaw[index]!);
@@ -748,10 +762,12 @@ export class BatchedShipRenderer {
     const nozzleCount = lod === VisualLod.Close && this.quality !== "low" ? offsets.length : 1;
     const engine = state.shipEngine[shipIndex]!;
     const pulse = 0.88 + Math.sin(now * 0.026 + state.shipIds[shipIndex]! * 0.73) * 0.12;
-    const length = (THRUSTER_LENGTH[classId] ?? 20) * (0.46 + engine * 0.62) * pulse * QUALITY_ENGINE_SCALE[this.quality];
+    const cruiseScale = state.shipCruising[shipIndex] ? 1.18 : 1;
+    const length = (THRUSTER_LENGTH[classId] ?? 20) * (0.46 + engine * 0.62) * pulse
+      * QUALITY_ENGINE_SCALE[this.quality] * cruiseScale;
     const width = (THRUSTER_WIDTH[classId] ?? 2) * (0.72 + engine * 0.32);
     const rear = THRUSTER_REAR[classId] ?? -24;
-    this.color.setHex(THRUSTER_COLOR[classId] ?? 0x77ddff);
+    this.color.setHex(state.shipCruising[shipIndex] ? 0xa8efff : THRUSTER_COLOR[classId] ?? 0x77ddff);
     for (let nozzle = 0; nozzle < nozzleCount && this.thrusterBatch.count < this.thrusterBatch.capacity; nozzle += 1) {
       const offset = nozzleCount === 1 ? 0 : (offsets[nozzle] ?? 0);
       this.position.set(offset, 0.4, rear - length * 0.5);

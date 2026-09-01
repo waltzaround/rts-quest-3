@@ -72,7 +72,7 @@ for (const structureType of ["commandCore", "advancedShipyard", "unknown"]) {
 
 const playerView = {
   version: 1,
-  simulationVersion: 7,
+  simulationVersion: 9,
   tick: 12,
   viewerPlayerId: "pilot-blue",
   viewerTeamId: 1,
@@ -117,7 +117,7 @@ assert.equal(parseServerMessage(JSON.stringify({ type: "events", tick: 12, event
 assert.equal(parseServerMessage(JSON.stringify({ ...frame, checksum: playerView.checksum + 1 })), null, "frame checksum must match its view");
 
 const lockstepState = {
-  version: 7, seed: 0x7233, tick: 12, nextEntityId: 1, nextTurretId: 1, nextQueueItemId: 1,
+  version: 9, seed: 0x7233, tick: 12, nextEntityId: 1, nextTurretId: 1, nextQueueItemId: 1,
   players: [], teams: [], ships: [], structures: [], resourceNodes: [], obstacles: [], visibility: [],
   projectiles: [], commandQueue: [], aiPlayerIds: [], aiCommanders: {},
   status: "playing", winnerTeamId: null, checksum: 91234,
