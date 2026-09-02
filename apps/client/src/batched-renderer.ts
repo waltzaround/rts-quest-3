@@ -7,6 +7,7 @@ import {
   getFighterSquadMemberPose,
 } from "@space-rts/game-core";
 import { getBatchedTurretGeometry, getShipHullGeometries, type HullGeometrySet } from "./combat-visuals";
+import { SHIP_THRUSTERS } from "./ship-layout";
 import {
   MAX_RENDER_SHIPS,
   MAX_RENDER_TURRETS,
@@ -271,16 +272,9 @@ function createBatch(
 }
 
 const QUALITY_ENGINE_SCALE: Readonly<Record<RenderQuality, number>> = { low: 0.78, medium: 1, high: 1.16 };
-const TACTICAL_SCALE = [12.5, 11, 12.5, 12.5, 13.5, 13.5, 14, 15, 15.5, 16.5, 17.5, 18.5, 20] as const;
-const TACTICAL_SELECTION_RADIUS = [18, 16, 18, 18, 19, 19, 20, 22, 23, 24, 26, 27, 29] as const;
+const TACTICAL_SCALE = [12.5, 11, 12.5, 11.5, 13.5, 13.5, 14, 15, 15.5, 16.5, 17.5, 18.5, 20] as const;
+const TACTICAL_SELECTION_RADIUS = [18, 16, 18, 17, 19, 19, 20, 22, 23, 24, 26, 27, 29] as const;
 const CLOSE_SELECTION_RADIUS = [22, 13, 17, 7.5, 18, 19, 29, 42, 56, 64] as const;
-const THRUSTER_REAR = [-3.65, -11.5, -15.1, -5.1, -15.4, -15.4, -29.2, -34.8, -45.5, -56] as const;
-const THRUSTER_WIDTH = [0.3, 1.05, 1.35, 0.65, 1.42, 1.48, 1.72, 2.35, 2.4, 2.7] as const;
-const THRUSTER_LENGTH = [3.2, 9, 12, 5, 12, 12, 21, 28, 34, 44] as const;
-const THRUSTER_OFFSETS: ReadonlyArray<readonly number[]> = [
-  [-0.46, 0.46], [-7.8, 7.8], [-10.5, 10.5], [-3.1, 3.1], [-11.3, 11.3], [-11.8, 11.8],
-  [-9, -3, 3, 9], [-22, 22], [-30, -21, -5, 5, 21, 30], [-18, -11, -4, 4, 11, 18],
-];
 const THRUSTER_COLOR = [0x8ff7ff, 0x79f0c8, 0x78e8ff, 0x72dfff, 0x82f3ff, 0x77dcff, 0x68cfff, 0x77c5ff, 0x9abaff, 0xffbd78] as const;
 const HEALTH_BAR_GREEN = new THREE.Color(0x63df8c);
 const HEALTH_BAR_AMBER = new THREE.Color(0xf1bd5a);
@@ -333,6 +327,7 @@ export class BatchedShipRenderer {
   private readonly scale = new THREE.Vector3(1, 1, 1);
   private readonly color = new THREE.Color();
   private readonly tint = new THREE.Color();
+  private readonly lightTint = new THREE.Color();
   private readonly white = new THREE.Color(0xffffff);
   private readonly forwardAxis = new THREE.Vector3(0, 0, 1);
   private readonly identityQuaternion = new THREE.Quaternion();
@@ -536,6 +531,7 @@ export class BatchedShipRenderer {
       this.color.setHex(state.shipColor[index]!);
       const health = state.shipHealth[index]!;
       this.tint.copy(this.color).lerp(this.white, 0.58).multiplyScalar(0.62 + health * 0.38);
+      this.lightTint.copy(this.color).lerp(this.white, 0.72);
       if (state.shipRevealed[index]) this.tint.lerp(ARTILLERY_REVEAL, 0.22 + Math.sin(now * 0.014) * 0.08);
       if (health < 0.7) this.tint.lerp(DAMAGE_SCORCH, Math.min(0.58, (0.7 - health) * 0.92));
       if (health < 0.3) this.color.multiplyScalar(0.62 + Math.abs(Math.sin(now * 0.012 + state.shipIds[index]!)) * 0.38);
@@ -599,7 +595,9 @@ export class BatchedShipRenderer {
               this.localMatrix.copy(this.memberMatrix).multiply(this.scaleMatrix);
               this.writeInstance(batch, this.localMatrix, this.color);
             } else {
-              const layerColor = layer === "hull" || layer === "armor" ? this.tint : this.color;
+              const layerColor = layer === "hull" || layer === "armor"
+                ? this.tint
+                : layer === "light" ? this.lightTint : this.color;
               this.writeInstance(batch, this.memberMatrix, layerColor);
             }
           }
@@ -787,19 +785,20 @@ export class BatchedShipRenderer {
     shipMatrix: THREE.Matrix4,
   ): void {
     const classId = state.shipClass[shipIndex]!;
-    const offsets = THRUSTER_OFFSETS[classId] ?? [0];
+    const layout = SHIP_THRUSTERS[SHIP_CLASSES[classId]!];
+    const offsets = layout.offsets;
     const nozzleCount = lod === VisualLod.Close && this.quality !== "low" ? offsets.length : 1;
     const engine = state.shipEngine[shipIndex]!;
     const pulse = 0.88 + Math.sin(now * 0.026 + state.shipIds[shipIndex]! * 0.73) * 0.12;
     const cruiseScale = state.shipCruising[shipIndex] ? 1.18 : 1;
-    const length = (THRUSTER_LENGTH[classId] ?? 20) * (0.46 + engine * 0.62) * pulse
+    const length = layout.length * (0.46 + engine * 0.62) * pulse
       * QUALITY_ENGINE_SCALE[this.quality] * cruiseScale;
-    const width = (THRUSTER_WIDTH[classId] ?? 2) * (0.72 + engine * 0.32);
-    const rear = THRUSTER_REAR[classId] ?? -24;
+    const width = layout.width * (0.72 + engine * 0.32);
+    const rear = layout.rear;
     this.color.setHex(state.shipCruising[shipIndex] ? 0xa8efff : THRUSTER_COLOR[classId] ?? 0x77ddff);
     for (let nozzle = 0; nozzle < nozzleCount && this.thrusterBatch.count < this.thrusterBatch.capacity; nozzle += 1) {
       const offset = nozzleCount === 1 ? 0 : (offsets[nozzle] ?? 0);
-      this.position.set(offset, 0.4, rear - length * 0.5);
+      this.position.set(offset, layout.y, rear - length * 0.5);
       this.scale.set(width, width * 0.72, length);
       this.localMatrix.compose(this.position, this.identityQuaternion, this.scale).premultiply(shipMatrix);
       this.writeInstance(this.thrusterBatch, this.localMatrix, this.color);

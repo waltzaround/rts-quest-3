@@ -61,7 +61,8 @@ import {
 } from "@space-rts/protocol";
 import { FIXED_DT } from "@space-rts/shared";
 import { ScalableBattleAudio } from "./audio-system";
-import { ProjectileVfx } from "./combat-visuals";
+import { ProjectileVfx, getBatchedTurretGeometry } from "./combat-visuals";
+import { STRUCTURE_TURRET_SCALE, getStructureModel } from "./structure-models";
 import { BatchedShipRenderer, CombatEffectRenderer } from "./batched-renderer";
 import { RenderStateBuilder, SHIP_CLASSES, VisualStressScenario, turretVisualHeight, type RenderQuality } from "./render-state";
 import "./styles.css";
@@ -196,8 +197,14 @@ interface StructureVisual {
   hitTarget: THREE.Mesh;
   materials: THREE.Material[];
   factory: FactoryAnimationVisual | null;
-  turret: THREE.Group | null;
-  turretYaw: number;
+  type: StructureType;
+  /** One aiming turret per hardpoint, indexed like the definition's hardpoints. */
+  mounts: StructureMountVisual[];
+}
+
+interface StructureMountVisual {
+  group: THREE.Group;
+  yaw: number;
 }
 
 interface FactoryAnimationVisual {
@@ -559,7 +566,7 @@ function resourceExtractorUpgradeSourceInView(
 }
 
 const structureVisuals = new Map<number, StructureVisual>();
-const defensiveAimYaw = new Map<number, number>();
+const defensiveAimYaw = new Map<number, Map<number, number>>();
 const resourceVisuals = new Map<number, ResourceVisual>();
 const obstacleVisuals = new Map<number, ObstacleVisual>();
 const previousTransforms = new Map<number, RenderTransform>();
@@ -3205,9 +3212,6 @@ function createObstacleVisual(obstacle: ObstacleState): ObstacleVisual {
 }
 
 interface FactoryGeometryTemplates {
-  hull: THREE.BufferGeometry;
-  inset: THREE.BufferGeometry;
-  trim: THREE.BufferGeometry;
   gantry: THREE.BufferGeometry;
   assembly: THREE.BufferGeometry;
   workLights: THREE.BufferGeometry;
@@ -3241,31 +3245,6 @@ function mergeFactoryGeometry(parts: THREE.BufferGeometry[]): THREE.BufferGeomet
 
 function getFactoryGeometryTemplates(): FactoryGeometryTemplates {
   if (factoryGeometryTemplates) return factoryGeometryTemplates;
-  const hullParts: THREE.BufferGeometry[] = [
-    factoryGeometryPart(new THREE.BoxGeometry(56, 5, 50), [0, 3, 0]),
-    factoryGeometryPart(new THREE.BoxGeometry(38, 3, 6), [0, 6, -23]),
-    factoryGeometryPart(new THREE.BoxGeometry(38, 3, 6), [0, 6, 23]),
-  ];
-  for (const x of [-24, 24]) {
-    for (const z of [-20, 20]) {
-      hullParts.push(factoryGeometryPart(new THREE.BoxGeometry(7, 14, 8), [x, 10, z]));
-    }
-  }
-
-  const insetParts: THREE.BufferGeometry[] = [
-    factoryGeometryPart(new THREE.BoxGeometry(31, 1.2, 38), [0, 6, 0]),
-    factoryGeometryPart(new THREE.BoxGeometry(8, 11, 46), [-24, 9, 0]),
-    factoryGeometryPart(new THREE.BoxGeometry(8, 11, 46), [24, 9, 0]),
-    factoryGeometryPart(new THREE.BoxGeometry(12, 9, 8), [0, 11, -22]),
-  ];
-  const trimParts: THREE.BufferGeometry[] = [
-    factoryGeometryPart(new THREE.BoxGeometry(2.2, 1.4, 40), [-24, 15.2, 0]),
-    factoryGeometryPart(new THREE.BoxGeometry(2.2, 1.4, 40), [24, 15.2, 0]),
-    factoryGeometryPart(new THREE.BoxGeometry(0.75, 0.25, 34), [-14, 6.75, 0]),
-    factoryGeometryPart(new THREE.BoxGeometry(0.75, 0.25, 34), [14, 6.75, 0]),
-    factoryGeometryPart(new THREE.BoxGeometry(28, 0.8, 1), [0, 7.9, -23.1]),
-    factoryGeometryPart(new THREE.BoxGeometry(28, 0.8, 1), [0, 7.9, 23.1]),
-  ];
   const gantry = mergeFactoryGeometry([
     factoryGeometryPart(new THREE.BoxGeometry(3, 17, 3), [-18, 15, 0]),
     factoryGeometryPart(new THREE.BoxGeometry(3, 17, 3), [18, 15, 0]),
@@ -3283,9 +3262,6 @@ function getFactoryGeometryTemplates(): FactoryGeometryTemplates {
     }
   }
   factoryGeometryTemplates = {
-    hull: mergeFactoryGeometry(hullParts),
-    inset: mergeFactoryGeometry(insetParts),
-    trim: mergeFactoryGeometry(trimParts),
     gantry,
     assembly,
     workLights: mergeFactoryGeometry(workLightParts),
@@ -3299,446 +3275,68 @@ function createStructureVisual(structure: StructureState): StructureVisual {
   const teamColor = colorForPlayer(structure.ownerPlayerId, structure.teamId);
   const definition = STRUCTURES[structure.type];
   const group = new THREE.Group();
+  const teamTint = new THREE.Color(teamColor).lerp(new THREE.Color(0xffffff), 0.58);
   const hull = new THREE.MeshStandardMaterial({
-    color: 0x3e5664, emissive: 0x102936, emissiveIntensity: 0.62,
-    metalness: 0.66, roughness: 0.46, transparent: true,
+    color: new THREE.Color(0x6d8290).multiply(teamTint), emissive: 0x102936, emissiveIntensity: 0.62,
+    metalness: 0.66, roughness: 0.44, flatShading: true, transparent: true,
   });
   const dark = new THREE.MeshStandardMaterial({
     color: 0x192d39, emissive: 0x091923, emissiveIntensity: 0.55,
-    metalness: 0.56, roughness: 0.54, transparent: true,
+    metalness: 0.56, roughness: 0.54, flatShading: true, transparent: true,
   });
   const accent = new THREE.MeshStandardMaterial({
     color: teamColor, emissive: teamColor, emissiveIntensity: 2.15, metalness: 0.2, roughness: 0.42, transparent: true,
   });
-  const materials: THREE.Material[] = [hull, dark, accent];
+  const armor = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0x4f6270).multiply(teamTint), emissive: 0x0b1d29, emissiveIntensity: 0.58,
+    metalness: 0.74, roughness: 0.38, flatShading: true, transparent: true,
+  });
+  const light = new THREE.MeshBasicMaterial({
+    color: new THREE.Color(teamColor).lerp(new THREE.Color(0xffffff), 0.72), transparent: true, toneMapped: false,
+  });
+  const turretMaterial = new THREE.MeshStandardMaterial({
+    color: teamColor, emissive: 0x061017, emissiveIntensity: 0.5, metalness: 0.72, roughness: 0.34,
+    flatShading: true, vertexColors: true, transparent: true,
+  });
+  // Index 2 must stay the accent material: the update loop pulses it on reveal.
+  const materials: THREE.Material[] = [hull, dark, accent, armor, light, turretMaterial];
   let factory: FactoryAnimationVisual | null = null;
-  let turret: THREE.Group | null = null;
 
-  if (structure.type === "commandCore") {
-    const foundation = new THREE.Mesh(new THREE.CylinderGeometry(35, 38, 7, 8), dark);
-    foundation.position.y = 3.5;
-    group.add(foundation);
-    const armoredDeck = new THREE.Mesh(new THREE.CylinderGeometry(31, 35, 6, 8), hull);
-    armoredDeck.position.y = 8;
-    group.add(armoredDeck);
-    const perimeter = new THREE.Mesh(new THREE.TorusGeometry(33, 1.4, 5, 32), accent);
-    perimeter.rotation.x = Math.PI / 2;
-    perimeter.position.y = 9.5;
-    group.add(perimeter);
+  const model = getStructureModel(structure.type);
+  group.add(
+    new THREE.Mesh(model.body.hull, hull),
+    new THREE.Mesh(model.body.armor, armor),
+    new THREE.Mesh(model.body.dark, dark),
+    new THREE.Mesh(model.body.accent, accent),
+    new THREE.Mesh(model.body.light, light),
+  );
 
-    // A compact command keep makes the core read as a fortress, while the open
-    // radial gantries retain the visual language of a large construction hub.
-    const keep = new THREE.Mesh(new THREE.CylinderGeometry(9, 15, 25, 8), hull);
-    keep.position.y = 21;
-    group.add(keep);
-    const keepInset = new THREE.Mesh(new THREE.CylinderGeometry(6.5, 10.5, 21, 8), dark);
-    keepInset.position.y = 23;
-    group.add(keepInset);
-    const crown = new THREE.Mesh(new THREE.CylinderGeometry(10.5, 10.5, 3.2, 8), accent);
-    crown.position.y = 34.5;
-    group.add(crown);
-    const constructionCore = new THREE.Mesh(new THREE.OctahedronGeometry(4.4, 0), accent);
-    constructionCore.position.y = 38.5;
-    group.add(constructionCore);
+  // Weapon mounts live in a container that cancels the base yaw because the
+  // simulation places hardpoints on world axes relative to the structure.
+  const mountRoot = new THREE.Group();
+  mountRoot.rotation.y = -structure.yaw;
+  mountRoot.add(
+    new THREE.Mesh(model.mounts.armor, armor),
+    new THREE.Mesh(model.mounts.accent, accent),
+  );
+  group.add(mountRoot);
+  const mounts: StructureMountVisual[] = [];
+  for (const hardpoint of definition.hardpoints ?? []) {
+    const mount = new THREE.Group();
+    mount.position.set(hardpoint.localX, model.turretHeight, hardpoint.localZ);
+    mount.rotation.y = Math.atan2(hardpoint.localX, hardpoint.localZ);
+    const turretMesh = new THREE.Mesh(getBatchedTurretGeometry(hardpoint.weaponTypeId), turretMaterial);
+    turretMesh.scale.copy(STRUCTURE_TURRET_SCALE);
+    mount.add(turretMesh);
+    mountRoot.add(mount);
+    mounts.push({ group: mount, yaw: mount.rotation.y });
+  }
 
-    for (let index = 0; index < 4; index += 1) {
-      const angle = index * Math.PI / 2;
-      const wallSection = new THREE.Group();
-      wallSection.rotation.y = angle;
-      const wall = new THREE.Mesh(new THREE.BoxGeometry(23, 7, 5.5), hull);
-      wall.position.set(0, 11.5, 27);
-      wallSection.add(wall);
-      const wallInset = new THREE.Mesh(new THREE.BoxGeometry(14, 2.2, 6.2), accent);
-      wallInset.position.set(0, 12.5, 27);
-      wallSection.add(wallInset);
-
-      const gantry = new THREE.Mesh(new THREE.BoxGeometry(4.5, 4, 26), dark);
-      gantry.position.set(0, 25, 11);
-      gantry.rotation.x = -0.08;
-      wallSection.add(gantry);
-      const gantryRail = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.2, 25), accent);
-      gantryRail.position.set(0, 27.2, 11);
-      gantryRail.rotation.x = -0.08;
-      wallSection.add(gantryRail);
-      const toolHead = new THREE.Mesh(new THREE.OctahedronGeometry(3.1, 0), accent);
-      toolHead.position.set(0, 22.2, 24.5);
-      wallSection.add(toolHead);
-      const bay = new THREE.Mesh(new THREE.BoxGeometry(13, 0.75, 9), accent);
-      bay.position.set(0, 12.1, 18.5);
-      wallSection.add(bay);
-      group.add(wallSection);
-    }
-
-    for (const hardpoint of definition.hardpoints ?? []) {
-      const mount = new THREE.Group();
-      mount.position.set(hardpoint.localX, 13.8, hardpoint.localZ);
-      mount.rotation.y = Math.atan2(hardpoint.localX, hardpoint.localZ);
-      group.add(mount);
-      const bastion = new THREE.Mesh(new THREE.CylinderGeometry(6.2, 7.6, 7.5, 8), hull);
-      bastion.position.y = -2.7;
-      mount.add(bastion);
-      const cupola = new THREE.Mesh(new THREE.CylinderGeometry(3.4, 4.3, 3.2, 8), dark);
-      cupola.position.y = 1.4;
-      mount.add(cupola);
-      for (const side of [-1, 1]) {
-        const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.85, 1.15, 8.5), dark);
-        barrel.position.set(side * 1.2, 3, 3.6);
-        barrel.rotation.x = -0.1;
-        mount.add(barrel);
-      }
-      const trackingNode = new THREE.Mesh(new THREE.OctahedronGeometry(1.35, 0), accent);
-      trackingNode.position.set(0, 4.3, -1.2);
-      mount.add(trackingNode);
-    }
-  } else if (isResourceExtractorType(structure.type)) {
-    const extractorScale = structure.type === "singularityHarvester" ? 1.55
-      : structure.type === "deepCoreExtractor" ? 1.25 : 1;
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(14 * extractorScale, 2.8 * extractorScale, 6, 20), hull);
-    ring.rotation.x = Math.PI / 2;
-    ring.position.y = 5;
-    group.add(ring);
-    const spindle = new THREE.Mesh(new THREE.CylinderGeometry(
-      5 * extractorScale, 8 * extractorScale, 17 * extractorScale, 6,
-    ), accent);
-    spindle.position.y = 10 * extractorScale;
-    group.add(spindle);
-    const armCount = structure.type === "extractor" ? 3 : structure.type === "deepCoreExtractor" ? 4 : 6;
-    for (let index = 0; index < armCount; index += 1) {
-      const arm = new THREE.Mesh(new THREE.BoxGeometry(3 * extractorScale, 3, 18 * extractorScale), dark);
-      arm.position.y = 4 * extractorScale;
-      arm.rotation.y = index * Math.PI * 2 / armCount;
-      group.add(arm);
-    }
-    if (structure.type !== "extractor") {
-      const core = new THREE.Mesh(
-        structure.type === "singularityHarvester"
-          ? new THREE.IcosahedronGeometry(6.5, 1)
-          : new THREE.OctahedronGeometry(5.2, 0),
-        accent,
-      );
-      core.position.y = 22 * extractorScale;
-      group.add(core);
-      const orbit = new THREE.Mesh(new THREE.TorusGeometry(9 * extractorScale, 1.1, 5, 20), dark);
-      orbit.rotation.x = Math.PI / 2;
-      orbit.position.y = core.position.y;
-      group.add(orbit);
-    }
-  } else if (structure.type === "solarArray") {
-    const hub = new THREE.Mesh(new THREE.CylinderGeometry(5, 8, 13, 8), hull);
-    hub.position.y = 7;
-    group.add(hub);
-    for (const side of [-1, 1]) {
-      const panel = new THREE.Mesh(new THREE.BoxGeometry(24, 1, 15), accent);
-      panel.position.set(side * 17, 8, 0);
-      group.add(panel);
-      const spar = new THREE.Mesh(new THREE.BoxGeometry(15, 1.5, 2), dark);
-      spar.position.set(side * 9, 8, 0);
-      group.add(spar);
-    }
-  } else if (structure.type === "alloyRefinery" || structure.type === "matterForge") {
-    const forgeScale = structure.type === "matterForge" ? 1.38 : 1;
-    const base = new THREE.Mesh(new THREE.CylinderGeometry(18 * forgeScale, 23 * forgeScale, 7, 10), dark);
-    base.position.y = 3.5;
-    group.add(base);
-    const crucible = new THREE.Mesh(new THREE.CylinderGeometry(8 * forgeScale, 11 * forgeScale, 15 * forgeScale, 8), hull);
-    crucible.position.y = 12 * forgeScale;
-    group.add(crucible);
-    const core = new THREE.Mesh(new THREE.IcosahedronGeometry(5.5 * forgeScale, 1), accent);
-    core.position.y = 15 * forgeScale;
-    group.add(core);
-    const stackCount = structure.type === "matterForge" ? 4 : 3;
-    for (let index = 0; index < stackCount; index += 1) {
-      const angle = index / stackCount * Math.PI * 2;
-      const stack = new THREE.Mesh(new THREE.CylinderGeometry(2.2 * forgeScale, 3.5 * forgeScale, 18 * forgeScale, 6), hull);
-      stack.position.set(Math.sin(angle) * 15 * forgeScale, 12 * forgeScale, Math.cos(angle) * 15 * forgeScale);
-      group.add(stack);
-      const vent = new THREE.Mesh(new THREE.TorusGeometry(3.3 * forgeScale, 0.7, 5, 12), accent);
-      vent.rotation.x = Math.PI / 2;
-      vent.position.set(stack.position.x, 21 * forgeScale, stack.position.z);
-      group.add(vent);
-    }
-  } else if (structure.type === "storage" || structure.type === "quantumStorage") {
-    const storageScale = structure.type === "quantumStorage" ? 1.45 : 1;
-    const base = new THREE.Mesh(new THREE.CylinderGeometry(16 * storageScale, 18 * storageScale, 4 * storageScale, 8), dark);
-    base.position.y = 2;
-    group.add(base);
-    for (const x of [-10, 0, 10]) {
-      const cell = new THREE.Mesh(new THREE.BoxGeometry(8 * storageScale, 11 * storageScale, 20 * storageScale), hull);
-      cell.position.set(x * storageScale, 8 * storageScale, 0);
-      group.add(cell);
-      const band = new THREE.Mesh(new THREE.BoxGeometry(8.5 * storageScale, 2, 20.5 * storageScale), accent);
-      band.position.set(x * storageScale, 8 * storageScale, 0);
-      group.add(band);
-    }
-    if (structure.type === "quantumStorage") {
-      const vaultCore = new THREE.Mesh(new THREE.IcosahedronGeometry(6.5, 1), accent);
-      vaultCore.position.y = 22;
-      group.add(vaultCore);
-    }
-  } else if (structure.type === "fabricator") {
-    const base = new THREE.Mesh(new THREE.CylinderGeometry(17, 21, 6, 8), hull);
-    base.position.y = 3;
-    group.add(base);
-    const spindle = new THREE.Mesh(new THREE.CylinderGeometry(5, 8, 18, 6), accent);
-    spindle.position.y = 12;
-    group.add(spindle);
-    for (let index = 0; index < 4; index += 1) {
-      const arm = new THREE.Group();
-      arm.rotation.y = index * Math.PI / 2;
-      const boom = new THREE.Mesh(new THREE.BoxGeometry(4, 4, 25), dark);
-      boom.position.set(0, 14, 10);
-      arm.add(boom);
-      const emitter = new THREE.Mesh(new THREE.OctahedronGeometry(3.2, 0), accent);
-      emitter.position.set(0, 13, 23);
-      arm.add(emitter);
-      group.add(arm);
-    }
-  } else if (structure.type === "radarArray" || structure.type === "phasedRadarArray" || structure.type === "deepSpaceRadarArray") {
-    const radarTier = structure.type === "deepSpaceRadarArray" ? 3 : structure.type === "phasedRadarArray" ? 2 : 1;
-    const radarScale = radarTier === 3 ? 1.55 : radarTier === 2 ? 1.25 : 1;
-    const base = new THREE.Mesh(new THREE.CylinderGeometry(13 * radarScale, 17 * radarScale, 6 * radarScale, 8), hull);
-    base.position.y = 3;
-    group.add(base);
-    const mast = new THREE.Mesh(new THREE.CylinderGeometry(2.2 * radarScale, 4.2 * radarScale, 25 * radarScale, 7), dark);
-    mast.position.y = 17 * radarScale;
-    group.add(mast);
-    const dish = new THREE.Mesh(new THREE.SphereGeometry(13 * radarScale, 16, 8, 0, Math.PI * 2, 0, Math.PI * 0.34), accent);
-    dish.scale.y = 0.42;
-    dish.rotation.x = Math.PI * 0.28;
-    dish.position.set(0, 31 * radarScale, 2 * radarScale);
-    group.add(dish);
-    const receiver = new THREE.Mesh(new THREE.OctahedronGeometry(2.5 * radarScale, 0), accent);
-    receiver.position.set(0, 37 * radarScale, -radarScale);
-    group.add(receiver);
-    const sweepRing = new THREE.Mesh(new THREE.TorusGeometry(16 * radarScale, 0.75 * radarScale, 5, 28), accent);
-    sweepRing.rotation.x = Math.PI / 2;
-    sweepRing.position.y = 8 * radarScale;
-    group.add(sweepRing);
-    for (let extra = 1; extra < radarTier; extra += 1) {
-      const sideDish = dish.clone();
-      const side = extra % 2 === 1 ? -1 : 1;
-      sideDish.scale.multiplyScalar(0.58);
-      sideDish.rotation.z = side * 0.32;
-      sideDish.position.set(side * 12 * radarScale, (22 + extra * 3) * radarScale, -4 * radarScale);
-      group.add(sideDish);
-      const phaseRing = new THREE.Mesh(new THREE.TorusGeometry((10 + extra * 5) * radarScale, 0.5 * radarScale, 5, 28), accent);
-      phaseRing.rotation.x = Math.PI / 2;
-      phaseRing.position.y = (12 + extra * 6) * radarScale;
-      group.add(phaseRing);
-    }
-  } else if (isDefensiveStructureType(structure.type)) {
-    const base = new THREE.Mesh(new THREE.CylinderGeometry(
-      definition.radius * 0.72, definition.radius * 0.9, 6, 8,
-    ), hull);
-    base.position.y = 3;
-    group.add(base);
-    const armoredDeck = new THREE.Mesh(new THREE.CylinderGeometry(
-      definition.radius * 0.68, definition.radius * 0.76, 4, 10,
-    ), dark);
-    armoredDeck.position.y = 7;
-    group.add(armoredDeck);
-    const perimeter = new THREE.Mesh(new THREE.TorusGeometry(
-      definition.radius * 0.76, 1.4, 5, 24,
-    ), accent);
-    perimeter.rotation.x = Math.PI / 2;
-    perimeter.position.y = 7.5;
-    group.add(perimeter);
-
-    for (const hardpoint of definition.hardpoints ?? []) {
-      const mount = new THREE.Group();
-      mount.position.set(hardpoint.localX, 9, hardpoint.localZ);
-      mount.rotation.y = Math.atan2(hardpoint.localX, hardpoint.localZ);
-      group.add(mount);
-      const mountScale = hardpoint.weaponTypeId === "beam" || hardpoint.weaponTypeId === "heavyRail"
-        || hardpoint.weaponTypeId === "strategicArtillery" ? 1.3
-        : hardpoint.weaponTypeId === "siegeArtillery" ? 1.16
-        : hardpoint.weaponTypeId === "torpedo" || hardpoint.weaponTypeId === "plasma" ? 1.1 : 0.78;
-      const cupola = new THREE.Mesh(new THREE.CylinderGeometry(
-        3.2 * mountScale, 4.1 * mountScale, 3.2 * mountScale, 7,
-      ), hull);
-      mount.add(cupola);
-      if (hardpoint.weaponTypeId === "torpedo") {
-        const rack = new THREE.Mesh(new THREE.BoxGeometry(6.5 * mountScale, 4, 8 * mountScale), dark);
-        rack.position.set(0, 2.8, 2.5);
-        mount.add(rack);
-      } else {
-        const barrelLength = hardpoint.weaponTypeId === "strategicArtillery" ? 23
-          : hardpoint.weaponTypeId === "siegeArtillery" ? 19
-            : hardpoint.weaponTypeId === "lightArtillery" ? 15
-              : hardpoint.weaponTypeId === "heavyRail" || hardpoint.weaponTypeId === "beam" ? 15 : 10;
-        const barrelWidth = hardpoint.weaponTypeId === "pointDefense" ? 0.85 : 1.7;
-        for (const side of hardpoint.weaponTypeId === "pointDefense" ? [-1, 1] : [0]) {
-          const barrel = new THREE.Mesh(new THREE.BoxGeometry(
-            barrelWidth * mountScale, 1.4 * mountScale, barrelLength * mountScale,
-          ), hardpoint.weaponTypeId === "plasma" || hardpoint.weaponTypeId === "beam" ? accent : dark);
-          barrel.position.set(side * 1.2, 3.2, barrelLength * mountScale * 0.38);
-          barrel.rotation.x = -0.08;
-          mount.add(barrel);
-        }
-      }
-    }
-
-    turret = new THREE.Group();
-    group.add(turret);
-    const turntable = new THREE.Mesh(new THREE.CylinderGeometry(
-      definition.radius * 0.42, definition.radius * 0.54, 5, 8,
-    ), accent);
-    turntable.position.y = 8;
-    turret.add(turntable);
-    if (structure.type === "pointDefenseBattery") {
-      for (const side of [-1, 1]) {
-        const barrel = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 16), dark);
-        barrel.position.set(side * 3.3, 12, 5);
-        barrel.rotation.x = -0.12;
-        turret.add(barrel);
-      }
-      const sensor = new THREE.Mesh(new THREE.OctahedronGeometry(3.2, 0), accent);
-      sensor.position.set(0, 16, -3);
-      turret.add(sensor);
-    } else if (structure.type === "missileBattery") {
-      for (const side of [-1, 1]) {
-        const rack = new THREE.Mesh(new THREE.BoxGeometry(7, 6, 14), dark);
-        rack.position.set(side * 5, 13, 2);
-        rack.rotation.x = -0.28;
-        turret.add(rack);
-        for (const xOffset of [-2, 2]) {
-          const missile = new THREE.Mesh(new THREE.ConeGeometry(1.15, 7, 5), accent);
-          missile.rotation.x = Math.PI / 2 - 0.28;
-          missile.position.set(side * 5 + xOffset, 15, 6);
-          turret.add(missile);
-        }
-      }
-    } else if (structure.type === "railBattery") {
-      const spine = new THREE.Mesh(new THREE.BoxGeometry(7, 6, 25), dark);
-      spine.position.set(0, 13, 7);
-      spine.rotation.x = -0.08;
-      turret.add(spine);
-      const rail = new THREE.Mesh(new THREE.BoxGeometry(2.5, 2.5, 31), accent);
-      rail.position.set(0, 15, 10);
-      rail.rotation.x = -0.08;
-      turret.add(rail);
-      for (const side of [-1, 1]) {
-        const brace = new THREE.Mesh(new THREE.BoxGeometry(3, 8, 10), hull);
-        brace.position.set(side * 6, 11, -1);
-        turret.add(brace);
-      }
-    } else if (structure.type === "plasmaBattery") {
-      const cradle = new THREE.Mesh(new THREE.BoxGeometry(18, 9, 18), dark);
-      cradle.position.set(0, 13, 0);
-      turret.add(cradle);
-      for (const side of [-1, 1]) {
-        const emitter = new THREE.Mesh(new THREE.CylinderGeometry(3.2, 4.5, 18, 8), hull);
-        emitter.rotation.x = Math.PI / 2;
-        emitter.position.set(side * 6, 16, 9);
-        turret.add(emitter);
-        const plasmaCore = new THREE.Mesh(new THREE.IcosahedronGeometry(3.5, 1), accent);
-        plasmaCore.position.set(side * 6, 16, 19);
-        turret.add(plasmaCore);
-      }
-    } else if (structure.type === "artilleryBattery" || structure.type === "heavyArtilleryBattery"
-      || structure.type === "strategicArtilleryArray") {
-      const tierScale = structure.type === "strategicArtilleryArray" ? 1.45
-        : structure.type === "heavyArtilleryBattery" ? 1.18 : 0.9;
-      const recoilBed = new THREE.Mesh(new THREE.BoxGeometry(18 * tierScale, 7 * tierScale, 20 * tierScale), dark);
-      recoilBed.position.set(0, 13 * tierScale, 1);
-      recoilBed.rotation.x = -0.08;
-      turret.add(recoilBed);
-      const barrelCount = structure.type === "artilleryBattery" ? 1 : 2;
-      for (let index = 0; index < barrelCount; index += 1) {
-        const side = barrelCount === 1 ? 0 : index === 0 ? -1 : 1;
-        const barrel = new THREE.Mesh(new THREE.BoxGeometry(
-          2.4 * tierScale, 2.2 * tierScale, 30 * tierScale,
-        ), hull);
-        barrel.position.set(side * 5.5 * tierScale, 17 * tierScale, 12 * tierScale);
-        barrel.rotation.x = -0.1;
-        turret.add(barrel);
-        const muzzleBand = new THREE.Mesh(new THREE.BoxGeometry(
-          3.3 * tierScale, 3 * tierScale, 3.2 * tierScale,
-        ), accent);
-        muzzleBand.position.set(side * 5.5 * tierScale, 18.5 * tierScale, 27 * tierScale);
-        turret.add(muzzleBand);
-      }
-    } else {
-      const beamMount = new THREE.Mesh(new THREE.BoxGeometry(20, 11, 22), dark);
-      beamMount.position.set(0, 15, 2);
-      turret.add(beamMount);
-      const emitter = new THREE.Mesh(new THREE.CylinderGeometry(4, 6, 30, 10), hull);
-      emitter.rotation.x = Math.PI / 2;
-      emitter.position.set(0, 18, 14);
-      turret.add(emitter);
-      const lens = new THREE.Mesh(new THREE.CylinderGeometry(5.2, 5.2, 2.5, 12), accent);
-      lens.rotation.x = Math.PI / 2;
-      lens.position.set(0, 18, 30);
-      turret.add(lens);
-      for (const side of [-1, 1]) {
-        const coil = new THREE.Mesh(new THREE.TorusGeometry(5.5, 1.2, 6, 18), accent);
-        coil.rotation.y = Math.PI / 2;
-        coil.position.set(side * 8, 17, 8);
-        turret.add(coil);
-      }
-    }
-  } else if (structure.type === "advancedFabrication") {
-    const base = new THREE.Mesh(new THREE.CylinderGeometry(22, 27, 8, 10), hull);
-    base.position.y = 4;
-    group.add(base);
-    const core = new THREE.Mesh(new THREE.OctahedronGeometry(9, 0), accent);
-    core.position.y = 17;
-    group.add(core);
-    for (let index = 0; index < 4; index += 1) {
-      const tower = new THREE.Mesh(new THREE.BoxGeometry(5, 20, 5), dark);
-      const angle = index * Math.PI / 2;
-      tower.position.set(Math.sin(angle) * 18, 11, Math.cos(angle) * 18);
-      group.add(tower);
-    }
-  } else if (structure.type === "fusionReactor") {
-    const base = new THREE.Mesh(new THREE.CylinderGeometry(20, 25, 7, 10), hull);
-    base.position.y = 3.5;
-    group.add(base);
-    const core = new THREE.Mesh(new THREE.IcosahedronGeometry(9, 1), accent);
-    core.position.y = 15;
-    group.add(core);
-    for (let index = 0; index < 3; index += 1) {
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(14 + index * 2.2, 1.15, 5, 24), index === 1 ? hull : dark);
-      ring.position.y = 15;
-      ring.rotation.set(index === 0 ? Math.PI / 2 : 0, index === 2 ? Math.PI / 2 : 0, index * Math.PI / 3);
-      group.add(ring);
-    }
-  } else if (structure.type === "antimatterReactor") {
-    const base = new THREE.Mesh(new THREE.CylinderGeometry(27, 33, 9, 10), hull);
-    base.position.y = 4.5;
-    group.add(base);
-    const core = new THREE.Mesh(new THREE.IcosahedronGeometry(12, 1), accent);
-    core.position.y = 21;
-    group.add(core);
-    for (let index = 0; index < 4; index += 1) {
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(17 + index * 2.8, 1.35, 5, 28), index % 2 === 0 ? dark : hull);
-      ring.position.y = 21;
-      ring.rotation.set(index % 2 === 0 ? Math.PI / 2 : 0, index > 1 ? Math.PI / 2 : 0, index * 0.55);
-      group.add(ring);
-    }
-  } else if (structure.type === "capitalInfrastructure") {
-    const base = new THREE.Mesh(new THREE.CylinderGeometry(29, 35, 10, 10), hull);
-    base.position.y = 5;
-    group.add(base);
-    const core = new THREE.Mesh(new THREE.IcosahedronGeometry(11, 1), accent);
-    core.position.y = 20;
-    group.add(core);
-    for (let index = 0; index < 3; index += 1) {
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(18 + index * 3.2, 1.4, 6, 28), index === 1 ? hull : dark);
-      ring.position.y = 20;
-      ring.rotation.set(index === 0 ? Math.PI / 2 : 0, index === 2 ? Math.PI / 2 : 0, index * 0.7);
-      group.add(ring);
-    }
-  } else if (SHIPYARD_TYPES.includes(structure.type as (typeof SHIPYARD_TYPES)[number])) {
+  if (SHIPYARD_TYPES.includes(structure.type as (typeof SHIPYARD_TYPES)[number])) {
     const yardScale = structure.type === "capitalShipyard" ? 1.72 : structure.type === "fleetShipyard" ? 1.28 : 1;
     const templates = getFactoryGeometryTemplates();
     const yard = new THREE.Group();
     yard.scale.setScalar(yardScale);
-    yard.add(
-      new THREE.Mesh(templates.hull, hull),
-      new THREE.Mesh(templates.inset, dark),
-      new THREE.Mesh(templates.trim, accent),
-    );
 
     const bayGlowMaterial = new THREE.MeshBasicMaterial({
       color: teamColor,
@@ -3842,7 +3440,7 @@ function createStructureVisual(structure: StructureState): StructureVisual {
   group.position.set(structure.x, 0, structure.z);
   group.rotation.y = structure.yaw;
   worldRoot.add(group);
-  return { group, shield, progress, marker, hitTarget, materials, factory, turret, turretYaw: 0 };
+  return { group, shield, progress, marker, hitTarget, materials, factory, type: structure.type, mounts };
 }
 
 function createDynamicLines(color: number, opacity: number): THREE.LineSegments {
@@ -4089,6 +3687,11 @@ function updateStaticWorldVisuals(now: number): void {
   }
   for (const structure of clientView.structures) {
     let visual = structureVisuals.get(structure.id);
+    if (visual && visual.type !== structure.type) {
+      worldRoot.remove(visual.group);
+      structureVisuals.delete(structure.id);
+      visual = undefined;
+    }
     if (!visual) {
       visual = createStructureVisual(structure);
       structureVisuals.set(structure.id, visual);
@@ -4099,16 +3702,17 @@ function updateStaticWorldVisuals(now: number): void {
     const accentMaterial = visual.materials[2] as THREE.MeshStandardMaterial;
     accentMaterial.emissiveIntensity = (structure.revealedUntilTick ?? 0) >= clientView.state.tick ? 4.4 : 2.15;
     if (visual.factory) updateFactoryAnimation(visual.factory, structure, now, reveal);
-    if (visual.turret) {
-      const desiredWorldYaw = defensiveAimYaw.get(structure.id);
-      if (desiredWorldYaw !== undefined) {
-        const desiredLocalYaw = desiredWorldYaw - structure.yaw;
-        const yawDelta = Math.atan2(
-          Math.sin(desiredLocalYaw - visual.turretYaw),
-          Math.cos(desiredLocalYaw - visual.turretYaw),
-        );
-        visual.turretYaw += yawDelta * 0.18;
-        visual.turret.rotation.y = visual.turretYaw;
+    const aims = defensiveAimYaw.get(structure.id);
+    if (aims) {
+      for (let mountIndex = 0; mountIndex < visual.mounts.length; mountIndex += 1) {
+        const desiredWorldYaw = aims.get(mountIndex);
+        if (desiredWorldYaw === undefined) continue;
+        const mount = visual.mounts[mountIndex]!;
+        // Mounts sit in a container that cancels the base yaw, so the world
+        // aim angle applies directly.
+        const yawDelta = Math.atan2(Math.sin(desiredWorldYaw - mount.yaw), Math.cos(desiredWorldYaw - mount.yaw));
+        mount.yaw += yawDelta * 0.18;
+        mount.group.rotation.y = mount.yaw;
       }
     }
     visual.group.scale.y = 0.72 + structure.buildProgress * 0.28;
@@ -4488,8 +4092,19 @@ function processEvents(events: SimulationEvent[]): void {
       if (((ship && turret) || (defense && defenseWeaponType)) && stressScenario.activeCount === 0) {
         const projectile = clientView.projectiles.find((candidate) => candidate.id === event.projectileId);
         const target = effectOrigins.get(event.targetId);
-        if (defense && target) {
-          defensiveAimYaw.set(defense.id, Math.atan2(target.x - defense.x, target.z - defense.z));
+        const defenseMountIndex = defense ? (-event.turretId - 1) % 16 : -1;
+        const defenseMount = defense
+          ? STRUCTURES[defense.type].hardpoints?.[defenseMountIndex] ?? { localX: 0, localZ: 0 }
+          : null;
+        if (defense && defenseMount && target) {
+          const mountX = defense.x + defenseMount.localX;
+          const mountZ = defense.z + defenseMount.localZ;
+          let aims = defensiveAimYaw.get(defense.id);
+          if (!aims) {
+            aims = new Map();
+            defensiveAimYaw.set(defense.id, aims);
+          }
+          aims.set(defenseMountIndex, Math.atan2(target.x - mountX, target.z - mountZ));
         }
         const muzzle = projectile
           ? { x: projectile.previousX, z: projectile.previousZ }
@@ -4498,17 +4113,19 @@ function processEvents(events: SimulationEvent[]): void {
             turret,
             Math.max(0, turret.fireSequence - 1),
             clientView.state.tick,
-          ) : defense && target ? (() => {
-            const dx = target.x - defense.x;
-            const dz = target.z - defense.z;
+          ) : defense && defenseMount && target ? (() => {
+            const mountX = defense.x + defenseMount.localX;
+            const mountZ = defense.z + defenseMount.localZ;
+            const dx = target.x - mountX;
+            const dz = target.z - mountZ;
             const distance = Math.max(1, Math.hypot(dx, dz));
-            const muzzleOffset = STRUCTURES[defense.type].radius * 0.72;
-            return { x: defense.x + dx / distance * muzzleOffset, z: defense.z + dz / distance * muzzleOffset };
+            const muzzleOffset = WEAPONS[event.weaponTypeId].muzzleOffset;
+            return { x: mountX + dx / distance * muzzleOffset, z: mountZ + dz / distance * muzzleOffset };
           })() : { x: defense!.x, z: defense!.z };
         const weaponTypeId = turret?.weaponTypeId ?? defenseWeaponType!;
         const y = ship && turret
           ? ship.y + turretVisualHeight(ship.class, turret.localX, turret.localZ, turret.weaponTypeId) + 1.2
-          : 14;
+          : defense ? getStructureModel(defense.type).turretHeight + 2.2 : 14;
         const muzzleSize = weaponTypeId === "heavyRail" || WEAPONS[weaponTypeId].artillery
           ? 4.2
           : weaponTypeId === "torpedo"

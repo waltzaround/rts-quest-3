@@ -11,6 +11,7 @@ import {
   type WeaponTypeId,
 } from "@space-rts/game-core";
 import { FIXED_DT, wrapAngle } from "@space-rts/shared";
+import { turretDeckHeight } from "./ship-layout";
 
 export const MAX_RENDER_SHIPS = 4_096;
 export const MAX_RENDER_TURRETS = 16_384;
@@ -169,26 +170,7 @@ export function turretVisualHeight(
   localZ = 0,
   weaponTypeId?: WeaponTypeId,
 ): number {
-  switch (shipClass) {
-    case "fighter": return 1.55;
-    case "fabricator": return 4.05;
-    case "bomber": return 2.8;
-    case "frigate": return localZ > 4 ? 6.45 : 3.5;
-    case "flakFrigate": return localZ >= 3 ? 6.7 : 3.6;
-    case "torpedoFrigate": return localZ >= 0 ? 6.75 : 5.55;
-    case "artilleryFrigate": return 7.1;
-    case "destroyer": return 7.5;
-    case "artilleryDestroyer": return 8.2;
-    case "cruiser":
-      if (localZ >= 8) return 7.55;
-      if (Math.abs(localX) <= 9 && localZ < 0) return 8.15;
-      return 4.98;
-    case "artilleryCruiser": return 16.2;
-    case "carrier": return 7.05;
-    case "battleship":
-      if (weaponTypeId === "beam") return 14.35;
-      return localZ > 28 ? 5.48 : 10.95;
-  }
+  return turretDeckHeight(shipClass, localX, localZ, weaponTypeId);
 }
 
 export class InterpolatedRenderState {
