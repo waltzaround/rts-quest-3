@@ -139,6 +139,8 @@ button, input { font: inherit; }
 .command-deck > section::before { content: ""; position: absolute; inset: -1px auto auto -1px; width: 16px; height: 3px; background: var(--cyan); box-shadow: 0 0 10px rgba(98,220,255,.5); }
 .selection { min-width: 0; display:flex; align-items:center; gap:15px; padding:17px 18px; }
 .unit-schematic { flex: 0 0 auto; display:grid; place-items:center; width:92px; height:92px; border:1px solid rgba(98,220,255,.35); background:radial-gradient(circle,rgba(62,186,230,.18),rgba(15,43,59,.08) 55%,transparent 72%); color:var(--cyan); font-size:38px; clip-path: polygon(11% 0,89% 0,100% 11%,100% 89%,89% 100%,11% 100%,0 89%,0 11%); }
+#selection-icon.fighter-squad-symbol { white-space:pre; text-align:center; letter-spacing:.08em; }
+#selection-icon.fighter-squad-symbol { font:22px/.68 "JetBrains Mono"; }
 .selection-copy { flex: 1; min-width: 0; }
 .selection h2 { margin:6px 0 3px; font-size:24px; letter-spacing:.08em; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }.selection p { margin:0; color:#7791a3; font-size:11px; letter-spacing:.05em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .selection-bars { display:flex; gap:4px; height:11px; margin-top:9px; padding-right:10px; }

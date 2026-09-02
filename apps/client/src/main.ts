@@ -5047,7 +5047,7 @@ function renderSelectionRoster(ships: readonly ShipState[]): void {
       ? Math.max(0, Math.min(100, Math.round((ship.shields / definition.maxShield) * 100)))
       : 0;
     const teamColor = `#${colorForTeam(ship.teamId).toString(16).padStart(6, "0")}`;
-    const squadSize = SHIP_ECONOMY[ship.class].batchSize;
+    const squadSize = ship.class === "fighter" ? 5 : 1;
     const badge = squadSize > 1 ? `<em class="unit-thumb-badge">×${squadSize}</em>` : "";
     const shieldCopy = definition.maxShield > 0 ? `, ${shieldPercent}% shields` : "";
     return `<button class="unit-thumb${index === 0 ? " primary" : ""}${hullPercent < 30 ? " critical" : ""}" data-selection-ship-id="${ship.id}" style="--team:${teamColor};--hull:${hullPercent}%;--shield:${shieldPercent}%" title="${SHIP_LABELS[ship.class]} ${ship.id}" aria-label="${SHIP_LABELS[ship.class]} ${ship.id}, ${hullPercent}% hull${shieldCopy}">
@@ -5077,6 +5077,7 @@ function updateSelectionHud(): void {
   constructionSiteControls.classList.add("hidden");
   productionControls.classList.add("hidden");
   queueConsole.classList.add("hidden");
+  icon.classList.remove("fighter-squad-symbol");
   if (!canIssuePlayerCommands() || structures.length > 0 || ships.length <= 1) clearSelectionRoster();
 
   if (!canIssuePlayerCommands()) {
@@ -5221,13 +5222,18 @@ function updateSelectionHud(): void {
         : `DEPLOYING ${Math.floor((ships[0]!.artilleryDeploymentTicks ?? 0) / artillerySetupTicks * 100)}%`
     : ships.some(isShipCruising) ? "CRUISE DRIVE" : "TACTICAL DRIVE";
   summary.textContent = `${composition} · ${sharedArmor} · ${tacticalState}`;
-  icon.textContent = ships.length === 1
-    ? ships[0]!.class === "fabricator" ? "⌁"
-      : ships[0]!.class === "carrier" ? "▣"
-      : ships[0]!.class === "battleship" ? "⬣"
-        : ships[0]!.class === "cruiser" || ships[0]!.class === "destroyer" ? "⬢"
-          : ships[0]!.class === "bomber" ? "◆" : "△"
-    : "◈";
+  if (ships.length === 1 && ships[0]!.class === "fighter") {
+    icon.classList.add("fighter-squad-symbol");
+    icon.textContent = "⌃\n⌃ ⌃\n⌃ ⌃";
+  } else {
+    icon.textContent = ships.length === 1
+      ? ships[0]!.class === "fabricator" ? "⌁"
+        : ships[0]!.class === "carrier" ? "▣"
+        : ships[0]!.class === "battleship" ? "⬣"
+          : ships[0]!.class === "cruiser" || ships[0]!.class === "destroyer" ? "⬢"
+            : ships[0]!.class === "bomber" ? "◆" : "△"
+      : "◈";
+  }
   bars.innerHTML = selectionMetersHtml(health, maxHealth, shields, maxShields);
   if (ships.length > 1) renderSelectionRoster(ships);
   const mobileBuilders = ships.filter((ship) => SHIPS[ship.class].buildPower > 0);

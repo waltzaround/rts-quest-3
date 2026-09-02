@@ -67,6 +67,7 @@ function createBadgeBar(
 
 function createTacticalGeometry(classId: number): THREE.BufferGeometry {
   const pieces: THREE.BufferGeometry[] = [];
+  const shipClass = SHIP_CLASSES[classId]!;
   const addBar = (
     fromX: number,
     fromY: number,
@@ -76,86 +77,114 @@ function createTacticalGeometry(classId: number): THREE.BufferGeometry {
   ): void => {
     pieces.push(createBadgeBar(fromX, fromY, toX, toY, thickness));
   };
+  const addPolyline = (points: ReadonlyArray<readonly [number, number]>, thickness = BADGE_STROKE): void => {
+    for (let index = 1; index < points.length; index += 1) {
+      const from = points[index - 1]!;
+      const to = points[index]!;
+      addBar(from[0], from[1], to[0], to[1], thickness);
+    }
+  };
+  const addClosedShape = (points: ReadonlyArray<readonly [number, number]>, thickness = BADGE_STROKE): void => {
+    addPolyline([...points, points[0]!], thickness);
+  };
+  const addChevron = (x: number, y: number, width: number, height: number, thickness = 0.1): void => {
+    addBar(x - width / 2, y - height / 2, x, y + height / 2, thickness);
+    addBar(x, y + height / 2, x + width / 2, y - height / 2, thickness);
+  };
+  const addDiamond = (x: number, y: number, width: number, height: number, thickness = 0.1): void => {
+    addClosedShape([
+      [x, y + height / 2], [x + width / 2, y],
+      [x, y - height / 2], [x - width / 2, y],
+    ], thickness);
+  };
+  const addFrigateHull = (thickness = 0.13): void => {
+    addClosedShape([
+      [0, 0.9], [0.62, 0.22], [0.47, -0.72],
+      [0, -0.5], [-0.47, -0.72], [-0.62, 0.22],
+    ], thickness);
+  };
 
-  // Light craft share a compact military frame. Capital classes use distinct
-  // silhouettes so they remain identifiable before their field marks resolve.
-  const framePoints: ReadonlyArray<readonly [number, number]> = classId === 7
-    ? [[0, 0.82], [1.08, 0], [0, -0.82], [-1.08, 0]] // Destroyer: diamond.
-    : classId === 6 || classId === 8 || classId === 10
-      ? [[-0.72, 0.88], [0.72, 0.88], [0.9, -0.88], [-0.9, -0.88]] // Artillery: long fire-support hull.
-    : classId === 9
-      ? [[-0.9, 0.7], [0.9, 0.7], [1.2, 0], [0.9, -0.7], [-0.9, -0.7], [-1.2, 0]] // Cruiser: hexagon.
-      : classId === 11
-        ? [[-1.28, 0.6], [1.28, 0.6], [1.28, -0.6], [-1.28, -0.6]] // Carrier: flight deck.
-        : classId === 12
-          ? [[-0.92, 0.8], [0.92, 0.8], [1.22, 0.5], [1.22, -0.5], [0.92, -0.8], [-0.92, -0.8], [-1.22, -0.5], [-1.22, 0.5]] // Battleship: heavy octagon.
-          : [[-0.88, 0.72], [0.88, 0.72], [1.08, 0.52], [1.08, -0.52], [0.88, -0.72], [-0.88, -0.72], [-1.08, -0.52], [-1.08, 0.52]];
-  const frameStroke = classId >= 6 ? 0.15 : BADGE_STROKE;
-  for (let index = 0; index < framePoints.length; index += 1) {
-    const from = framePoints[index]!;
-    const to = framePoints[(index + 1) % framePoints.length]!;
-    addBar(from[0], from[1], to[0], to[1], frameStroke);
-  }
-
-  switch (classId) {
-    case 0: // Fighter: air-intercept cross.
-      addBar(-0.55, -0.42, 0.55, 0.42, 0.14);
-      addBar(-0.55, 0.42, 0.55, -0.42, 0.14);
+  switch (shipClass) {
+    case "fighter": // One unit is a five-craft squadron.
+      addChevron(0, 0.58, 0.4, 0.3);
+      addChevron(-0.47, 0.12, 0.4, 0.3);
+      addChevron(0.47, 0.12, 0.4, 0.3);
+      addChevron(-0.27, -0.42, 0.4, 0.3);
+      addChevron(0.27, -0.42, 0.4, 0.3);
       break;
-    case 1: // Fabricator: engineering diamond and mast.
-      addBar(0, 0.46, 0.5, 0);
-      addBar(0.5, 0, 0, -0.46);
-      addBar(0, -0.46, -0.5, 0);
-      addBar(-0.5, 0, 0, 0.46);
-      addBar(0, -0.3, 0, 0.3, 0.1);
+    case "bomber": // One broad strike craft, not a squadron marker.
+      addClosedShape([
+        [0, 0.88], [0.82, -0.28], [0.44, -0.62],
+        [0, -0.38], [-0.44, -0.62], [-0.82, -0.28],
+      ], 0.15);
+      addBar(-0.56, -0.2, 0.56, -0.2, 0.13);
+      addBar(0, -0.28, 0, 0.52, 0.13);
       break;
-    case 2: // Frigate: single light-combat bar.
-      addBar(-0.62, 0, 0.62, 0, 0.16);
+    case "fabricator": // Engineering diamond with a construction cross.
+      addDiamond(0, 0, 1.34, 1.48, 0.14);
+      addBar(-0.39, 0, 0.39, 0, 0.16);
+      addBar(0, -0.39, 0, 0.39, 0.16);
       break;
-    case 3: // Bomber: strike wedge.
-      addBar(-0.58, -0.38, 0, 0.42, 0.14);
-      addBar(0, 0.42, 0.58, -0.38, 0.14);
-      addBar(-0.58, -0.38, 0.58, -0.38, 0.14);
+    case "frigate": // Small pointed escort hull.
+      addFrigateHull();
+      addBar(0, -0.34, 0, 0.55, 0.13);
       break;
-    case 4: // Flak frigate: anti-air cross over a combat bar.
-      addBar(-0.52, -0.38, 0.52, 0.38, 0.12);
-      addBar(-0.52, 0.38, 0.52, -0.38, 0.12);
-      addBar(-0.62, 0, 0.62, 0, 0.13);
+    case "flakFrigate": // Escort hull with an unmistakable flak burst.
+      addFrigateHull();
+      addBar(-0.36, -0.36, 0.36, 0.36, 0.12);
+      addBar(-0.36, 0.36, 0.36, -0.36, 0.12);
+      addBar(-0.48, 0, 0.48, 0, 0.12);
+      addBar(0, -0.48, 0, 0.48, 0.12);
       break;
-    case 5: // Torpedo frigate: downward attack chevron.
-      addBar(-0.62, 0.32, 0, -0.36, 0.15);
-      addBar(0, -0.36, 0.62, 0.32, 0.15);
+    case "torpedoFrigate": // Escort hull with paired launch rails.
+      addFrigateHull();
+      addBar(-0.25, -0.38, -0.25, 0.5, 0.15);
+      addBar(0.25, -0.38, 0.25, 0.5, 0.15);
+      addChevron(-0.25, 0.55, 0.28, 0.22, 0.1);
+      addChevron(0.25, 0.55, 0.28, 0.22, 0.1);
       break;
-    case 7: // Destroyer: medium-combat cross.
-      addBar(-0.62, 0, 0.62, 0, 0.17);
-      addBar(0, -0.44, 0, 0.44, 0.17);
-      addBar(-0.26, 1.02, 0.26, 1.02, 0.14);
+    case "artilleryFrigate": // Narrow hull and one long-range gun.
+      addFrigateHull();
+      addBar(0, -0.42, 0, 0.76, 0.17);
+      addBar(-0.38, -0.18, 0.38, -0.18, 0.12);
+      addChevron(0, 0.8, 0.4, 0.24, 0.1);
       break;
-    case 6: case 8: case 10: // Artillery: long-range gun mark.
-      addBar(-0.28, -0.55, -0.28, 0.55, 0.14);
-      addBar(0.28, -0.55, 0.28, 0.55, 0.14);
-      addBar(-0.52, 1.02, 0.52, 1.02, 0.14);
+    case "destroyer": // Broad line-warship diamond.
+      addClosedShape([[0, 1], [0.88, 0.08], [0.62, -0.86], [0, -0.6], [-0.62, -0.86], [-0.88, 0.08]], 0.16);
+      addBar(-0.58, 0.14, 0.58, 0.14, 0.17);
+      addBar(-0.46, -0.22, 0.46, -0.22, 0.17);
       break;
-    case 9: // Cruiser: twin heavy-combat bars.
-      addBar(-0.62, 0.23, 0.62, 0.23, 0.16);
-      addBar(-0.62, -0.23, 0.62, -0.23, 0.16);
-      addBar(-0.5, 0.94, -0.08, 0.94, 0.14);
-      addBar(0.08, 0.94, 0.5, 0.94, 0.14);
+    case "artilleryDestroyer": // Broad hull with twin siege barrels.
+      addClosedShape([[0, 1], [0.85, 0.12], [0.62, -0.86], [0, -0.62], [-0.62, -0.86], [-0.85, 0.12]], 0.16);
+      addBar(-0.26, -0.5, -0.26, 0.72, 0.17);
+      addBar(0.26, -0.5, 0.26, 0.72, 0.17);
+      addBar(-0.58, -0.28, 0.58, -0.28, 0.13);
       break;
-    case 11: // Carrier: flight deck and embarked air wing.
-      addBar(0, -0.5, 0, 0.5, 0.16);
-      addBar(-0.58, -0.2, 0, 0.3, 0.13);
-      addBar(0, 0.3, 0.58, -0.2, 0.13);
-      addBar(-0.42, 0.82, 0, 1.08, 0.13);
-      addBar(0, 1.08, 0.42, 0.82, 0.13);
+    case "cruiser": // Wide heavy hull with a central armored spine.
+      addClosedShape([[0, 1.02], [1.05, 0.4], [0.92, -0.68], [0, -0.9], [-0.92, -0.68], [-1.05, 0.4]], 0.17);
+      addClosedShape([[0, 0.58], [0.52, 0.2], [0.42, -0.42], [0, -0.58], [-0.42, -0.42], [-0.52, 0.2]], 0.14);
       break;
-    default: // Battleship: reinforced triple heavy-combat bars.
-      addBar(-0.66, 0.32, 0.66, 0.32, 0.17);
-      addBar(-0.66, 0, 0.66, 0, 0.17);
-      addBar(-0.66, -0.32, 0.66, -0.32, 0.17);
-      addBar(-0.62, 1.04, -0.22, 1.04, 0.15);
-      addBar(-0.2, 1.04, 0.2, 1.04, 0.15);
-      addBar(0.22, 1.04, 0.62, 1.04, 0.15);
+    case "artilleryCruiser": // Heavy hull with paired strategic guns.
+      addClosedShape([[0, 1.02], [1.05, 0.4], [0.92, -0.68], [0, -0.9], [-0.92, -0.68], [-1.05, 0.4]], 0.17);
+      addBar(-0.3, -0.5, -0.3, 0.78, 0.18);
+      addBar(0.3, -0.5, 0.3, 0.78, 0.18);
+      addChevron(0, 0.84, 0.74, 0.3, 0.12);
+      break;
+    case "carrier": // Flight deck, runway, and embarked wing.
+      addClosedShape([[-1.18, 0.72], [1.18, 0.72], [1.18, -0.72], [-1.18, -0.72]], 0.17);
+      addBar(-0.72, 0, 0.72, 0, 0.13);
+      addBar(0, -0.48, 0, 0.48, 0.13);
+      addChevron(-0.68, 0.32, 0.34, 0.25, 0.09);
+      addChevron(0.68, -0.32, 0.34, 0.25, 0.09);
+      break;
+    case "battleship": // Largest hull with three armored batteries.
+      addClosedShape([
+        [0, 1.08], [0.92, 0.72], [1.25, 0.18], [1.02, -0.74],
+        [0, -0.96], [-1.02, -0.74], [-1.25, 0.18], [-0.92, 0.72],
+      ], 0.19);
+      addBar(-0.72, 0.38, 0.72, 0.38, 0.19);
+      addBar(-0.76, 0, 0.76, 0, 0.19);
+      addBar(-0.68, -0.38, 0.68, -0.38, 0.19);
       break;
   }
 
@@ -242,8 +271,8 @@ function createBatch(
 }
 
 const QUALITY_ENGINE_SCALE: Readonly<Record<RenderQuality, number>> = { low: 0.78, medium: 1, high: 1.16 };
-const TACTICAL_SCALE = [9, 10.5, 12, 9, 12.5, 12.5, 14, 15.5, 17.5, 19] as const;
-const TACTICAL_SELECTION_RADIUS = [13, 15, 17, 13, 18, 18, 20, 22, 25, 27] as const;
+const TACTICAL_SCALE = [12.5, 11, 12.5, 12.5, 13.5, 13.5, 14, 15, 15.5, 16.5, 17.5, 18.5, 20] as const;
+const TACTICAL_SELECTION_RADIUS = [18, 16, 18, 18, 19, 19, 20, 22, 23, 24, 26, 27, 29] as const;
 const CLOSE_SELECTION_RADIUS = [22, 13, 17, 7.5, 18, 19, 29, 42, 56, 64] as const;
 const THRUSTER_REAR = [-3.65, -11.5, -15.1, -5.1, -15.4, -15.4, -29.2, -34.8, -45.5, -56] as const;
 const THRUSTER_WIDTH = [0.3, 1.05, 1.35, 0.65, 1.42, 1.48, 1.72, 2.35, 2.4, 2.7] as const;
@@ -365,7 +394,7 @@ export class BatchedShipRenderer {
       const tacticalBatch = createBatch(
         createTacticalGeometry(classId),
         new THREE.MeshBasicMaterial({
-          color: 0xffffff, transparent: true, opacity: 0.9, side: THREE.DoubleSide,
+          color: 0xffffff, transparent: true, opacity: 0.96, side: THREE.DoubleSide,
           depthWrite: false, depthTest: false, fog: false, toneMapped: false,
         }),
         MAX_RENDER_SHIPS,
