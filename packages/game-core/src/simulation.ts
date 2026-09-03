@@ -113,6 +113,7 @@ export interface ScenarioOptions {
     | "amazon-tunnel" | "core-rush" | "star-fortress";
   mapSize?: "small" | "medium" | "large" | "huge" | "colossal";
   startingResources?: "low" | "standard" | "high";
+  startingBase?: "full" | "fortified" | "command-core";
   resourceDensity?: "scarce" | "standard" | "rich";
   teamSpawnMode?: "together" | "interleaved" | "random";
   /** Seeded one-on-one deployment variation for playable matches. */
@@ -449,8 +450,6 @@ export class GameSimulation {
       isExtractor ? EXTRACTOR_BUILD_RANGE : BUILD_RANGE,
     );
     const hasAssignedMobileBuilder = this.getAssignedMobileBuilders(playerId, builderUnitIds).length > 0;
-    if (DEFENSIVE_STRUCTURE_TYPES.includes(structureType as (typeof DEFENSIVE_STRUCTURE_TYPES)[number])
-      && !hasAssignedMobileBuilder) return false;
     if (!inStaticBuildRange && !hasAssignedMobileBuilder) {
       return false;
     }
@@ -866,13 +865,8 @@ export class GameSimulation {
           Math.hypot(builder.x - constructionPosition.x, builder.z - constructionPosition.z)
             <= SHIPS[builder.class].buildRange,
         );
-        const requiresMobileBuilder = DEFENSIVE_STRUCTURE_TYPES.includes(
-          command.structureType as (typeof DEFENSIVE_STRUCTURE_TYPES)[number],
-        );
-        if ((requiresMobileBuilder && !mobileBuilderInRange)
-          || (!requiresMobileBuilder
-            && !this.hasStaticBuildAnchorInRange(command.playerId, constructionPosition)
-            && !mobileBuilderInRange)) {
+        if (!this.hasStaticBuildAnchorInRange(command.playerId, constructionPosition)
+          && !mobileBuilderInRange) {
           for (const builder of mobileBuilders) {
             this.sendMobileBuilderToSite(builder, constructionPosition, command.queued);
           }
@@ -1923,17 +1917,28 @@ export class GameSimulation {
       const constructionLimit = 1;
       if (this.state.tick % (thinkTicks * 3) === 0 && activeConstructionCount < constructionLimit) {
         const constructionCycle = Math.floor(this.state.tick / (thinkTicks * 3));
+        const extractorCount = this.state.structures.filter((structure) =>
+          structure.ownerPlayerId === playerId
+            && RESOURCE_EXTRACTOR_TYPES.includes(structure.type as typeof RESOURCE_EXTRACTOR_TYPES[number]),
+        ).length;
+        const prioritizingEarlyExtractors = extractorCount < 3;
+        const needsInitialDefense = settings.personality !== "economic"
+          && extractorCount >= 3
+          && !this.state.structures.some((structure) =>
+            structure.ownerPlayerId === playerId
+              && DEFENSIVE_STRUCTURE_TYPES.includes(structure.type as typeof DEFENSIVE_STRUCTURE_TYPES[number]));
         const defenseInterval = settings.personality === "turtle" ? 2
           : settings.personality === "aggressive" ? 5
             : settings.personality === "economic" ? 4 : 3;
         const defenseTurn = constructionCycle % defenseInterval === defenseInterval - 1;
         const economyTurn = constructionCycle % 2 === 0;
-        if (defenseTurn) this.advanceAiDefenses(playerId, settings);
+        if (prioritizingEarlyExtractors) this.expandAiEconomy(playerId, settings);
+        else if (needsInitialDefense || defenseTurn) this.advanceAiDefenses(playerId, settings);
         else if (economyTurn) this.expandAiEconomy(playerId, settings);
         else this.advanceAiInfrastructure(playerId, settings);
         activeConstructionCount = this.aiConstructionCount(playerId);
         if (activeConstructionCount < constructionLimit) {
-          if (economyTurn) this.advanceAiInfrastructure(playerId, settings);
+          if (prioritizingEarlyExtractors || economyTurn) this.advanceAiInfrastructure(playerId, settings);
           else this.expandAiEconomy(playerId, settings);
         }
       }
@@ -2136,7 +2141,7 @@ export class GameSimulation {
       }
       return false;
     };
-    if (extractors.length >= Math.min(2, extractorTarget) && tryUpgradeExtractor()) return;
+    if (extractors.length >= Math.min(3, extractorTarget) && tryUpgradeExtractor()) return;
     if (extractors.length < extractorTarget) {
       const reservedNodeIds = new Set(this.state.commandQueue
         .filter((command) => command.type === "buildStructure"
@@ -2282,6 +2287,10 @@ export class GameSimulation {
     );
     const hasFusionPower = this.state.structures.some((structure) =>
       structure.ownerPlayerId === playerId && structure.type === "fusionReactor" && structure.buildProgress >= 1);
+    const hasAdvancedAlloyIncome = this.state.structures.some((structure) =>
+      structure.ownerPlayerId === playerId
+        && (structure.type === "alloyRefinery" || structure.type === "matterForge"));
+    if (settings.personality === "economic" && !hasAdvancedAlloyIncome) return;
     const limit = settings.personality === "turtle" ? (settings.difficulty === "hard" ? 8 : 6)
       : settings.personality === "economic" && !hasFusionPower ? 1
         : settings.personality === "aggressive" ? 2 : 3;
@@ -2431,6 +2440,7 @@ export function createCombatScenario(options: ScenarioOptions = {}): GameSimulat
   const mapPreset = options.mapPreset ?? "orbital-ring";
   const mapRandom = createMapRandom(seed, mapPreset);
   const mapSize = options.mapSize ?? "medium";
+  const startingBase = options.startingBase ?? "full";
   const resourceDensity = options.resourceDensity ?? "standard";
   const baseRadius = { small: 1_600, medium: 2_400, large: 4_000, huge: 6_000, colossal: 8_500 }[mapSize];
   const isOneVsOneMatch = options.varyStartingPositions === true
@@ -2703,9 +2713,23 @@ export function createCombatScenario(options: ScenarioOptions = {}): GameSimulat
         );
       }
       addStructure(player, "commandCore", baseX, baseZ, yaw, rally);
-      addStructure(player, "extractor", safeNode.x, safeNode.z, yaw, rally, safeNode);
-      addStructure(player, "solarArray", baseX + inwardX * 70 * clusterScale - tangentX * 92 * clusterScale, baseZ + inwardZ * 70 * clusterScale - tangentZ * 92 * clusterScale, yaw, rally);
-      addStructure(player, "shipyard", baseX + inwardX * 65 * clusterScale + tangentX * 105 * clusterScale, baseZ + inwardZ * 65 * clusterScale + tangentZ * 105 * clusterScale, yaw, rally);
+      if (startingBase !== "command-core") {
+        addStructure(player, "extractor", safeNode.x, safeNode.z, yaw, rally, safeNode);
+        addStructure(player, "solarArray", baseX + inwardX * 70 * clusterScale - tangentX * 92 * clusterScale, baseZ + inwardZ * 70 * clusterScale - tangentZ * 92 * clusterScale, yaw, rally);
+        addStructure(player, "shipyard", baseX + inwardX * 65 * clusterScale + tangentX * 105 * clusterScale, baseZ + inwardZ * 65 * clusterScale + tangentZ * 105 * clusterScale, yaw, rally);
+      }
+      if (startingBase === "fortified") {
+        for (const side of [-1, 1] as const) {
+          addStructure(
+            player,
+            "pointDefenseBattery",
+            baseX + inwardX * 25 * clusterScale + tangentX * side * 165 * clusterScale,
+            baseZ + inwardZ * 25 * clusterScale + tangentZ * side * 165 * clusterScale,
+            yaw,
+            rally,
+          );
+        }
+      }
       if (options.showcase === true) {
         const showcaseRally = { x: 0, z: 0 };
         const placeShowcaseStructure = (type: StructureType, inward: number, tangent: number): void => {

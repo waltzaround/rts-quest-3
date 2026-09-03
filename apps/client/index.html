@@ -119,6 +119,10 @@
           <div class="selection-roster hidden" id="selection-roster" role="group" aria-label="Selected units"></div>
           <div class="production-console hidden" id="selection-queue">
             <div class="production-heading"><span id="production-label">SHIPYARD IDLE</span><small id="queue-count">QUEUE 0</small></div>
+            <div class="production-economy" id="production-economy">
+              <span>IDLE UPKEEP <b id="production-idle-upkeep">−0 E/S</b></span>
+              <span>ACTIVE LOAD <b id="production-active-load">NONE</b></span>
+            </div>
             <div class="production-status" id="queue-progress-row"><div><i id="production-progress"></i></div><button id="cancel-production" title="Cancel active production">×</button></div>
             <div class="queue-items" id="queue-items"></div>
             <div class="production-actions" id="production-queue-actions">
@@ -148,40 +152,40 @@
             <button id="cmd-hold"><b>◉</b><span>HOLD</span><kbd>H</kbd></button>
           </div>
           <div class="command-grid progression-grid hidden" id="construction-controls">
-            <nav class="construction-tabs" aria-label="Building category">
-              <button type="button" class="active" data-construction-tab="economy">ECONOMY</button>
-              <button type="button" data-construction-tab="production">PRODUCTION</button>
-              <button type="button" data-construction-tab="defence">DEFENCE</button>
+            <nav class="construction-tabs" aria-label="Building technology tier">
+              <button type="button" class="active" data-construction-tab="t1"><b>T1</b><span>FOUNDATION</span></button>
+              <button type="button" data-construction-tab="t2"><b>T2</b><span>ADVANCED</span></button>
+              <button type="button" data-construction-tab="t3"><b>T3</b><span>STRATEGIC</span></button>
             </nav>
-            <div class="construction-category active" data-construction-category="economy">
+            <div class="construction-category active" data-construction-category="t1">
               <button id="build-extractor"><b>EX</b><span>EXTRACTOR</span><small>220A · 80E</small><em class="command-lock"></em></button>
-              <button id="build-deep-extractor"><b>DX</b><span>DEEP EXTRACTOR</span><small>900A · 650E</small><em class="command-lock"></em></button>
-              <button id="build-singularity"><b>SH</b><span>HARVESTER</span><small>2600A · 2300E</small><em class="command-lock"></em></button>
-              <button id="build-alloy-refinery"><b>R2</b><span>T2 ALLOY REFINERY</span><small>850A · 780E</small><em class="command-lock"></em></button>
-              <button id="build-matter-forge"><b>F3</b><span>T3 MATTER FORGE</span><small>2300A · 2650E</small><em class="command-lock"></em></button>
               <button id="build-solar"><b>SO</b><span>SOLAR ARRAY</span><small>170A · 20E</small><em class="command-lock"></em></button>
-              <button id="build-fusion"><b>FR</b><span>FUSION REACTOR</span><small>650A · 480E</small><em class="command-lock"></em></button>
-              <button id="build-antimatter"><b>AR</b><span>ANTIMATTER</span><small>1800A · 2000E</small><em class="command-lock"></em></button>
               <button id="build-storage"><b>ST</b><span>STORAGE</span><small>180A · 60E</small><em class="command-lock"></em></button>
-              <button id="build-quantum-storage"><b>QV</b><span>QUANTUM VAULT</span><small>1400A · 1100E</small><em class="command-lock"></em></button>
-            </div>
-            <div class="construction-category" data-construction-category="production">
               <button id="build-fabricator"><b>FB</b><span>FABRICATOR</span><small>340A · 180E</small><em class="command-lock"></em></button>
               <button id="build-shipyard"><b>SY</b><span>SMALL YARD</span><small>480A · 320E</small><em class="command-lock"></em></button>
-              <button id="build-fleet-yard"><b>MY</b><span>MEDIUM YARD</span><small>1250A · 900E</small><em class="command-lock"></em></button>
-              <button id="build-capital-yard"><b>LY</b><span>LARGE YARD</span><small>3200A · 2700E</small><em class="command-lock"></em></button>
-            </div>
-            <div class="construction-category" data-construction-category="defence">
               <button id="build-radar-array"><b>RA</b><span>RADAR ARRAY</span><small>420A · 360E</small><em class="command-lock"></em></button>
-              <button id="build-phased-radar"><b>R2</b><span>PHASED RADAR</span><small>1250A · 1050E</small><em class="command-lock"></em></button>
-              <button id="build-deep-space-radar"><b>R3</b><span>DEEP-SPACE ARRAY</span><small>3200A · 2900E</small><em class="command-lock"></em></button>
               <button id="build-pd-battery"><b>F1</b><span>T1 FLAK BASTION</span><small>620A · 430E · ANTI-FIGHTER</small><em class="command-lock"></em></button>
               <button id="build-missile-battery"><b>T1</b><span>T1 TORPEDO CITADEL</span><small>1050A · 860E · ANTI-CAPITAL</small><em class="command-lock"></em></button>
+              <button id="build-artillery-battery"><b>A1</b><span>T1 ARTILLERY BATTERY</span><small>650A · 450E · SIEGE</small><em class="command-lock"></em></button>
+            </div>
+            <div class="construction-category" data-construction-category="t2">
+              <button id="build-deep-extractor"><b>DX</b><span>DEEP EXTRACTOR</span><small>900A · 650E</small><em class="command-lock"></em></button>
+              <button id="build-alloy-refinery"><b>R2</b><span>ALLOY REFINERY</span><small>850A · 780E</small><em class="command-lock"></em></button>
+              <button id="build-fusion"><b>FR</b><span>FUSION REACTOR</span><small>650A · 480E</small><em class="command-lock"></em></button>
+              <button id="build-fleet-yard"><b>MY</b><span>MEDIUM YARD</span><small>1250A · 900E</small><em class="command-lock"></em></button>
+              <button id="build-phased-radar"><b>R2</b><span>PHASED RADAR</span><small>1250A · 1050E</small><em class="command-lock"></em></button>
               <button id="build-rail-battery"><b>R2</b><span>T2 RAIL FORTRESS</span><small>1750A · 1350E · ANTI-CAPITAL</small><em class="command-lock"></em></button>
               <button id="build-plasma-battery"><b>P2</b><span>T2 PLASMA FORTRESS</span><small>2150A · 1900E · AREA CONTROL</small><em class="command-lock"></em></button>
-              <button id="build-beam-battery"><b>B3</b><span>T3 BEAM CITADEL</span><small>5200A · 4800E · FLEET DENIAL</small><em class="command-lock"></em></button>
-              <button id="build-artillery-battery"><b>A1</b><span>T1 ARTILLERY BATTERY</span><small>650A · 450E · SIEGE</small><em class="command-lock"></em></button>
               <button id="build-heavy-artillery-battery"><b>A2</b><span>T2 HEAVY ARTILLERY</span><small>1800A · 1350E · SIEGE</small><em class="command-lock"></em></button>
+            </div>
+            <div class="construction-category" data-construction-category="t3">
+              <button id="build-singularity"><b>SH</b><span>HARVESTER</span><small>2600A · 2300E</small><em class="command-lock"></em></button>
+              <button id="build-matter-forge"><b>F3</b><span>MATTER FORGE</span><small>2300A · 2650E</small><em class="command-lock"></em></button>
+              <button id="build-antimatter"><b>AR</b><span>ANTIMATTER</span><small>1800A · 2000E</small><em class="command-lock"></em></button>
+              <button id="build-quantum-storage"><b>QV</b><span>QUANTUM VAULT</span><small>1400A · 1100E</small><em class="command-lock"></em></button>
+              <button id="build-capital-yard"><b>LY</b><span>LARGE YARD</span><small>3200A · 2700E</small><em class="command-lock"></em></button>
+              <button id="build-deep-space-radar"><b>R3</b><span>DEEP-SPACE ARRAY</span><small>3200A · 2900E</small><em class="command-lock"></em></button>
+              <button id="build-beam-battery"><b>B3</b><span>T3 BEAM CITADEL</span><small>5200A · 4800E · FLEET DENIAL</small><em class="command-lock"></em></button>
               <button id="build-strategic-artillery-array"><b>A3</b><span>T3 STRATEGIC ARRAY</span><small>5500A · 5200E · LONG-RANGE</small><em class="command-lock"></em></button>
             </div>
           </div>
@@ -206,7 +210,7 @@
 
       <aside id="command-tooltip" class="command-tooltip" role="tooltip" aria-hidden="true"></aside>
 
-      <div class="camera-help">LEFT SELECT <b>·</b> RIGHT-DRAG FORMATION <b>·</b> SHIFT QUEUE <b>·</b> CTRL+1–9 GROUPS <b>·</b> \ FULLSCREEN</div>
+      <div class="camera-help">ARROWS / EDGE PAN <b>·</b> MIDDLE-DRAG ROTATE <b>·</b> SHIFT+MIDDLE PAN <b>·</b> MINIMAP RMB MOVE <b>·</b> CTRL+1–9 GROUPS</div>
       <section id="replay-controls" class="replay-controls hidden" aria-label="Replay controls">
         <button id="replay-toggle" type="button" aria-label="Play replay">▶</button>
         <span id="replay-current">00:00</span>
@@ -278,6 +282,10 @@
                 <div class="lobby-sidebar-control">
                   <div class="setting-group-label">STARTING RESOURCES</div>
                   <select id="starting-resources" aria-label="Starting resources"><option value="low">LOW · 500</option><option value="standard">STANDARD · 900</option><option value="high">HIGH · 1,800</option></select>
+                </div>
+                <div class="lobby-sidebar-control">
+                  <div class="setting-group-label">STARTING BASE</div>
+                  <select id="starting-base" aria-label="Starting base"><option value="full">FULL BASE · ECONOMY + YARD</option><option value="fortified">FORTIFIED · BASE + 2 BATTERIES</option><option value="command-core">COMMAND CORE ONLY</option></select>
                 </div>
                 <div class="lobby-sidebar-control">
                   <div class="setting-group-label">GAME MODE</div>

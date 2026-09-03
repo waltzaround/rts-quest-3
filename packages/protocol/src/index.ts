@@ -35,7 +35,7 @@ const hasOwn = (record: object, key: unknown): key is string =>
 
 export const MAX_PLAYERS = 8;
 /** Bump whenever deterministic rules, unit data, or the lockstep bootstrap contract changes. */
-export const LOCKSTEP_PROTOCOL_VERSION = 2;
+export const LOCKSTEP_PROTOCOL_VERSION = 3;
 export const MAX_COMMAND_BATCH = 32;
 export const MAX_FLEET_COMMAND_UNITS = 2_048;
 export const MAX_MESSAGE_BYTES = 64 * 1024;
@@ -59,6 +59,7 @@ export type MapPreset =
   | "star-fortress";
 export type MapSize = "small" | "medium" | "large" | "huge" | "colossal";
 export type StartingResources = "low" | "standard" | "high";
+export type StartingBase = "full" | "fortified" | "command-core";
 export type ResourceDensity = "scarce" | "standard" | "rich";
 export type TeamSpawnMode = "together" | "interleaved" | "random";
 
@@ -66,6 +67,7 @@ export interface LobbySettings {
   mapPreset: MapPreset;
   mapSize: MapSize;
   startingResources: StartingResources;
+  startingBase: StartingBase;
   resourceDensity: ResourceDensity;
   teamSpawnMode: TeamSpawnMode;
 }
@@ -74,6 +76,7 @@ export const DEFAULT_LOBBY_SETTINGS: Readonly<LobbySettings> = {
   mapPreset: "orbital-ring",
   mapSize: "medium",
   startingResources: "standard",
+  startingBase: "full",
   resourceDensity: "standard",
   teamSpawnMode: "together",
 };
@@ -197,6 +200,7 @@ function isLobbySettings(value: unknown): value is LobbySettings {
     ].includes(String(value.mapPreset))
     && ["small", "medium", "large", "huge", "colossal"].includes(String(value.mapSize))
     && ["low", "standard", "high"].includes(String(value.startingResources))
+    && ["full", "fortified", "command-core"].includes(String(value.startingBase))
     && ["scarce", "standard", "rich"].includes(String(value.resourceDensity))
     && ["together", "interleaved", "random"].includes(String(value.teamSpawnMode));
 }

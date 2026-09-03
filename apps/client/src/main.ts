@@ -425,6 +425,47 @@ const DAMAGE_PROFILE_COPY = {
   siege: "SIEGE · STRONG VS FORTIFIED · WEAK VS LIGHT",
 } as const;
 
+const WEAPON_LABELS: Readonly<Record<WeaponTypeId, string>> = {
+  autocannon: "AUTOCANNON",
+  torpedo: "TORPEDO LAUNCHER",
+  plasma: "PLASMA BATTERY",
+  heavyRail: "HEAVY RAILGUN",
+  pointDefense: "POINT DEFENCE",
+  flakCannon: "FLAK CANNON",
+  beam: "BEAM LANCE",
+  lightArtillery: "LIGHT ARTILLERY",
+  siegeArtillery: "SIEGE ARTILLERY",
+  strategicArtillery: "STRATEGIC ARTILLERY",
+};
+
+type ShipyardType = (typeof SHIPYARD_TYPES)[number];
+
+const PRODUCTION_HOTKEYS: Readonly<Record<ShipyardType, readonly Readonly<{
+  code: string;
+  label: string;
+  shipClass: ShipClass;
+}>[]>> = {
+  shipyard: [
+    { code: "KeyQ", label: "Q", shipClass: "fighter" },
+    { code: "KeyW", label: "W", shipClass: "fabricator" },
+    { code: "KeyE", label: "E", shipClass: "frigate" },
+    { code: "KeyR", label: "R", shipClass: "bomber" },
+    { code: "KeyT", label: "T", shipClass: "artilleryFrigate" },
+  ],
+  fleetShipyard: [
+    { code: "KeyQ", label: "Q", shipClass: "flakFrigate" },
+    { code: "KeyW", label: "W", shipClass: "torpedoFrigate" },
+    { code: "KeyE", label: "E", shipClass: "destroyer" },
+    { code: "KeyR", label: "R", shipClass: "artilleryDestroyer" },
+    { code: "KeyT", label: "T", shipClass: "cruiser" },
+  ],
+  capitalShipyard: [
+    { code: "KeyQ", label: "Q", shipClass: "artilleryCruiser" },
+    { code: "KeyW", label: "W", shipClass: "carrier" },
+    { code: "KeyE", label: "E", shipClass: "battleship" },
+  ],
+};
+
 const FLEET_COMMAND_TOOLTIPS: Readonly<Record<string, string>> = {
   "cmd-move": "Move the selected formation to a destination while preserving its current engagement posture.",
   "cmd-attack": "Advance toward a destination and engage hostile contacts encountered along the route.",
@@ -438,15 +479,69 @@ const FLEET_COMMAND_TOOLTIPS: Readonly<Record<string, string>> = {
 function structureCommandDescription(type: StructureType): string {
   const definition = STRUCTURES[type];
   if ((definition.hardpoints?.length ?? 0) > 0) return `${fortressLoadoutSummary(type as (typeof DEFENSIVE_STRUCTURE_TYPES)[number])}. Fixed fortress providing layered control of the surrounding battlespace.`;
-  if (definition.alloyIncome > 0) return `Generates ${definition.alloyIncome} alloy per economy cycle${definition.energyUpkeep > 0 ? ` at ${definition.energyUpkeep} energy upkeep` : ""}.`;
-  if (definition.energyIncome > 0) return `Generates ${definition.energyIncome} energy per economy cycle with no external energy upkeep.`;
-  if (definition.alloyStorage > 0 || definition.energyStorage > 0) return `Expands reserves by ${definition.alloyStorage} alloy and ${definition.energyStorage} energy.`;
-  if (definition.buildPower > 0) return `Static fabrication hub with ${definition.buildPower.toFixed(1)}× build power and ${definition.assistRange} assist range.`;
   if (type === "shipyard") return "Produces fighters, bombers, fabricators, and light escort ships.";
   if (type === "fleetShipyard") return "Produces specialist frigates, line destroyers, artillery, and cruisers for sustained fleet combat.";
   if (type === "capitalShipyard") return "Constructs carriers and battleships. The foundation of a late-game capital fleet.";
+  if (definition.alloyIncome > 0) return `Generates ${definition.alloyIncome} alloy per second${definition.energyUpkeep > 0 ? ` at ${definition.energyUpkeep} energy per second upkeep` : ""}.`;
+  if (definition.energyIncome > 0) return `Generates ${definition.energyIncome} energy per second${definition.energyUpkeep > 0 ? ` with ${definition.energyUpkeep} consumed internally` : " with no upkeep"}.`;
+  if (definition.alloyStorage > 0 || definition.energyStorage > 0) return `Expands reserves by ${definition.alloyStorage} alloy and ${definition.energyStorage} energy.`;
+  if (definition.buildPower > 0) return `Static fabrication hub with ${definition.buildPower.toFixed(1)}× build power and ${definition.assistRange} assist range.`;
   if (type === "radarArray" || type === "phasedRadarArray" || type === "deepSpaceRadarArray") return `Provides ${definition.sensorRange} units of radar coverage without energy upkeep.`;
   return "Expands fleet infrastructure and unlocks additional construction options.";
+}
+
+function tooltipNumber(value: number): string {
+  const rounded = Math.round(value * 10) / 10;
+  return Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1);
+}
+
+function tooltipWeaponLoadout(
+  hardpoints: readonly Readonly<{ weaponTypeId: WeaponTypeId }>[],
+  rangeMultiplier = 1,
+  damageMultiplier = 1,
+): string {
+  if (hardpoints.length === 0) return "";
+  const counts = new Map<WeaponTypeId, number>();
+  for (const hardpoint of hardpoints) {
+    counts.set(hardpoint.weaponTypeId, (counts.get(hardpoint.weaponTypeId) ?? 0) + 1);
+  }
+  const rows = [...counts.entries()].map(([weaponTypeId, count]) => {
+    const weapon = WEAPONS[weaponTypeId];
+    const damage = weapon.damage * damageMultiplier;
+    const cycleTicks = Math.max(1, weapon.cooldownTicks + (weapon.burstSize - 1) * weapon.burstIntervalTicks);
+    const dps = damage * weapon.burstSize * 20 / cycleTicks;
+    const minimumRange = weapon.minimumRange * rangeMultiplier;
+    const maximumRange = weapon.range * rangeMultiplier;
+    const range = minimumRange > 0
+      ? `${tooltipNumber(minimumRange)}–${tooltipNumber(maximumRange)}`
+      : tooltipNumber(maximumRange);
+    return `<div class="tooltip-weapon"><div><strong>${count}× ${escapeHtml(WEAPON_LABELS[weaponTypeId])}</strong><span>${escapeHtml(weapon.damageProfile.toUpperCase())}</span></div><small>${tooltipNumber(damage)} DMG${weapon.burstSize > 1 ? ` × ${weapon.burstSize} BURST` : ""} · ${tooltipNumber(dps)} DPS EACH · ${range} RANGE</small></div>`;
+  }).join("");
+  return `<section class="tooltip-section tooltip-weapons"><h4>WEAPONS</h4>${rows}</section>`;
+}
+
+function structureEconomyTooltip(type: StructureType): string {
+  const definition = STRUCTURES[type];
+  const output = [
+    definition.alloyIncome > 0 ? `+${tooltipNumber(definition.alloyIncome)} A/S` : "",
+    definition.energyIncome > 0 ? `+${tooltipNumber(definition.energyIncome)} E/S` : "",
+  ].filter(Boolean).join(" · ") || "NO INCOME";
+  const upkeep = definition.energyUpkeep > 0 ? `−${tooltipNumber(definition.energyUpkeep)} E/S` : "NONE";
+  const netEnergy = definition.energyIncome - definition.energyUpkeep;
+  const netEnergyText = `${netEnergy > 0 ? "+" : netEnergy < 0 ? "−" : ""}${tooltipNumber(Math.abs(netEnergy))} E/S`;
+  const capacity = definition.alloyStorage > 0 || definition.energyStorage > 0
+    ? `<div><small>CAPACITY</small><strong>${definition.alloyStorage > 0 ? `+${definition.alloyStorage} A` : ""}${definition.alloyStorage > 0 && definition.energyStorage > 0 ? " · " : ""}${definition.energyStorage > 0 ? `+${definition.energyStorage} E` : ""}</strong></div>`
+    : "";
+  return `<section class="tooltip-section"><h4>ECONOMY</h4><div class="tooltip-economy"><div><small>OUTPUT</small><strong class="${output === "NO INCOME" ? "neutral" : "positive"}">${output}</strong></div><div><small>IDLE UPKEEP</small><strong class="${definition.energyUpkeep > 0 ? "negative" : "neutral"}">${upkeep}</strong></div><div><small>NET ENERGY</small><strong class="${netEnergy > 0 ? "positive" : netEnergy < 0 ? "negative" : "neutral"}">${netEnergyText}</strong></div>${capacity}</div></section>`;
+}
+
+function productionLoadTooltip(shipClass: ShipClass): string {
+  const economy = SHIP_ECONOMY[shipClass];
+  const buildSeconds = economy.buildTicks * FIXED_DT;
+  const output = shipClass === "fighter"
+    ? `${economy.batchSize} SQUADRONS / ${economy.batchSize * 5} CRAFT`
+    : `${economy.batchSize} SHIP${economy.batchSize === 1 ? "" : "S"}`;
+  return `<section class="tooltip-section"><h4>PRODUCTION LOAD</h4><div class="tooltip-economy tooltip-production-load"><div><small>ACTIVE DRAW</small><strong class="negative">−${tooltipNumber(economy.alloyCost / buildSeconds)} A/S · −${tooltipNumber(economy.energyCost / buildSeconds)} E/S</strong></div><div><small>OUTPUT</small><strong>${output} / ${tooltipNumber(buildSeconds)}S</strong></div></div></section>`;
 }
 
 function installCommandTooltips(): void {
@@ -456,6 +551,7 @@ function installCommandTooltips(): void {
   let activeButton: HTMLButtonElement | null = null;
 
   const hide = () => {
+    activeButton?.removeAttribute("aria-describedby");
     activeButton = null;
     tooltip.classList.remove("visible");
     tooltip.setAttribute("aria-hidden", "true");
@@ -474,26 +570,37 @@ function installCommandTooltips(): void {
     let title = button.querySelector("span")?.textContent?.trim() ?? "COMMAND";
     let description = commandDescription ?? "";
     let cost = "";
+    let economy = "";
+    let weapons = "";
     const stats: string[] = [];
     if (structureType) {
       const definition = STRUCTURES[structureType];
       title = STRUCTURE_LABELS[structureType];
       description = structureCommandDescription(structureType);
-      cost = `${definition.alloyCost} ALLOY · ${definition.energyCost} ENERGY · ${(definition.buildTicks / 20).toFixed(1)}s BUILD`;
+      cost = `${definition.alloyCost} ALLOY · ${definition.energyCost} ENERGY · ${(definition.buildTicks * FIXED_DT).toFixed(1)}s BUILD`;
       stats.push(`${definition.maxHealth} HULL`, `${definition.maxShield} SHIELD`);
       stats.push(`${definition.armorType.toUpperCase()} ARMOR`);
       if (definition.sensorRange > 0) stats.push(`${definition.sensorRange} SENSOR`);
+      economy = structureEconomyTooltip(structureType);
+      weapons = tooltipWeaponLoadout(
+        definition.hardpoints ?? (definition.weaponTypeId ? [{ weaponTypeId: definition.weaponTypeId }] : []),
+        definition.weaponRangeMultiplier,
+        definition.weaponDamageMultiplier,
+      );
     } else if (shipClass) {
       const ship = SHIPS[shipClass];
-      const economy = SHIP_ECONOMY[shipClass];
+      const production = SHIP_ECONOMY[shipClass];
       title = SHIP_LABELS[shipClass];
       description = SHIP_COMMAND_DESCRIPTIONS[shipClass];
-      cost = `${economy.alloyCost} ALLOY · ${economy.energyCost} ENERGY · ${(economy.buildTicks / 20).toFixed(1)}s BUILD${economy.batchSize > 1 ? ` · ×${economy.batchSize}` : ""}`;
+      cost = `${production.alloyCost} ALLOY · ${production.energyCost} ENERGY · ${(production.buildTicks * FIXED_DT).toFixed(1)}s BUILD${production.batchSize > 1 ? ` · ×${production.batchSize}` : ""}`;
       const profiles = [...new Set(ship.hardpoints.map((hardpoint) => WEAPONS[hardpoint.weaponTypeId].damageProfile))];
       stats.push(`${ship.maxHealth} HULL`, `${ship.maxShield} SHIELD`, `${ship.armorType.toUpperCase()} ARMOR`, `${ship.speed} SPEED`);
       for (const profile of profiles) stats.push(DAMAGE_PROFILE_COPY[profile]);
+      economy = productionLoadTooltip(shipClass);
+      weapons = tooltipWeaponLoadout(ship.hardpoints);
     }
-    tooltip.innerHTML = `<h3>${escapeHtml(title)}${hotkey ? `<span class="tooltip-hotkey">[${escapeHtml(hotkey)}]</span>` : ""}</h3>${cost ? `<div class="tooltip-cost">${escapeHtml(cost)}</div>` : ""}<p class="tooltip-description">${escapeHtml(description)}</p>${stats.length > 0 ? `<div class="tooltip-stats">${stats.map((stat) => `<span>${escapeHtml(stat)}</span>`).join("")}</div>` : ""}${lockedReason ? `<div class="tooltip-requirement">${escapeHtml(lockedReason)}</div>` : ""}`;
+    tooltip.innerHTML = `<h3><span>${escapeHtml(title)}</span>${hotkey ? `<kbd class="tooltip-hotkey">${escapeHtml(hotkey)}</kbd>` : ""}</h3>${cost ? `<div class="tooltip-cost">${escapeHtml(cost)}</div>` : ""}<p class="tooltip-description">${escapeHtml(description)}</p>${stats.length > 0 ? `<div class="tooltip-stats">${stats.map((stat) => `<span>${escapeHtml(stat)}</span>`).join("")}</div>` : ""}${weapons}${economy}${shipClass && hotkey ? `<div class="tooltip-action-hint"><kbd>${escapeHtml(hotkey)}</kbd> QUEUE · <kbd>SHIFT+${escapeHtml(hotkey)}</kbd> QUEUE ×5</div>` : ""}${lockedReason ? `<div class="tooltip-requirement">${escapeHtml(lockedReason)}</div>` : ""}`;
+    button.setAttribute("aria-describedby", "command-tooltip");
     tooltip.setAttribute("aria-hidden", "false");
     tooltip.classList.add("visible");
     const buttonRect = button.getBoundingClientRect();
@@ -529,7 +636,7 @@ function fortressLoadoutSummary(type: (typeof DEFENSIVE_STRUCTURE_TYPES)[number]
   const hardpoints = STRUCTURES[type].hardpoints ?? [];
   const counts = new Map<WeaponTypeId, number>();
   for (const hardpoint of hardpoints) counts.set(hardpoint.weaponTypeId, (counts.get(hardpoint.weaponTypeId) ?? 0) + 1);
-  return [...counts].map(([weapon, count]) => `${count}× ${weapon.toUpperCase()}`).join(" · ");
+  return [...counts].map(([weapon, count]) => `${count}× ${WEAPON_LABELS[weapon]}`).join(" · ");
 }
 
 function isShipCruising(ship: ShipState): boolean {
@@ -1135,6 +1242,7 @@ const cameraDirection = new THREE.Vector3();
 const keys = new Set<string>();
 let middleDrag = false;
 let lastPointerX = 0;
+let lastPointerY = 0;
 let pointerX = innerWidth / 2;
 let pointerY = innerHeight / 2;
 
@@ -1475,6 +1583,26 @@ function installClientView(next: ClientVisibilityView, preserveLastKnownContacts
   };
   lastKnownContactsDirty = true;
   clientView = next;
+  if (pruneSelectionsOutsideView()) updateSelectionHud();
+}
+
+function pruneSelectionsOutsideView(): boolean {
+  let changed = false;
+  selectedShipIds.forEach((id) => {
+    if (clientView.ships.some((ship) => ship.id === id)) return;
+    selectedShipIds.delete(id);
+    changed = true;
+  });
+  selectedStructureIds.forEach((id) => {
+    if (clientView.structures.some((structure) => structure.id === id)) return;
+    selectedStructureIds.delete(id);
+    changed = true;
+  });
+  if (primaryStructureId !== null && !selectedStructureIds.has(primaryStructureId)) {
+    primaryStructureId = null;
+    changed = true;
+  }
+  return changed;
 }
 
 function isAlliedToLocalPlayer(teamId: number): boolean {
@@ -2540,15 +2668,7 @@ function adoptAuthoritativeView(view: ProjectedViewState, notice?: string): void
   if (view.ownLastCommandSequence !== null) {
     commandSequence = Math.max(commandSequence, view.ownLastCommandSequence);
   }
-  selectedShipIds.forEach((id) => {
-    if (!clientView.ships.some((ship) => ship.id === id && ship.ownerPlayerId === localPlayerId)) selectedShipIds.delete(id);
-  });
-  selectedStructureIds.forEach((id) => {
-    if (!clientView.structures.some((structure) => structure.id === id && structure.ownerPlayerId === localPlayerId)) {
-      selectedStructureIds.delete(id);
-    }
-  });
-  if (primaryStructureId !== null && !selectedStructureIds.has(primaryStructureId)) primaryStructureId = null;
+  pruneSelectionsOutsideView();
   lastDebug = {
     tick: view.tick, checksum: view.checksum, activeTargetingTurrets: 0,
     shotsFired: 0, hits: 0, physicsBodyCount: 0, avoidance: [], events: [],
@@ -2826,6 +2946,9 @@ function renderLobbyMapSidebar(settings: LobbySettings, mode: LobbyState["mode"]
   const startingResources = element<HTMLSelectElement>("starting-resources");
   startingResources.value = settings.startingResources;
   startingResources.disabled = !canEdit;
+  const startingBase = element<HTMLSelectElement>("starting-base");
+  startingBase.value = settings.startingBase;
+  startingBase.disabled = !canEdit;
   element("mode-teams").classList.toggle("active", mode === "teams");
   element("mode-ffa").classList.toggle("active", mode === "ffa");
   element<HTMLButtonElement>("mode-teams").disabled = !canEdit;
@@ -2837,6 +2960,7 @@ function selectedLobbySettings(): LobbySettings {
     mapPreset: element<HTMLInputElement>("map-preset").value as LobbySettings["mapPreset"],
     mapSize: element<HTMLSelectElement>("map-size").value as LobbySettings["mapSize"],
     startingResources: element<HTMLSelectElement>("starting-resources").value as LobbySettings["startingResources"],
+    startingBase: element<HTMLSelectElement>("starting-base").value as LobbySettings["startingBase"],
     resourceDensity: element<HTMLSelectElement>("resource-density").value as LobbySettings["resourceDensity"],
     teamSpawnMode: element<HTMLSelectElement>("team-spawn-mode").value as LobbySettings["teamSpawnMode"],
   };
@@ -2856,7 +2980,12 @@ function mapSettingsDescription(settings: LobbySettings, mode: LobbyState["mode"
   const deploymentDescription = mode === "teams"
     ? ` Team deployment: ${settings.teamSpawnMode === "together" ? "allies share adjacent sectors" : settings.teamSpawnMode === "interleaved" ? "teams alternate around the perimeter" : "commanders receive seeded random sectors"}.`
     : "";
-  return `${MAP_CATALOG[settings.mapPreset].description} ${settings.mapSize.toUpperCase()} sectors support up to ${mapCapacity} commanders; ${settings.startingResources.toUpperCase()} starting reserves and ${settings.resourceDensity.toUpperCase()} deposits.${deploymentDescription}`;
+  const baseDescription = settings.startingBase === "command-core"
+    ? "a lone Command Core"
+    : settings.startingBase === "fortified"
+      ? "a full base protected by two perimeter batteries"
+      : "a full economy and shipyard base";
+  return `${MAP_CATALOG[settings.mapPreset].description} ${settings.mapSize.toUpperCase()} sectors support up to ${mapCapacity} commanders; each begins with ${baseDescription}, ${settings.startingResources.toUpperCase()} reserves, and ${settings.resourceDensity.toUpperCase()} deposits.${deploymentDescription}`;
 }
 
 function setMapSettingsEditingEnabled(canEdit: boolean): void {
@@ -2886,6 +3015,7 @@ function syncMapSettingsForm(settings: LobbySettings, mode: LobbyState["mode"], 
   element<HTMLInputElement>("map-preset").value = settings.mapPreset;
   element<HTMLSelectElement>("map-size").value = settings.mapSize;
   element<HTMLSelectElement>("starting-resources").value = settings.startingResources;
+  element<HTMLSelectElement>("starting-base").value = settings.startingBase;
   element<HTMLSelectElement>("resource-density").value = settings.resourceDensity;
   element<HTMLSelectElement>("team-spawn-mode").value = settings.teamSpawnMode;
   draftLobbyMode = mode;
@@ -2930,6 +3060,7 @@ function lobbySettingsEqual(left: LobbySettings, right: LobbySettings): boolean 
   return left.mapPreset === right.mapPreset
     && left.mapSize === right.mapSize
     && left.startingResources === right.startingResources
+    && left.startingBase === right.startingBase
     && left.resourceDensity === right.resourceDensity
     && left.teamSpawnMode === right.teamSpawnMode;
 }
@@ -3977,7 +4108,7 @@ function updateCamera(delta: number): void {
     camera.lookAt(cameraRig.target);
     return;
   }
-  const edge = 14;
+  const edge = 24;
   cameraForward.set(Math.sin(cameraRig.azimuth), 0, Math.cos(cameraRig.azimuth));
   cameraRight.set(cameraForward.z, 0, -cameraForward.x);
   cameraDirection.set(0, 0, 0);
@@ -3985,10 +4116,13 @@ function updateCamera(delta: number): void {
   if (keys.has("ArrowDown") || pointerY > innerHeight - edge) cameraDirection.add(cameraForward);
   if (keys.has("ArrowLeft") || pointerX < edge) cameraDirection.addScaledVector(cameraRight, -1);
   if (keys.has("ArrowRight") || pointerX > innerWidth - edge) cameraDirection.add(cameraRight);
-  if (cameraDirection.lengthSq() > 0) cameraRig.target.add(cameraDirection.normalize().multiplyScalar(delta * cameraRig.distance * 0.58));
   const panLimit = minimapHalfExtent();
-  cameraRig.target.x = THREE.MathUtils.clamp(cameraRig.target.x, -panLimit, panLimit);
-  cameraRig.target.z = THREE.MathUtils.clamp(cameraRig.target.z, -panLimit, panLimit);
+  if (cameraDirection.lengthSq() > 0) {
+    const fastPan = keys.has("ShiftLeft") || keys.has("ShiftRight") ? 2.25 : 1;
+    const panSpeed = Math.max(cameraRig.distance * 0.78, panLimit * 0.2) * fastPan;
+    cameraRig.target.add(cameraDirection.normalize().multiplyScalar(delta * panSpeed));
+  }
+  clampCameraTarget(panLimit);
   const horizontal = cameraRig.distance * 0.68;
   camera.position.set(
     cameraRig.target.x + Math.sin(cameraRig.azimuth) * horizontal,
@@ -3996,6 +4130,11 @@ function updateCamera(delta: number): void {
     cameraRig.target.z + Math.cos(cameraRig.azimuth) * horizontal,
   );
   camera.lookAt(cameraRig.target);
+}
+
+function clampCameraTarget(panLimit = minimapHalfExtent()): void {
+  cameraRig.target.x = THREE.MathUtils.clamp(cameraRig.target.x, -panLimit, panLimit);
+  cameraRig.target.z = THREE.MathUtils.clamp(cameraRig.target.z, -panLimit, panLimit);
 }
 
 function tickSimulation(): void {
@@ -4217,9 +4356,10 @@ function processEvents(events: SimulationEvent[]): void {
         siegeArtillery: { y: 11, size: 5.2 },
         strategicArtillery: { y: 14, size: 8.2 },
       }[event.weaponTypeId];
-      let impactOrigin = effectOrigins.get(hitTargetsByProjectileId.get(event.projectileId) ?? -1);
+      const hitTargetId = hitTargetsByProjectileId.get(event.projectileId);
+      let impactOrigin = effectOrigins.get(hitTargetId ?? -1);
       let nearestImpactDistance = Infinity;
-      if (!impactOrigin) {
+      if (hitTargetId !== undefined && !impactOrigin) {
         for (const origin of effectOrigins.values()) {
           const distance = Math.hypot(origin.x - event.x, origin.z - event.z);
           if (distance <= origin.radius + 12 && distance < nearestImpactDistance) {
@@ -4228,10 +4368,13 @@ function processEvents(events: SimulationEvent[]): void {
           }
         }
       }
-      const impactY = impactOrigin?.y ?? style.y;
+      const lastVisualPose = event.weaponTypeId === "torpedo" && hitTargetId === undefined
+        ? projectileVfx.getLastVisualPose(event.projectileId)
+        : undefined;
+      const impactY = impactOrigin?.y ?? lastVisualPose?.y ?? style.y;
       const impactPoint = event.weaponTypeId === "torpedo" && impactOrigin
         ? getTorpedoImpactPoint(event.projectileId, impactOrigin)
-        : event;
+        : lastVisualPose ?? event;
       const impactSize = event.weaponTypeId === "torpedo" && impactOrigin
         ? THREE.MathUtils.clamp(impactOrigin.radius * 0.22, style.size, 13)
         : style.size;
@@ -4513,9 +4656,21 @@ function getSelectedShips(): ShipState[] {
     .sort((a, b) => a.id - b.id);
 }
 
+function getDisplayedSelectedShips(): ShipState[] {
+  return clientView.ships
+    .filter((ship) => selectedShipIds.has(ship.id))
+    .sort((a, b) => a.id - b.id);
+}
+
 function getSelectedStructures(): StructureState[] {
   return clientView.structures
     .filter((structure) => selectedStructureIds.has(structure.id) && structure.ownerPlayerId === localPlayerId)
+    .sort((a, b) => a.id - b.id);
+}
+
+function getDisplayedSelectedStructures(): StructureState[] {
+  return clientView.structures
+    .filter((structure) => selectedStructureIds.has(structure.id))
     .sort((a, b) => a.id - b.id);
 }
 
@@ -4629,6 +4784,22 @@ function setStructureSelection(ids: readonly number[], additive = false, toggle 
   updateSelectionHud();
 }
 
+function inspectHostile(target: CombatTargetState): void {
+  if (!canIssuePlayerCommands() || !isHostileToLocalPlayer(target.teamId)) return;
+  selectedShipIds.clear();
+  selectedStructureIds.clear();
+  primaryStructureId = null;
+  if ("class" in target) selectedShipIds.add(target.id);
+  else {
+    selectedStructureIds.add(target.id);
+    primaryStructureId = target.id;
+  }
+  setCommandMode(null);
+  setStructureMode(null);
+  setRallyPointMode(false);
+  updateSelectionHud();
+}
+
 function selectEntitiesInBox(drag: NonNullable<typeof selectionDrag>): void {
   const left = Math.min(drag.startX, drag.currentX);
   const right = Math.max(drag.startX, drag.currentX);
@@ -4715,9 +4886,14 @@ function renderSelectionRoster(ships: readonly ShipState[]): void {
 }
 
 function updateSelectionHud(): void {
-  document.querySelector(".command-deck")?.classList.toggle("view-locked", !canIssuePlayerCommands());
-  const ships = getSelectedShips();
-  const structures = getSelectedStructures();
+  const ships = getDisplayedSelectedShips();
+  const structures = getDisplayedSelectedStructures();
+  const inspectedHostile = ships.length + structures.length === 1
+    ? [...ships, ...structures].find((entity) => isHostileToLocalPlayer(entity.teamId))
+    : undefined;
+  const commandDeck = document.querySelector(".command-deck");
+  commandDeck?.classList.toggle("view-locked", !canIssuePlayerCommands());
+  commandDeck?.classList.toggle("hostile-selection", inspectedHostile !== undefined);
   const title = element("selection-title");
   const eyebrow = element("selection-eyebrow");
   const summary = element("selection-summary");
@@ -4734,6 +4910,7 @@ function updateSelectionHud(): void {
   constructionSiteControls.classList.add("hidden");
   productionControls.classList.add("hidden");
   queueConsole.classList.add("hidden");
+  empty.classList.remove("hostile-intel");
   icon.classList.remove("fighter-squad-symbol");
   if (!canIssuePlayerCommands() || structures.length > 0 || ships.length <= 1) clearSelectionRoster();
 
@@ -4772,6 +4949,63 @@ function updateSelectionHud(): void {
     empty.innerHTML = "<span>◇</span><p>SELECT A FRIENDLY UNIT<br />OR STRUCTURE</p>";
     element("command-context-title").textContent = "COMMAND CARD";
     element("command-context-subtitle").textContent = "AWAITING SELECTION";
+    return;
+  }
+
+  if (inspectedHostile) {
+    const player = clientView.state.players.find((candidate) => candidate.id === inspectedHostile.ownerPlayerId);
+    const isShip = "class" in inspectedHostile;
+    const shipDefinition = "class" in inspectedHostile ? SHIPS[inspectedHostile.class] : undefined;
+    const structureDefinition = "type" in inspectedHostile ? STRUCTURES[inspectedHostile.type] : undefined;
+    const definition = shipDefinition ?? structureDefinition!;
+    const hardpoints: readonly Readonly<{ weaponTypeId: WeaponTypeId }>[] = shipDefinition?.hardpoints
+      ?? structureDefinition?.hardpoints
+      ?? (structureDefinition?.weaponTypeId ? [{ weaponTypeId: structureDefinition.weaponTypeId }] : []);
+    const weaponCounts = new Map<WeaponTypeId, number>();
+    for (const hardpoint of hardpoints) {
+      weaponCounts.set(hardpoint.weaponTypeId, (weaponCounts.get(hardpoint.weaponTypeId) ?? 0) + 1);
+    }
+    const weaponSummary = [...weaponCounts.entries()]
+      .map(([weaponTypeId, count]) => `${count}× ${WEAPON_LABELS[weaponTypeId]}`)
+      .join(" · ") || "UNARMED";
+    const maximumWeaponRange = hardpoints.reduce((maximum, hardpoint) => Math.max(
+      maximum,
+      WEAPONS[hardpoint.weaponTypeId].range * (structureDefinition?.weaponRangeMultiplier ?? 1),
+    ), 0);
+    const hull = Math.max(0, Math.ceil(inspectedHostile.health));
+    const shields = Math.max(0, Math.ceil(inspectedHostile.shields));
+    eyebrow.textContent = "VISIBLE HOSTILE CONTACT";
+    title.textContent = isShip ? SHIP_LABELS[inspectedHostile.class] : structureLabel(inspectedHostile.type);
+    summary.textContent = `${player?.name ?? "UNKNOWN COMMAND"} · TEAM ${inspectedHostile.teamId} · CONTACT ${inspectedHostile.id}`;
+    if (isShip && inspectedHostile.class === "fighter") {
+      icon.classList.add("fighter-squad-symbol");
+      icon.textContent = "⌃\n⌃ ⌃\n⌃ ⌃";
+    } else {
+      icon.textContent = isShip
+        ? inspectedHostile.class === "fabricator" ? "⌁"
+          : inspectedHostile.class === "carrier" ? "▣"
+          : inspectedHostile.class === "battleship" ? "⬣"
+          : inspectedHostile.class === "cruiser" || inspectedHostile.class === "destroyer" ? "⬢"
+          : inspectedHostile.class === "bomber" ? "◆" : "△"
+        : STRUCTURE_ICONS[inspectedHostile.type];
+    }
+    bars.innerHTML = selectionMetersHtml(
+      inspectedHostile.health,
+      definition.maxHealth,
+      inspectedHostile.shields,
+      definition.maxShield,
+    );
+    empty.classList.remove("hidden");
+    empty.classList.add("hostile-intel");
+    empty.innerHTML = `<div class="hostile-intel-grid">
+      <div><small>HULL</small><strong>${hull.toLocaleString()} / ${definition.maxHealth.toLocaleString()}</strong></div>
+      <div><small>SHIELDS</small><strong>${shields.toLocaleString()} / ${definition.maxShield.toLocaleString()}</strong></div>
+      <div><small>ARMOR</small><strong>${definition.armorType.toUpperCase()}</strong></div>
+      <div><small>${isShip ? "SPEED" : "SENSOR"}</small><strong>${shipDefinition ? tooltipNumber(shipDefinition.speed) : definition.sensorRange.toLocaleString()}</strong></div>
+      <div class="hostile-intel-loadout"><small>WEAPONS${maximumWeaponRange > 0 ? ` · ${tooltipNumber(maximumWeaponRange)} MAX RANGE` : ""}</small><strong>${weaponSummary}</strong></div>
+    </div>`;
+    element("command-context-title").textContent = "CONTACT INTELLIGENCE";
+    element("command-context-subtitle").textContent = "VISIBLE SENSOR DATA · COMMANDS DISABLED";
     return;
   }
 
@@ -4931,6 +5165,23 @@ function renderSelectedProduction(): void {
   element("construction-queue-actions").classList.add("hidden");
   const totalQueued = shipyards.reduce((sum, shipyard) => sum + shipyard.productionQueue.length, 0);
   const activeShipyards = shipyards.filter((shipyard) => shipyard.productionQueue[0]);
+  const drawingShipyards = activeShipyards.filter((shipyard) => {
+    const item = shipyard.productionQueue[0];
+    return item !== undefined && canProduceShipInView(localPlayerId, item.shipClass, shipyard.id);
+  });
+  const idleUpkeep = shipyards.reduce((sum, shipyard) => sum + STRUCTURES[shipyard.type].energyUpkeep, 0);
+  const activeAlloyLoad = drawingShipyards.reduce((sum, shipyard) => {
+    const production = SHIP_ECONOMY[shipyard.productionQueue[0]!.shipClass];
+    return sum + production.alloyCost / (production.buildTicks * FIXED_DT);
+  }, 0);
+  const activeEnergyLoad = drawingShipyards.reduce((sum, shipyard) => {
+    const production = SHIP_ECONOMY[shipyard.productionQueue[0]!.shipClass];
+    return sum + production.energyCost / (production.buildTicks * FIXED_DT);
+  }, 0);
+  element("production-idle-upkeep").textContent = idleUpkeep > 0 ? `−${tooltipNumber(idleUpkeep)} E/S` : "NONE";
+  element("production-active-load").textContent = drawingShipyards.length > 0
+    ? `−${tooltipNumber(activeAlloyLoad)} A/S · −${tooltipNumber(activeEnergyLoad)} E/S`
+    : "NONE";
   const primary = shipyards.find((shipyard) => shipyard.id === primaryStructureId) ?? activeShipyards[0] ?? shipyards[0]!;
   const activeItem = primary.productionQueue[0];
   const activeProductionOnline = !activeItem || canProduceShipInView(localPlayerId, activeItem.shipClass, primary.id);
@@ -5081,6 +5332,40 @@ function setProgressionButtonState(button: HTMLButtonElement, unlocked: boolean,
   button.title = available ? "" : unavailableReason;
 }
 
+function selectedProductionYardType(): ShipyardType | null {
+  const shipyards = getSelectedShipyards();
+  const primary = shipyards.find((shipyard) => shipyard.id === primaryStructureId) ?? shipyards[0];
+  return (primary?.type as ShipyardType | undefined) ?? null;
+}
+
+function updateProductionHotkeyHints(): void {
+  const yardType = selectedProductionYardType();
+  const hotkeyByClass = new Map((yardType ? PRODUCTION_HOTKEYS[yardType] : [])
+    .map((hotkey) => [hotkey.shipClass, hotkey]));
+  for (const shipClass of SHIP_CLASSES) {
+    const button = element<HTMLButtonElement>(SHIP_BUTTON_IDS[shipClass]);
+    const hotkey = hotkeyByClass.get(shipClass);
+    let hint = button.querySelector<HTMLElement>("kbd.production-hotkey");
+    if (!hotkey) {
+      hint?.remove();
+      continue;
+    }
+    if (!hint) {
+      hint = document.createElement("kbd");
+      hint.className = "production-hotkey";
+      button.append(hint);
+    }
+    hint.textContent = hotkey.label;
+  }
+}
+
+function productionHotkeyShipClass(code: string): ShipClass | null {
+  const yardType = selectedProductionYardType();
+  return yardType
+    ? PRODUCTION_HOTKEYS[yardType].find((hotkey) => hotkey.code === code)?.shipClass ?? null
+    : null;
+}
+
 function updateProductionRosterVisibility(): void {
   const selectedYardTypes = new Set(getSelectedShipyards().map((yard) => yard.type));
   for (const shipClass of SHIP_CLASSES) {
@@ -5089,11 +5374,11 @@ function updateProductionRosterVisibility(): void {
       !selectedYardTypes.has(SHIP_ECONOMY[shipClass].yardType),
     );
   }
+  updateProductionHotkeyHints();
 }
 
 function updateProgressionControls(): void {
   const availableStructureTypes = new Set(BUILDABLE_STRUCTURE_TYPES.filter((type) => canBuildStructureInView(localPlayerId, type)));
-  const hasSelectedMobileBuilder = getSelectedMobileBuilderIds().length > 0;
   for (const structureType of BUILDABLE_STRUCTURE_TYPES) {
     const definition = STRUCTURES[structureType];
     const button = element<HTMLButtonElement>(STRUCTURE_BUTTON_IDS[structureType]);
@@ -5102,11 +5387,8 @@ function updateProgressionControls(): void {
     const missing = missingStructureRequirements(structureType);
     setProgressionButtonState(
       button,
-      availableStructureTypes.has(structureType)
-        && (!isDefensiveStructureType(structureType) || hasSelectedMobileBuilder),
-      isDefensiveStructureType(structureType) && !hasSelectedMobileBuilder
-        ? "NEEDS MOBILE FABRICATOR"
-        : `NEEDS ${missing.map(structureLabel).join(" + ") || "PREREQUISITE"}`,
+      availableStructureTypes.has(structureType),
+      `NEEDS ${missing.map(structureLabel).join(" + ") || "PREREQUISITE"}`,
     );
   }
 
@@ -5154,10 +5436,6 @@ function setStructureMode(type: BuildableStructureType | null): void {
     showToast("SELECT A COMPLETED CORE OR FABRICATOR");
     return;
   }
-  if (type !== null && isDefensiveStructureType(type) && getSelectedMobileBuilderIds().length === 0) {
-    showToast("SELECT A MOBILE FABRICATOR FOR DEFENSES");
-    return;
-  }
   if (type !== null && !canBuildStructureInView(localPlayerId, type)) {
     const missing = missingStructureRequirements(type).map(structureLabel).join(" + ");
     showToast(`${structureLabel(type)} LOCKED // NEEDS ${missing || "TECH"}`);
@@ -5192,7 +5470,6 @@ function canPlaceStructureInView(
   const definition = STRUCTURES[structureType];
   const upgradeSource = resourceExtractorUpgradeSourceInView(structureType, resourceNodeId);
   const hasAssignedMobileBuilder = getSelectedMobileBuilderIds().length > 0;
-  if (isDefensiveStructureType(structureType) && !hasAssignedMobileBuilder) return false;
   // Legacy medium/large matches placed their initial expansion nodes just past
   // the normal 360-unit construction radius. Preserve those live matches while
   // keeping the standard range for every non-extractor structure.
@@ -5903,6 +6180,14 @@ addEventListener("keydown", (event) => {
   if (event.code === "Period" && clientViewMode === "post-match-omniscient" && !replayPlaying) stepReplay();
   else if (event.code === "Period" && paused) tickSimulation();
   if (!canIssuePlayerCommands()) return;
+  const productionHotkey = !event.ctrlKey && !event.metaKey && !event.altKey
+    ? productionHotkeyShipClass(event.code)
+    : null;
+  if (productionHotkey) {
+    event.preventDefault();
+    issueQueueUnit(productionHotkey, event.shiftKey ? 5 : 1);
+    return;
+  }
   if (event.code === "KeyR") resetSimulation();
   if (event.code === "KeyF") setCommandMode("focusFire");
   if (event.code === "KeyM") setCommandMode("move");
@@ -5926,8 +6211,18 @@ addEventListener("pointermove", (event) => {
     }
   } else if (pendingStructureType) updatePlacementGhost(event.clientX, event.clientY);
   if (middleDrag && !element("app").classList.contains("start-screen-active")) {
-    cameraRig.azimuth -= (event.clientX - lastPointerX) * 0.006;
+    const deltaX = event.clientX - lastPointerX;
+    const deltaY = event.clientY - lastPointerY;
+    if (event.shiftKey) {
+      const dragScale = Math.max(0.45, cameraRig.distance * 0.0018);
+      cameraRig.target.addScaledVector(cameraRight, -deltaX * dragScale);
+      cameraRig.target.addScaledVector(cameraForward, -deltaY * dragScale);
+      clampCameraTarget();
+    } else {
+      cameraRig.azimuth -= deltaX * 0.006;
+    }
     lastPointerX = event.clientX;
+    lastPointerY = event.clientY;
   }
   if (selectionDrag) {
     selectionDrag.currentX = event.clientX;
@@ -5947,7 +6242,12 @@ addEventListener("pointermove", (event) => {
   }
 });
 addEventListener("pointerdown", (event) => {
-  if (event.button === 1) { middleDrag = true; lastPointerX = event.clientX; event.preventDefault(); }
+  if (event.button === 1) {
+    middleDrag = true;
+    lastPointerX = event.clientX;
+    lastPointerY = event.clientY;
+    event.preventDefault();
+  }
 });
 addEventListener("pointerup", (event) => {
   if (event.button === 1) middleDrag = false;
@@ -5969,6 +6269,8 @@ addEventListener("pointerup", (event) => {
       if (target && target.ownerPlayerId === localPlayerId) {
         if ("class" in target) setSelection([target.id], drag.shift, drag.shift);
         else setStructureSelection([target.id], drag.shift, drag.shift);
+      } else if (target && isHostileToLocalPlayer(target.teamId)) {
+        inspectHostile(target);
       } else if (!drag.shift) setSelection([]);
     }
   }
@@ -6009,9 +6311,7 @@ addEventListener("wheel", (event) => {
   if (anchorBeforeZoom && anchorAfterZoom) {
     cameraRig.target.x += anchorBeforeZoom.x - anchorAfterZoom.x;
     cameraRig.target.z += anchorBeforeZoom.z - anchorAfterZoom.z;
-    const panLimit = minimapHalfExtent();
-    cameraRig.target.x = THREE.MathUtils.clamp(cameraRig.target.x, -panLimit, panLimit);
-    cameraRig.target.z = THREE.MathUtils.clamp(cameraRig.target.z, -panLimit, panLimit);
+    clampCameraTarget();
     updateCamera(0);
     camera.updateMatrixWorld();
   }
@@ -6213,7 +6513,7 @@ element("build-artillery-battery").addEventListener("click", () => setStructureM
 element("build-heavy-artillery-battery").addEventListener("click", () => setStructureMode("heavyArtilleryBattery"));
 element("build-strategic-artillery-array").addEventListener("click", () => setStructureMode("strategicArtilleryArray"));
 for (const tab of document.querySelectorAll<HTMLButtonElement>("[data-construction-tab]")) {
-  tab.addEventListener("click", () => setConstructionCategory(tab.dataset.constructionTab ?? "economy"));
+  tab.addEventListener("click", () => setConstructionCategory(tab.dataset.constructionTab ?? "t1"));
 }
 element("queue-fighter").addEventListener("click", (event) => issueQueueUnit("fighter", event.shiftKey ? 5 : 1));
 element("queue-fabricator").addEventListener("click", (event) => issueQueueUnit("fabricator", event.shiftKey ? 5 : 1));
@@ -6294,15 +6594,29 @@ element<HTMLSelectElement>("stress-count").addEventListener("change", (event) =>
 });
 const minimapElement = element<HTMLCanvasElement>("minimap");
 let minimapDragPointerId: number | null = null;
-const moveCameraFromMinimap = (event: PointerEvent) => {
+const worldPointFromMinimap = (event: PointerEvent): THREE.Vector3 => {
   const rect = minimapElement.getBoundingClientRect();
   const halfExtent = minimapHalfExtent();
   const x = THREE.MathUtils.clamp((event.clientX - rect.left) / rect.width, 0, 1);
   const y = THREE.MathUtils.clamp((event.clientY - rect.top) / rect.height, 0, 1);
-  cameraRig.target.x = x * halfExtent * 2 - halfExtent;
-  cameraRig.target.z = y * halfExtent * 2 - halfExtent;
+  return new THREE.Vector3(x * halfExtent * 2 - halfExtent, 0, y * halfExtent * 2 - halfExtent);
+};
+const moveCameraFromMinimap = (event: PointerEvent) => {
+  cameraRig.target.copy(worldPointFromMinimap(event));
 };
 minimapElement.addEventListener("pointerdown", (event) => {
+  if (event.button === 2) {
+    event.preventDefault();
+    if (!canIssuePlayerCommands()) return;
+    if (getSelectedShips().length === 0) {
+      showToast("SELECT YOUR UNITS FIRST");
+      return;
+    }
+    if (pendingStructureType) setStructureMode(null);
+    if (pendingRallyPoint) setRallyPointMode(false);
+    issueNavigationCommand("move", worldPointFromMinimap(event), undefined, event.shiftKey);
+    return;
+  }
   if (event.button !== 0) return;
   minimapDragPointerId = event.pointerId;
   minimapElement.setPointerCapture(event.pointerId);
@@ -6328,6 +6642,7 @@ minimapElement.addEventListener("lostpointercapture", (event) => {
   minimapDragPointerId = null;
   minimapElement.classList.remove("dragging");
 });
+minimapElement.addEventListener("contextmenu", (event) => event.preventDefault());
 
 element<HTMLInputElement>("pilot-name").value = localStorage.getItem("voidfront:pilot-name") ?? "Commander";
 element("network-overlay").classList.add("visible");
@@ -6453,6 +6768,16 @@ element<HTMLSelectElement>("starting-resources").addEventListener("change", () =
     settings: {
       ...networkLobby.settings,
       startingResources: element<HTMLSelectElement>("starting-resources").value as LobbySettings["startingResources"],
+    },
+  });
+});
+element<HTMLSelectElement>("starting-base").addEventListener("change", () => {
+  if (!networkLobby) return;
+  sendNetworkMessage({
+    type: "set_settings",
+    settings: {
+      ...networkLobby.settings,
+      startingBase: element<HTMLSelectElement>("starting-base").value as LobbySettings["startingBase"],
     },
   });
 });

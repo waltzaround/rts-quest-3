@@ -151,6 +151,7 @@ const lobby = {
     mapPreset: "orbital-ring",
     mapSize: "medium",
     startingResources: "standard",
+    startingBase: "full",
     resourceDensity: "standard",
     teamSpawnMode: "together",
   },
@@ -159,13 +160,13 @@ const lobby = {
   createdAt: Date.now(),
 };
 assert.equal(parseClientMessage(JSON.stringify({
-  type: "hello", name: "Commander", lockstepVersion: 2,
+  type: "hello", name: "Commander", lockstepVersion: 3,
 }))?.type, "hello", "lockstep clients should identify their deterministic rules version");
 assert.equal(parseClientMessage(JSON.stringify({
   type: "hello", name: "Commander", lockstepVersion: "old",
 })), null, "invalid lockstep versions must fail validation");
 assert.equal(parseServerMessage(JSON.stringify({
-  type: "hello_required", matchId: lobby.matchId, lobby, lockstepVersion: 2,
+  type: "hello_required", matchId: lobby.matchId, lobby, lockstepVersion: 3,
 }))?.type, "hello_required", "authorities should advertise their deterministic rules version");
 assert.equal(parseServerMessage(JSON.stringify({ type: "lobby", lobby }))?.type, "lobby");
 assert.equal(parseServerMessage(JSON.stringify({ type: "lobby", lobby: { ...lobby, seed: 123 } })), null, "lobby seed must be private");
@@ -183,6 +184,10 @@ assert.equal(parseClientMessage(JSON.stringify({
   type: "set_settings",
   settings: { ...lobby.settings, teamSpawnMode: "host-picks" },
 })), null, "unknown team deployment modes must fail validation");
+assert.equal(parseClientMessage(JSON.stringify({
+  type: "set_settings",
+  settings: { ...lobby.settings, startingBase: "battle-fortress" },
+})), null, "unknown starting base modes must fail validation");
 
 const spectatorToken = "grant-123456789";
 assert.equal(parseClientMessage(JSON.stringify({

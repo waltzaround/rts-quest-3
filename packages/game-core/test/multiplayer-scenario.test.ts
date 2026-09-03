@@ -48,6 +48,21 @@ describe("multiplayer scenarios", () => {
     expect(first.snapshot()).toEqual(second.snapshot());
   });
 
+  it("supports full, fortified, and Command Core-only starting bases", () => {
+    const config = players(2, 2);
+    const ownedTypes = (startingBase: "full" | "fortified" | "command-core") => createCombatScenario({
+      seed: 8128, players: config, startingBase,
+    }).state.structures
+      .filter((structure) => structure.ownerPlayerId === "pilot-1")
+      .map((structure) => structure.type);
+
+    expect(ownedTypes("full")).toEqual(["commandCore", "extractor", "solarArray", "shipyard"]);
+    expect(ownedTypes("fortified")).toEqual([
+      "commandCore", "extractor", "solarArray", "shipyard", "pointDefenseBattery", "pointDefenseBattery",
+    ]);
+    expect(ownedTypes("command-core")).toEqual(["commandCore"]);
+  });
+
   it("supports grouped, interleaved, and deterministic random team deployments", () => {
     const config = players(4, 2);
     const coreOwners = (mode: "together" | "interleaved" | "random") => createCombatScenario({

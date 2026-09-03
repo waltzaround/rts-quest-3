@@ -415,6 +415,7 @@ export class ProjectileVfx {
   private readonly direction = new THREE.Vector3();
   private readonly forward = new THREE.Vector3(0, 0, 1);
   private readonly verticalLaunchFlights = new Map<number, VerticalLaunchFlight>();
+  private readonly lastVisualPoses = new Map<number, ProjectileVisualPose>();
   private readonly activeProjectileIds = new Set<number>();
 
   constructor(scene: THREE.Scene) {
@@ -448,7 +449,12 @@ export class ProjectileVfx {
 
   clearHistory(): void {
     this.verticalLaunchFlights.clear();
+    this.lastVisualPoses.clear();
     this.activeProjectileIds.clear();
+  }
+
+  getLastVisualPose(projectileId: number): Readonly<ProjectileVisualPose> | undefined {
+    return this.lastVisualPoses.get(projectileId);
   }
 
   update(
@@ -479,6 +485,7 @@ export class ProjectileVfx {
         style,
         flight,
       );
+      this.lastVisualPoses.set(projectile.id, pose);
       this.position.set(pose.x, pose.y, pose.z);
       this.direction.set(pose.directionX, pose.directionY, pose.directionZ).normalize();
       this.quaternion.setFromUnitVectors(this.forward, this.direction);
@@ -505,6 +512,9 @@ export class ProjectileVfx {
     for (const projectile of projectiles) this.activeProjectileIds.add(projectile.id);
     for (const projectileId of this.verticalLaunchFlights.keys()) {
       if (!this.activeProjectileIds.has(projectileId)) this.verticalLaunchFlights.delete(projectileId);
+    }
+    for (const projectileId of this.lastVisualPoses.keys()) {
+      if (!this.activeProjectileIds.has(projectileId)) this.lastVisualPoses.delete(projectileId);
     }
   }
 

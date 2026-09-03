@@ -1,5 +1,5 @@
 const authority = process.env.VOIDFRONT_AUTHORITY ?? "ws://127.0.0.1:8788";
-const lockstepVersion = 2;
+const lockstepVersion = 3;
 const unitsPerPlayer = Number(process.env.VOIDFRONT_SOAK_UNITS ?? 400);
 const playerCount = Number(process.env.VOIDFRONT_SOAK_PLAYERS ?? 2);
 const durationMs = Number(process.env.VOIDFRONT_SOAK_DURATION_MS ?? 180_000);

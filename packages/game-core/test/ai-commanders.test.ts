@@ -77,6 +77,26 @@ describe("AI commander profiles", () => {
     expect(deployedShips.length).toBeGreaterThan(0);
   });
 
+  it("claims its first three deposits early before diversifying construction", () => {
+    const simulation = createCombatScenario({
+      seed: 790,
+      resourceDensity: "rich",
+      players: [
+        { id: "human", name: "Human", teamId: 1 },
+        { id: "bot", name: "Expansion Bot", teamId: 2, ai: true },
+      ],
+    });
+
+    simulation.stepMany(800);
+
+    const claimedNodeIds = new Set(simulation.state.structures
+      .filter((structure) => structure.ownerPlayerId === "bot"
+        && RESOURCE_EXTRACTOR_TYPES.includes(structure.type as typeof RESOURCE_EXTRACTOR_TYPES[number])
+        && structure.resourceNodeId !== null)
+      .map((structure) => structure.resourceNodeId));
+    expect(claimedNodeIds.size).toBeGreaterThanOrEqual(3);
+  });
+
   it("gives a normal balanced commander a static defence program", () => {
     const simulation = createCombatScenario({
       seed: 914,

@@ -46,35 +46,29 @@ describe("defensive structures", () => {
     expect(STRUCTURES.beamBattery.maxHealth).toBeGreaterThan(STRUCTURES.plasmaBattery.maxHealth);
   });
 
-  it("requires a mobile Fabricator to place defensive structures, including near a Command Core", () => {
+  it("allows defensive structures near a static build anchor without a mobile Fabricator", () => {
     const simulation = createCombatScenario({ enemyCommander: false });
     simulation.state.obstacles = [];
     const player = simulation.state.players.find((candidate) => candidate.id === "pilot-blue")!;
-    const yard = simulation.state.structures.find(
-      (structure) => structure.ownerPlayerId === player.id && structure.type === "shipyard",
-    )!;
     player.economy.alloy = player.economy.alloyStorage;
     player.economy.energy = player.economy.energyStorage;
-    expect(simulation.submitCommand({
-      type: "queueUnit", playerId: player.id, sequence: 1, requestedTick: 1,
-      structureId: yard.id, shipClass: "fabricator", count: 1,
-    }).accepted).toBe(true);
-    simulation.stepMany(232);
-    const fabricator = simulation.state.ships.find(
-      (ship) => ship.ownerPlayerId === player.id && ship.class === "fabricator",
-    )!;
     const core = simulation.state.structures.find(
       (structure) => structure.ownerPlayerId === player.id && structure.type === "commandCore",
     )!;
     const site = { x: core.x + 105, z: core.z + 25 };
 
-    expect(simulation.canPlaceStructure(player.id, "pointDefenseBattery", site)).toBe(false);
-    expect(simulation.canPlaceStructure(player.id, "pointDefenseBattery", site, undefined, [fabricator.id])).toBe(true);
+    expect(simulation.canPlaceStructure(player.id, "pointDefenseBattery", site)).toBe(true);
     expect(simulation.submitCommand({
-      type: "buildStructure", playerId: player.id, sequence: 2,
+      type: "buildStructure", playerId: player.id, sequence: 1,
       requestedTick: simulation.state.tick + 1, structureType: "pointDefenseBattery",
-      position: site, builderUnitIds: [fabricator.id], queued: false,
+      position: site, builderUnitIds: [], queued: false,
     }).accepted).toBe(true);
+    simulation.step();
+    expect(simulation.state.structures.some((structure) =>
+      structure.ownerPlayerId === player.id
+        && structure.type === "pointDefenseBattery"
+        && structure.buildProgress < 1,
+    )).toBe(true);
   });
 
   it("fires deterministic pooled projectiles from completed defensive batteries", () => {
