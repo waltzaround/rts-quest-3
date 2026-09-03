@@ -59,6 +59,29 @@ describe("multiplayer scenarios", () => {
     expect(coreOwners("random")).toEqual(coreOwners("random"));
   });
 
+  it("varies one-on-one starting sectors deterministically between match seeds", () => {
+    const config = players(2, 2);
+    const presets = [
+      "orbital-ring", "crossfire", "open-expanse", "asteroid-belt", "spiral-arms",
+      "shattered-core", "amazon-tunnel", "core-rush", "star-fortress",
+    ] as const;
+    const corePositions = (seed: number, mapPreset: (typeof presets)[number]) => createCombatScenario({
+      seed, mapPreset, mapSize: "small", varyStartingPositions: true, players: config,
+    }).state.structures
+      .filter((structure) => structure.type === "commandCore")
+      .map((core) => ({ ownerPlayerId: core.ownerPlayerId, x: core.x, z: core.z }));
+
+    for (const mapPreset of presets) {
+      const first = corePositions(8_128, mapPreset);
+      const repeated = corePositions(8_128, mapPreset);
+      const rerolled = corePositions(8_129, mapPreset);
+      expect(repeated, `${mapPreset} repeated seed`).toEqual(first);
+      expect(rerolled, `${mapPreset} new seed`).not.toEqual(first);
+      expect(Math.hypot(first[0]!.x - first[1]!.x, first[0]!.z - first[1]!.z), mapPreset)
+        .toBeGreaterThan(2_500);
+    }
+  });
+
   it("keeps a team alive while any allied Command Core survives", () => {
     const simulation = createCombatScenario({
       players: players(4, 2).map((player, index) => ({ ...player, teamId: index < 2 ? 1 : 2, ai: false })),

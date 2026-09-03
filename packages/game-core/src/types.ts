@@ -174,6 +174,10 @@ export interface StructureDefinition {
   weaponTypeId?: WeaponTypeId;
   /** Independent weapon mounts used by fortress-style defensive structures. */
   hardpoints?: readonly TurretHardpointDefinition[];
+  /** Structure-only reach modifier; does not alter ships using the same weapon. */
+  weaponRangeMultiplier?: number;
+  /** Structure-only raw-damage modifier; does not alter ships using the same weapon. */
+  weaponDamageMultiplier?: number;
 }
 
 export interface ShipEconomyDefinition {

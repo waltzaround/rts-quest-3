@@ -6,6 +6,8 @@ export {
   DEFENSIVE_STRUCTURE_TYPES,
   FIGHTER_SQUAD_OFFSETS,
   getFighterSquadMemberPose,
+  getStructureWeaponDamage,
+  getStructureWeaponRange,
   getWeaponArmorMultiplier,
   SHIPS,
   SHIP_TURRET_SCALES,

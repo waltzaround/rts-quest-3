@@ -741,6 +741,7 @@ export class Match implements DurableObject {
       startingFleet: this.soakUnitsPerPlayer > 0,
       fightersPerTeam: Math.max(0, this.soakUnitsPerPlayer - 2),
       bombersPerTeam: 0,
+      varyStartingPositions: true,
       players: this.lobby.slots.map((slot) => ({
         id: slot.playerId,
         name: slot.name,

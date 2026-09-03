@@ -5,6 +5,8 @@ import {
   STRUCTURES,
   WEAPONS,
   createCombatScenario,
+  getStructureWeaponDamage,
+  getStructureWeaponRange,
   isEntityVisibleToTeam,
   type GameSimulation,
   type ShipClass,
@@ -26,13 +28,14 @@ const MOBILE_TIERS = [
 }[];
 
 const STATIC_TIERS = [
-  { structureType: "artilleryBattery", weapon: "lightArtillery", reveal: 100 },
-  { structureType: "heavyArtilleryBattery", weapon: "siegeArtillery", reveal: 150 },
-  { structureType: "strategicArtilleryArray", weapon: "strategicArtillery", reveal: 200 },
+  { structureType: "artilleryBattery", weapon: "lightArtillery", reveal: 100, rangeMultiplier: 1.2 },
+  { structureType: "heavyArtilleryBattery", weapon: "siegeArtillery", reveal: 150, rangeMultiplier: 1.35 },
+  { structureType: "strategicArtilleryArray", weapon: "strategicArtillery", reveal: 200, rangeMultiplier: 1.5 },
 ] as const satisfies readonly {
   structureType: StructureType;
   weapon: WeaponTypeId;
   reveal: number;
+  rangeMultiplier: number;
 }[];
 
 function refitShip(simulation: GameSimulation, shipClass: ShipClass): ShipState {
@@ -219,16 +222,19 @@ describe("T1–T3 artillery structures", () => {
       armorType: "fortified", alloyCost: 650, energyCost: 450, buildTicks: 330,
       maxHealth: 1_600, maxShield: 400, radius: 20, sensorRange: 300, energyUpkeep: 12,
       requiredStructures: ["commandCore"],
+      weaponRangeMultiplier: 1.2, weaponDamageMultiplier: 0.9,
     });
     expect(STRUCTURES.heavyArtilleryBattery).toMatchObject({
       armorType: "fortified", alloyCost: 1_800, energyCost: 1_350, buildTicks: 680,
       maxHealth: 4_200, maxShield: 1_200, radius: 28, sensorRange: 420, energyUpkeep: 42,
       requiredStructures: ["fleetShipyard", "fusionReactor"],
+      weaponRangeMultiplier: 1.35, weaponDamageMultiplier: 0.9,
     });
     expect(STRUCTURES.strategicArtilleryArray).toMatchObject({
       armorType: "fortified", alloyCost: 5_500, energyCost: 5_200, buildTicks: 1_500,
       maxHealth: 9_000, maxShield: 3_000, radius: 40, sensorRange: 540, energyUpkeep: 120,
       requiredStructures: ["capitalShipyard", "antimatterReactor"],
+      weaponRangeMultiplier: 1.5, weaponDamageMultiplier: 0.9,
     });
     expect(STRUCTURES.artilleryBattery.hardpoints).toHaveLength(1);
     expect(STRUCTURES.heavyArtilleryBattery.hardpoints).toHaveLength(2);
@@ -241,9 +247,10 @@ describe("T1–T3 artillery structures", () => {
       simulation.state.obstacles = [];
       const battery = addArtilleryStructure(simulation, tier.structureType);
       const weapon = WEAPONS[tier.weapon];
+      const staticRange = getStructureWeaponRange(tier.structureType, tier.weapon);
       const target = simulation.state.ships.find((ship) => ship.teamId === 2 && ship.class === "fighter")!;
       const scout = simulation.state.ships.find((ship) => ship.teamId === 1)!;
-      const range = (weapon.minimumRange + weapon.range) / 2;
+      const range = weapon.range + (staticRange - weapon.range) * 0.5;
       target.x = 0;
       target.z = range;
       scout.x = 0;
@@ -256,7 +263,10 @@ describe("T1–T3 artillery structures", () => {
           event.type === "weaponFired" && event.shipId === battery.id && event.weaponTypeId === tier.weapon) as typeof fired;
       }
       expect(fired).toBeDefined();
-      expect(simulation.state.projectiles.find((projectile) => projectile.id === fired?.projectileId)?.fixedTrajectory).toBe(true);
+      const projectile = simulation.state.projectiles.find((candidate) => candidate.id === fired?.projectileId);
+      expect(projectile?.fixedTrajectory).toBe(true);
+      expect(projectile?.damage).toBeCloseTo(getStructureWeaponDamage(tier.structureType, tier.weapon));
+      expect(staticRange).toBeCloseTo(weapon.range * tier.rangeMultiplier);
       expect((battery.revealedUntilTick ?? 0) - simulation.state.tick).toBeGreaterThanOrEqual(tier.reveal - 1);
       expect(isEntityVisibleToTeam(simulation.state, 2, battery.id)).toBe(true);
     });
@@ -309,7 +319,9 @@ describe("strategic artillery map safety", () => {
           for (let right = left + 1; right < cores.length; right += 1) {
             if (cores[left]!.teamId === cores[right]!.teamId) continue;
             expect(Math.hypot(cores[left]!.x - cores[right]!.x, cores[left]!.z - cores[right]!.z),
-              `${mapPreset}/${mapSize}`).toBeGreaterThan(WEAPONS.strategicArtillery.range);
+              `${mapPreset}/${mapSize}`).toBeGreaterThan(
+                getStructureWeaponRange("strategicArtilleryArray", "strategicArtillery"),
+              );
           }
         }
       }

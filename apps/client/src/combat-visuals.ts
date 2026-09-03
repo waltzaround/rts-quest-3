@@ -159,10 +159,44 @@ interface ProjectileVisualPose {
   directionZ: number;
 }
 
-interface ProjectileVisualTarget {
+export interface ProjectileVisualTarget {
   readonly x: number;
   readonly z: number;
   readonly radius: number;
+  readonly yaw?: number;
+  readonly isShip?: boolean;
+}
+
+export interface TorpedoImpactPoint {
+  readonly x: number;
+  readonly z: number;
+}
+
+/**
+ * Returns a stable point inside the target footprint. The golden-angle sequence
+ * keeps consecutive salvos from clustering while a hashed radius fills the
+ * interior instead of drawing another ring around the collision boundary.
+ */
+export function getTorpedoImpactPoint(
+  projectileId: number,
+  target: ProjectileVisualTarget,
+): TorpedoImpactPoint {
+  let hash = projectileId >>> 0;
+  hash = Math.imul(hash ^ hash >>> 16, 0x21f0aaad) >>> 0;
+  hash = Math.imul(hash ^ hash >>> 15, 0x735a2d97) >>> 0;
+  hash = (hash ^ hash >>> 15) >>> 0;
+  const radialDistance = Math.sqrt(0.06 + hash / 0x1_0000_0000 * 0.72);
+  const angle = projectileId * 2.399963229728653;
+  const halfWidth = target.radius * (target.isShip === false ? 0.62 : 0.48);
+  const halfLength = target.radius * (target.isShip === false ? 0.62 : 0.74);
+  const localX = Math.sin(angle) * halfWidth * radialDistance;
+  const localZ = Math.cos(angle) * halfLength * radialDistance;
+  const cosine = Math.cos(target.yaw ?? 0);
+  const sine = Math.sin(target.yaw ?? 0);
+  return {
+    x: target.x + cosine * localX + sine * localZ,
+    z: target.z - sine * localX + cosine * localZ,
+  };
 }
 
 interface VerticalLaunchFlight {
@@ -173,6 +207,8 @@ interface VerticalLaunchFlight {
   readonly boostProgress: number;
   readonly boostHeight: number;
   readonly arcLift: number;
+  readonly impactX: number | undefined;
+  readonly impactZ: number | undefined;
 }
 
 function torpedoThrustScale(ageTicks: number): number {
@@ -231,7 +267,12 @@ function createVerticalLaunchFlight(
   const boostHeight = THREE.MathUtils.clamp(totalDistance * 0.18, 38, 72);
   // This value makes the climb rate continuous where the straight boost hands off to the arc.
   const arcLift = boostHeight / (4 * boostProgress);
-  return { launchX, launchZ, totalDistance, totalFlightTicks, boostProgress, boostHeight, arcLift };
+  const impact = target ? getTorpedoImpactPoint(projectile.id, target) : undefined;
+  return {
+    launchX, launchZ, totalDistance, totalFlightTicks, boostProgress, boostHeight, arcLift,
+    impactX: impact?.x,
+    impactZ: impact?.z,
+  };
 }
 
 function projectileVisualPose(
@@ -271,16 +312,34 @@ function projectileVisualPose(
   // the simulation's horizontal track as the nose pitches over.
   const pitchProgress = THREE.MathUtils.clamp(arcProgress / 0.18, 0, 1);
   const pitchBlend = pitchProgress * pitchProgress * (3 - 2 * pitchProgress);
-  const visualX = THREE.MathUtils.lerp(flight.launchX, x, pitchBlend);
-  const visualZ = THREE.MathUtils.lerp(flight.launchZ, z, pitchBlend);
+  const trackX = THREE.MathUtils.lerp(flight.launchX, x, pitchBlend);
+  const trackZ = THREE.MathUtils.lerp(flight.launchZ, z, pitchBlend);
+  const landingProgress = THREE.MathUtils.clamp((arcProgress - 0.48) / 0.52, 0, 1);
+  const landingBlend = landingProgress * landingProgress * (3 - 2 * landingProgress);
+  const visualX = flight.impactX === undefined ? trackX : THREE.MathUtils.lerp(trackX, flight.impactX, landingBlend);
+  const visualZ = flight.impactZ === undefined ? trackZ : THREE.MathUtils.lerp(trackZ, flight.impactZ, landingBlend);
   const relativeHeight = flight.boostHeight * (1 - arcProgress)
     + 4 * flight.arcLift * arcProgress * (1 - arcProgress);
   const heightDerivative = -flight.boostHeight + 4 * flight.arcLift * (1 - 2 * arcProgress);
   const slope = THREE.MathUtils.clamp(heightDerivative / flight.totalDistance, -8, 8);
   const directionScale = 1 / Math.hypot(1, slope);
-  let directionX = horizontalX * directionScale * pitchBlend;
+  let landingDirectionX = horizontalX;
+  let landingDirectionZ = horizontalZ;
+  if (flight.impactX !== undefined && flight.impactZ !== undefined) {
+    const correctionX = flight.impactX - x;
+    const correctionZ = flight.impactZ - z;
+    const correctionLength = Math.hypot(correctionX, correctionZ);
+    if (correctionLength > 0.001) {
+      landingDirectionX = THREE.MathUtils.lerp(horizontalX, correctionX / correctionLength, landingBlend);
+      landingDirectionZ = THREE.MathUtils.lerp(horizontalZ, correctionZ / correctionLength, landingBlend);
+      const landingDirectionLength = Math.max(0.001, Math.hypot(landingDirectionX, landingDirectionZ));
+      landingDirectionX /= landingDirectionLength;
+      landingDirectionZ /= landingDirectionLength;
+    }
+  }
+  let directionX = landingDirectionX * directionScale * pitchBlend;
   let directionY = THREE.MathUtils.lerp(1, slope * directionScale, pitchBlend);
-  let directionZ = horizontalZ * directionScale * pitchBlend;
+  let directionZ = landingDirectionZ * directionScale * pitchBlend;
   const directionLength = Math.max(0.001, Math.hypot(directionX, directionY, directionZ));
   directionX /= directionLength;
   directionY /= directionLength;

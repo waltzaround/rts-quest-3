@@ -194,6 +194,15 @@ describe("dedicated flak specialization", () => {
   });
 });
 
+describe("frontline capital resilience", () => {
+  it("gives carriers and battleships tougher hulls with layered point defence", () => {
+    expect(SHIPS.carrier).toMatchObject({ maxHealth: 14_500, maxShield: 7_300 });
+    expect(SHIPS.battleship).toMatchObject({ maxHealth: 21_500, maxShield: 9_500 });
+    expect(SHIPS.carrier.hardpoints.filter((mount) => mount.weaponTypeId === "pointDefense")).toHaveLength(10);
+    expect(SHIPS.battleship.hardpoints.filter((mount) => mount.weaponTypeId === "pointDefense")).toHaveLength(8);
+  });
+});
+
 describe("artillery positioning and counterplay", () => {
   it("cannot fire before deployment, while moving or cruising, or inside minimum range", () => {
     const beforeDeployment = prepareArtilleryEngagement();
@@ -266,6 +275,24 @@ describe("artillery positioning and counterplay", () => {
 });
 
 describe("deterministic strategic cruise", () => {
+  it("gives larger hulls a stronger out-of-combat cruise boost", () => {
+    const expectedCruiseSpeeds = [
+      ["destroyer", 1.8, 43.2],
+      ["artilleryDestroyer", 1.8, 45],
+      ["cruiser", 2.2, 39.6],
+      ["artilleryCruiser", 2.2, 33],
+      ["carrier", 2.6, 34.32],
+      ["battleship", 2.6, 28.08],
+    ] as const;
+
+    expect(SHIPS.frigate.cruiseMultiplier).toBe(1.3);
+    for (const [shipClass, multiplier, cruiseSpeed] of expectedCruiseSpeeds) {
+      const definition = SHIPS[shipClass];
+      expect(definition.cruiseMultiplier).toBe(multiplier);
+      expect(definition.speed * definition.cruiseMultiplier).toBeCloseTo(cruiseSpeed);
+    }
+  });
+
   it("activates after 60 quiet ticks and drops to tactical speed on target acquisition", () => {
     const simulation = createCombatScenario({ startingFleet: true, enemyCommander: false });
     simulation.state.obstacles = [];

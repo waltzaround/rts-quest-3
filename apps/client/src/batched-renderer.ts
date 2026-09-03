@@ -274,8 +274,11 @@ function createBatch(
 const QUALITY_ENGINE_SCALE: Readonly<Record<RenderQuality, number>> = { low: 0.78, medium: 1, high: 1.16 };
 const TACTICAL_SCALE = [12.5, 11, 12.5, 11.5, 13.5, 13.5, 14, 15, 15.5, 16.5, 17.5, 18.5, 20] as const;
 const TACTICAL_SELECTION_RADIUS = [18, 16, 18, 17, 19, 19, 20, 22, 23, 24, 26, 27, 29] as const;
-const CLOSE_SELECTION_RADIUS = [22, 13, 17, 7.5, 18, 19, 29, 42, 56, 64] as const;
-const THRUSTER_COLOR = [0x8ff7ff, 0x79f0c8, 0x78e8ff, 0x72dfff, 0x82f3ff, 0x77dcff, 0x68cfff, 0x77c5ff, 0x9abaff, 0xffbd78] as const;
+const CLOSE_SELECTION_RADIUS = [22, 13, 17, 7.5, 18, 19, 19, 29, 31, 42, 45, 56, 64] as const;
+const THRUSTER_COLOR = [
+  0x8ff7ff, 0x79f0c8, 0x78e8ff, 0x72dfff, 0x82f3ff, 0x77dcff, 0xffd37a,
+  0x68cfff, 0xffc06a, 0x77c5ff, 0xffb86b, 0x9abaff, 0xffbd78,
+] as const;
 const HEALTH_BAR_GREEN = new THREE.Color(0x63df8c);
 const HEALTH_BAR_AMBER = new THREE.Color(0xf1bd5a);
 const HEALTH_BAR_RED = new THREE.Color(0xff5674);

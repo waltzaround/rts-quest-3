@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFENSIVE_STRUCTURE_TYPES, SHIPS, STRUCTURES, createCombatScenario } from "../src";
+import { DEFENSIVE_STRUCTURE_TYPES, SHIPS, STRUCTURES, createCombatScenario, type ShipClass } from "../src";
 
 describe("defensive structures", () => {
   it("gives the Command Core four short-range anti-rush mounts", () => {
@@ -114,5 +114,100 @@ describe("defensive structures", () => {
       damage: 4,
     });
     expect(SHIPS.fabricator.buildPower).toBeGreaterThan(0);
+  });
+
+  it.each(["fighter", "bomber"] as const)("always detonates VLS missiles that miss a %s", (targetClass) => {
+    const simulation = createCombatScenario({ enemyCommander: false, startingFleet: true });
+    simulation.state.obstacles = [];
+    const battery = simulation.state.structures.find(
+      (structure) => structure.ownerPlayerId === "pilot-blue" && structure.type === "solarArray",
+    )!;
+    battery.type = "missileBattery";
+    battery.buildProgress = 0;
+    const target = simulation.state.ships.find((ship) => ship.ownerPlayerId === "pilot-red")!;
+    target.class = targetClass as ShipClass;
+    target.x = 90;
+    target.z = 90;
+    target.turrets = [];
+    simulation.state.ships = [target];
+    const projectileId = simulation.state.nextEntityId++;
+    simulation.state.projectiles = [{
+      id: projectileId, ownerShipId: battery.id, ownerTeamId: battery.teamId,
+      weaponTypeId: "torpedo", targetEntityId: target.id,
+      targetX: target.x, targetZ: target.z, fixedTrajectory: false,
+      x: 0, z: 0, previousX: 0, previousZ: 0,
+      vx: 0, vz: 0, radius: 4.2, damage: 32, lifetimeTicks: 1,
+    }];
+
+    const events = simulation.step().events;
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "projectileDetonated", projectileId, weaponTypeId: "torpedo", x: 0, z: 0,
+    }));
+  });
+
+  it.each(["fighter", "bomber"] as const)("always detonates VLS missiles that hit a %s", (targetClass) => {
+    const simulation = createCombatScenario({ enemyCommander: false, startingFleet: true });
+    simulation.state.obstacles = [];
+    const battery = simulation.state.structures.find(
+      (structure) => structure.ownerPlayerId === "pilot-blue" && structure.type === "solarArray",
+    )!;
+    battery.type = "missileBattery";
+    battery.buildProgress = 0;
+    const target = simulation.state.ships.find((ship) => ship.ownerPlayerId === "pilot-red")!;
+    target.class = targetClass as ShipClass;
+    target.x = 0;
+    target.z = 30;
+    target.vx = 0;
+    target.vz = 0;
+    target.health = SHIPS[targetClass].maxHealth;
+    target.shields = SHIPS[targetClass].maxShield;
+    target.orders = [{ type: "hold", destination: { x: target.x, z: target.z }, facing: Math.PI }];
+    target.turrets = [];
+    simulation.state.ships = [target];
+    const projectileId = simulation.state.nextEntityId++;
+    simulation.state.projectiles = [{
+      id: projectileId, ownerShipId: battery.id, ownerTeamId: battery.teamId,
+      weaponTypeId: "torpedo", targetEntityId: target.id,
+      targetX: target.x, targetZ: target.z, fixedTrajectory: false,
+      x: target.x, z: target.z, previousX: target.x, previousZ: target.z,
+      vx: 0, vz: 0, radius: 4.2, damage: 32, lifetimeTicks: 40,
+    }];
+
+    const events = simulation.step().events;
+
+    expect(events).toContainEqual(expect.objectContaining({ type: "hit", projectileId, targetId: target.id }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "projectileDetonated", projectileId, weaponTypeId: "torpedo",
+    }));
+  });
+
+  it.each(["fighter", "bomber"] as const)("detonates VLS missiles when another shot destroys the %s target", (targetClass) => {
+    const simulation = createCombatScenario({ enemyCommander: false, startingFleet: true });
+    simulation.state.obstacles = [];
+    const battery = simulation.state.structures.find(
+      (structure) => structure.ownerPlayerId === "pilot-blue" && structure.type === "solarArray",
+    )!;
+    battery.type = "missileBattery";
+    battery.buildProgress = 0;
+    const target = simulation.state.ships.find((ship) => ship.ownerPlayerId === "pilot-red")!;
+    target.class = targetClass as ShipClass;
+    target.health = 0;
+    target.turrets = [];
+    simulation.state.ships = [target];
+    const projectileId = simulation.state.nextEntityId++;
+    simulation.state.projectiles = [{
+      id: projectileId, ownerShipId: battery.id, ownerTeamId: battery.teamId,
+      weaponTypeId: "torpedo", targetEntityId: target.id,
+      targetX: target.x, targetZ: target.z, fixedTrajectory: false,
+      x: 18, z: 24, previousX: 18, previousZ: 24,
+      vx: 0, vz: 0, radius: 4.2, damage: 32, lifetimeTicks: 40,
+    }];
+
+    const events = simulation.step().events;
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "projectileDetonated", projectileId, weaponTypeId: "torpedo", x: 18, z: 24,
+    }));
   });
 });

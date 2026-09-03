@@ -16,6 +16,8 @@ import {
   WEAPONS,
   calculateProfiledDamage,
   getFighterSquadMemberPose,
+  getStructureWeaponDamage,
+  getStructureWeaponRange,
 } from "./data";
 import { SpatialHash } from "./spatial-hash";
 import { projectOmniscientView, projectPlayerView, projectTeamView } from "./player-view";
@@ -92,6 +94,10 @@ function getShipArtilleryWeapon(shipClass: ShipClass) {
     .find((weapon) => weapon.artillery !== undefined);
 }
 
+function shouldEmitProjectileDetonation(projectile: ProjectileState, owner: ShipState | undefined): boolean {
+  return projectile.weaponTypeId === "torpedo" || owner?.class !== "fighter";
+}
+
 export interface ScenarioOptions {
   seed?: number;
   fightersPerTeam?: number;
@@ -109,6 +115,8 @@ export interface ScenarioOptions {
   startingResources?: "low" | "standard" | "high";
   resourceDensity?: "scarce" | "standard" | "rich";
   teamSpawnMode?: "together" | "interleaved" | "random";
+  /** Seeded one-on-one deployment variation for playable matches. */
+  varyStartingPositions?: boolean;
   players?: readonly ScenarioPlayerConfig[];
 }
 
@@ -1611,6 +1619,8 @@ export class GameSimulation {
         const mount = mounts[mountIndex]!;
         const weaponTypeId = mount.weaponTypeId;
         const weapon = WEAPONS[weaponTypeId];
+        const weaponRange = getStructureWeaponRange(structure.type, weaponTypeId);
+        const weaponDamage = getStructureWeaponDamage(structure.type, weaponTypeId);
         const burstTicks = Math.max(1, (weapon.burstSize - 1) * weapon.burstIntervalTicks + 1);
         const cycleTicks = burstTicks + weapon.cooldownTicks;
         const phase = (this.state.tick + structure.id * 17 + mountIndex * 11) % cycleTicks;
@@ -1618,12 +1628,12 @@ export class GameSimulation {
 
         let target: CombatTargetState | null = null;
         let bestScore = Infinity;
-        for (const candidate of this.spatialHash.query(structure.x, structure.z, weapon.range)) {
+        for (const candidate of this.spatialHash.query(structure.x, structure.z, weaponRange)) {
           if (candidate.id === structure.id || candidate.health <= 0
             || !this.isHostile(structure.teamId, candidate.teamId)
             || !this.isEntityVisible(structure.teamId, candidate.id)) continue;
           const rangeSquared = distanceSquared(structure, candidate);
-          if (rangeSquared > weapon.range ** 2 || rangeSquared < weapon.minimumRange ** 2) continue;
+          if (rangeSquared > weaponRange ** 2 || rangeSquared < weapon.minimumRange ** 2) continue;
           const preference = isShip(candidate)
             ? weapon.targetPreference[candidate.class]
             : getStructureTargetPreference(weaponTypeId, candidate.type);
@@ -1646,13 +1656,17 @@ export class GameSimulation {
         };
         const projectileId = this.state.nextEntityId++;
         if (weapon.delivery === "projectile") {
+          const lifetimeTicks = Math.max(
+            weapon.projectileLifetimeTicks,
+            Math.ceil(weaponRange / Math.max(1, weapon.projectileSpeed * FIXED_DT)) + 2,
+          );
           this.state.projectiles.push({
             id: projectileId, ownerShipId: structure.id, ownerTeamId: structure.teamId,
             weaponTypeId, targetEntityId: target.id,
             targetX: target.x, targetZ: target.z, fixedTrajectory: weapon.artillery !== undefined,
             x: muzzle.x, z: muzzle.z, previousX: muzzle.x, previousZ: muzzle.z,
             vx: dx / length * weapon.projectileSpeed, vz: dz / length * weapon.projectileSpeed,
-            radius: weapon.projectileRadius, damage: weapon.damage, lifetimeTicks: weapon.projectileLifetimeTicks,
+            radius: weapon.projectileRadius, damage: weaponDamage, lifetimeTicks,
           });
         }
         this.shotsFired += 1;
@@ -1675,7 +1689,7 @@ export class GameSimulation {
           turretId: -(structure.id * 16 + mountIndex + 1),
           shipId: structure.id, targetId: target.id, projectileId, weaponTypeId,
         });
-        if (weapon.delivery === "beam") this.applyDamage(target, weapon.damage, projectileId, weaponTypeId);
+        if (weapon.delivery === "beam") this.applyDamage(target, weaponDamage, projectileId, weaponTypeId);
       }
     }
   }
@@ -1778,7 +1792,7 @@ export class GameSimulation {
         projectile.z = projectile.previousZ + (projectile.z - projectile.previousZ) * resolvedImpact.fraction;
         this.applyDamage(resolvedImpact.target, projectile.damage, projectile.id, projectile.weaponTypeId);
         const owner = projectileOwners.get(projectile.ownerShipId);
-        if (owner?.class !== "fighter") {
+        if (shouldEmitProjectileDetonation(projectile, owner)) {
           this.events.push({
             type: "projectileDetonated", tick: this.state.tick,
             projectileId: projectile.id, weaponTypeId: projectile.weaponTypeId,
@@ -1789,7 +1803,7 @@ export class GameSimulation {
         survivingProjectiles.push(projectile);
       } else {
         const owner = projectileOwners.get(projectile.ownerShipId);
-        if (owner?.class !== "fighter") {
+        if (shouldEmitProjectileDetonation(projectile, owner)) {
           if (resolvedImpact) {
             projectile.x = projectile.previousX + (projectile.x - projectile.previousX) * resolvedImpact.fraction;
             projectile.z = projectile.previousZ + (projectile.z - projectile.previousZ) * resolvedImpact.fraction;
@@ -1810,6 +1824,18 @@ export class GameSimulation {
     const destroyedStructures = this.state.structures.filter((structure) => structure.health <= 0);
     if (destroyedShips.length === 0 && destroyedStructures.length === 0) return;
     const destroyedIds = new Set([...destroyedShips, ...destroyedStructures].map((entity) => entity.id));
+    const projectileOwners = new Map(this.state.ships.map((ship) => [ship.id, ship]));
+    const abandonedProjectiles = this.state.projectiles.filter(
+      (projectile) => !projectile.fixedTrajectory && destroyedIds.has(projectile.targetEntityId),
+    );
+    for (const projectile of abandonedProjectiles) {
+      if (!shouldEmitProjectileDetonation(projectile, projectileOwners.get(projectile.ownerShipId))) continue;
+      this.events.push({
+        type: "projectileDetonated", tick: this.state.tick,
+        projectileId: projectile.id, weaponTypeId: projectile.weaponTypeId,
+        x: projectile.x, z: projectile.z,
+      });
+    }
     for (const entityId of [...destroyedIds].sort((a, b) => a - b)) {
       this.events.push({ type: "destroyed", tick: this.state.tick, entityId });
     }
@@ -2407,6 +2433,22 @@ export function createCombatScenario(options: ScenarioOptions = {}): GameSimulat
   const mapSize = options.mapSize ?? "medium";
   const resourceDensity = options.resourceDensity ?? "standard";
   const baseRadius = { small: 1_600, medium: 2_400, large: 4_000, huge: 6_000, colossal: 8_500 }[mapSize];
+  const isOneVsOneMatch = options.varyStartingPositions === true
+    && configs.length === 2
+    && configs[0]!.teamId !== configs[1]!.teamId
+    && options.showcase !== true
+    && options.menuBattle !== true;
+  const spawnRandom = createMapRandom(seed ^ 0x1a11_ce55, `${mapPreset}:spawns`);
+  const oneVsOneRotation = isOneVsOneMatch ? (spawnRandom() - 0.5) * Math.PI / 3 : 0;
+  const oneVsOneSeparationOffset = isOneVsOneMatch ? (spawnRandom() - 0.5) * Math.PI / 6 : 0;
+  const spawnAngles = configs.map((_, index) => (
+    Math.PI + index / configs.length * Math.PI * 2
+      + oneVsOneRotation
+      + (isOneVsOneMatch && index === 1 ? oneVsOneSeparationOffset : 0)
+  ));
+  const oneVsOneTunnelOffsets = isOneVsOneMatch
+    ? [(spawnRandom() - 0.5) * baseRadius * 0.56, (spawnRandom() - 0.5) * baseRadius * 0.56] as const
+    : [0, 0] as const;
   const mapScale = baseRadius / 420;
   const startingResourceAmount = { low: 500, standard: 900, high: 1_800 }[options.startingResources ?? "standard"];
   const density = {
@@ -2430,7 +2472,7 @@ export function createCombatScenario(options: ScenarioOptions = {}): GameSimulat
   const state: SimulationState = {
     version: 9, seed, tick: 0, nextEntityId: 1, nextTurretId: 1, nextQueueItemId: 1,
     players, teams, ships: [], structures: [], resourceNodes: [],
-    obstacles: createScenarioObstacles(players.length, mapPreset, baseRadius, seed),
+    obstacles: createScenarioObstacles(players.length, mapPreset, baseRadius, seed, spawnAngles),
     visibility: [],
     projectiles: [], commandQueue: [],
     aiPlayerIds: configs.filter((player) => player.ai).map((player) => player.id),
@@ -2568,7 +2610,8 @@ export function createCombatScenario(options: ScenarioOptions = {}): GameSimulat
       let richnessMultiplier = 1;
       if (mapPreset === "orbital-ring" && index < players.length) {
         // Preserve one fair inward expansion lane per spawn, then randomize the remaining ring nodes.
-        angle = index / players.length * Math.PI * 2 + (mapRandom() - 0.5) * 0.08;
+        angle = (isOneVsOneMatch ? spawnAngles[index]! : index / players.length * Math.PI * 2)
+          + (mapRandom() - 0.5) * 0.08;
         radius = baseRadius * (0.5 + (mapRandom() - 0.5) * 0.025);
       } else if (mapPreset === "crossfire") {
         angle += Math.PI / 4;
@@ -2622,14 +2665,16 @@ export function createCombatScenario(options: ScenarioOptions = {}): GameSimulat
         const sideIndices = indicesBySide[side];
         for (let sideIndex = 0; sideIndex < sideIndices.length; sideIndex += 1) {
           const normalized = sideIndices.length <= 1 ? 0 : sideIndex / (sideIndices.length - 1) - 0.5;
-          tunnelSpawnByIndex.set(sideIndices[sideIndex]!, { side, z: normalized * baseRadius * 1.22 });
+          const playerIndex = sideIndices[sideIndex]!;
+          const oneVsOneOffset = sideIndices.length === 1 ? oneVsOneTunnelOffsets[playerIndex]! : 0;
+          tunnelSpawnByIndex.set(playerIndex, { side, z: normalized * baseRadius * 1.22 + oneVsOneOffset });
         }
       }
     }
     for (let index = 0; index < players.length; index += 1) {
       const player = players[index]!;
       const tunnelSpawn = tunnelSpawnByIndex.get(index);
-      const angle = Math.PI + index / players.length * Math.PI * 2;
+      const angle = spawnAngles[index]!;
       const outwardX = tunnelSpawn?.side ?? Math.sin(angle);
       const outwardZ = tunnelSpawn ? 0 : Math.cos(angle);
       const inwardX = -outwardX;
@@ -3101,6 +3146,7 @@ function createScenarioObstacles(
   mapPreset: NonNullable<ScenarioOptions["mapPreset"]> = "orbital-ring",
   baseRadius = 2_400,
   seed = 0xc0ffee,
+  spawnAngles?: readonly number[],
 ): ObstacleState[] {
   const random = createMapRandom(seed ^ Math.imul(playerCount, 0x85ebca6b), mapPreset);
   const obstacles: ObstacleState[] = [];
@@ -3149,7 +3195,7 @@ function createScenarioObstacles(
     const wallDistance = Math.max(320, baseRadius * 0.19);
     const wallPieces = 12;
     for (let playerIndex = 0; playerIndex < playerCount; playerIndex += 1) {
-      const spawnAngle = Math.PI + playerIndex / playerCount * Math.PI * 2;
+      const spawnAngle = spawnAngles?.[playerIndex] ?? Math.PI + playerIndex / playerCount * Math.PI * 2;
       const centerX = Math.sin(spawnAngle) * baseRadius;
       const centerZ = Math.cos(spawnAngle) * baseRadius;
       for (let wallIndex = 0; wallIndex < wallPieces; wallIndex += 1) {

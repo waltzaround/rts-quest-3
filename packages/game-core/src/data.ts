@@ -260,7 +260,7 @@ export const SHIPS: Readonly<Record<ShipClass, ShipDefinition>> = {
   },
   destroyer: {
     class: "destroyer", armorType: "plated", radius: 23, mass: 420, maxHealth: 3_450, maxShield: 1_380, speed: 24,
-    turnRate: 32 * DEG, sensorRange: 500, cruiseMultiplier: 1.5, buildPower: 0, buildRange: 0,
+    turnRate: 32 * DEG, sensorRange: 500, cruiseMultiplier: 1.8, buildPower: 0, buildRange: 0,
     hardpoints: [
       hp(-7, 13, 0, 105, "heavyRail"), hp(7, 13, 0, 105, "heavyRail"),
       hp(-11, 3, -90, 100, "plasma"), hp(11, 3, 90, 100, "plasma"),
@@ -271,14 +271,14 @@ export const SHIPS: Readonly<Record<ShipClass, ShipDefinition>> = {
   artilleryDestroyer: {
     class: "artilleryDestroyer", armorType: "plated", radius: 22, mass: 340,
     maxHealth: 2_400, maxShield: 900, speed: 25,
-    turnRate: 28 * DEG, sensorRange: 370, cruiseMultiplier: 1.5, buildPower: 0, buildRange: 0,
+    turnRate: 28 * DEG, sensorRange: 370, cruiseMultiplier: 1.8, buildPower: 0, buildRange: 0,
     hardpoints: [
       hp(-5.5, 13, -8, 22, "siegeArtillery"), hp(5.5, 13, 8, 22, "siegeArtillery"),
     ],
   },
   cruiser: {
     class: "cruiser", armorType: "heavy", radius: 34, mass: 980, maxHealth: 7_820, maxShield: 3_680, speed: 18,
-    turnRate: 20 * DEG, sensorRange: 610, cruiseMultiplier: 1.75, buildPower: 0, buildRange: 0,
+    turnRate: 20 * DEG, sensorRange: 610, cruiseMultiplier: 2.2, buildPower: 0, buildRange: 0,
     hardpoints: [
       hp(-10, 20, -12, 105, "heavyRail"), hp(10, 20, 12, 105, "heavyRail"),
       hp(-15, 10, -65, 115, "plasma"), hp(15, 10, 65, 115, "plasma"),
@@ -291,18 +291,19 @@ export const SHIPS: Readonly<Record<ShipClass, ShipDefinition>> = {
   artilleryCruiser: {
     class: "artilleryCruiser", armorType: "heavy", radius: 38, mass: 1_250,
     maxHealth: 7_800, maxShield: 3_000, speed: 15,
-    turnRate: 14 * DEG, sensorRange: 460, cruiseMultiplier: 1.75, buildPower: 0, buildRange: 0,
+    turnRate: 14 * DEG, sensorRange: 460, cruiseMultiplier: 2.2, buildPower: 0, buildRange: 0,
     hardpoints: [
       hp(-9, 21, -7, 18, "strategicArtillery"), hp(9, 21, 7, 18, "strategicArtillery"),
     ],
   },
   carrier: {
-    class: "carrier", armorType: "heavy", radius: 46, mass: 2_100, maxHealth: 13_225, maxShield: 6_670, speed: 13.2,
-    turnRate: 12.75 * DEG, sensorRange: 760, cruiseMultiplier: 2, buildPower: 0, buildRange: 0,
+    class: "carrier", armorType: "heavy", radius: 46, mass: 2_100, maxHealth: 14_500, maxShield: 7_300, speed: 13.2,
+    turnRate: 12.75 * DEG, sensorRange: 760, cruiseMultiplier: 2.6, buildPower: 0, buildRange: 0,
     hardpoints: [
       hp(-18, 24, -35, 115, "beam"), hp(18, 24, 35, 115, "beam"),
       hp(-22, 8, -80, 120, "plasma"), hp(22, 8, 80, 120, "plasma"),
       hp(-16, -20, -140, 120, "torpedo"), hp(16, -20, 140, 120, "torpedo"),
+      hp(-12, 31, -30, 145, "pointDefense"), hp(12, 31, 30, 145, "pointDefense"),
       hp(-25, 18, -60, 150, "pointDefense"), hp(25, 18, 60, 150, "pointDefense"),
       hp(-27, 6, -90, 155, "pointDefense"), hp(27, 6, 90, 155, "pointDefense"),
       hp(-26, -8, -110, 155, "pointDefense"), hp(26, -8, 110, 155, "pointDefense"),
@@ -310,14 +311,15 @@ export const SHIPS: Readonly<Record<ShipClass, ShipDefinition>> = {
     ],
   },
   battleship: {
-    class: "battleship", armorType: "heavy", radius: 52, mass: 3_600, maxHealth: 19_550, maxShield: 8_625, speed: 10.8,
-    turnRate: 9.35 * DEG, sensorRange: 700, cruiseMultiplier: 2, buildPower: 0, buildRange: 0,
+    class: "battleship", armorType: "heavy", radius: 52, mass: 3_600, maxHealth: 21_500, maxShield: 9_500, speed: 10.8,
+    turnRate: 9.35 * DEG, sensorRange: 700, cruiseMultiplier: 2.6, buildPower: 0, buildRange: 0,
     hardpoints: [
       hp(-5, 34, -18, 90, "heavyRail"), hp(5, 34, 18, 90, "heavyRail"),
       hp(-8, 22, -35, 100, "heavyRail"), hp(8, 22, 35, 100, "heavyRail"),
       hp(-12, 8, -70, 110, "heavyRail"), hp(12, 8, 70, 110, "heavyRail"),
       hp(-15, -10, -110, 115, "plasma"), hp(15, -10, 110, 115, "plasma"),
       hp(-14, -28, -150, 120, "beam"), hp(14, -28, 150, 120, "beam"),
+      hp(-13, 29, -40, 145, "pointDefense"), hp(13, 29, 40, 145, "pointDefense"),
       hp(-9, 15, -75, 150, "pointDefense"), hp(9, 15, 75, 150, "pointDefense"),
       hp(-14, -2, -95, 155, "pointDefense"), hp(14, -2, 95, 155, "pointDefense"),
       hp(-19, -22, -140, 150, "pointDefense"), hp(19, -22, 140, 150, "pointDefense"),
@@ -566,6 +568,7 @@ const STRUCTURE_BASE: Readonly<Record<StructureType, Omit<StructureDefinition, "
     alloyCost: 650, energyCost: 450, buildTicks: 330,
     alloyIncome: 0, energyIncome: 0, energyUpkeep: 12, alloyStorage: 0, energyStorage: 0,
     requiredStructures: ["commandCore"], buildPower: 0, assistRange: 0, sensorRange: 300,
+    weaponRangeMultiplier: 1.2, weaponDamageMultiplier: 0.9,
     weaponTypeId: "lightArtillery",
     hardpoints: [
       { localX: 0, localZ: 3, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "lightArtillery" },
@@ -576,6 +579,7 @@ const STRUCTURE_BASE: Readonly<Record<StructureType, Omit<StructureDefinition, "
     alloyCost: 1_800, energyCost: 1_350, buildTicks: 680,
     alloyIncome: 0, energyIncome: 0, energyUpkeep: 42, alloyStorage: 0, energyStorage: 0,
     requiredStructures: ["fleetShipyard", "fusionReactor"], buildPower: 0, assistRange: 0, sensorRange: 420,
+    weaponRangeMultiplier: 1.35, weaponDamageMultiplier: 0.9,
     weaponTypeId: "siegeArtillery",
     hardpoints: [
       { localX: -8, localZ: 4, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "siegeArtillery" },
@@ -587,6 +591,7 @@ const STRUCTURE_BASE: Readonly<Record<StructureType, Omit<StructureDefinition, "
     alloyCost: 5_500, energyCost: 5_200, buildTicks: 1_500,
     alloyIncome: 0, energyIncome: 0, energyUpkeep: 120, alloyStorage: 0, energyStorage: 0,
     requiredStructures: ["capitalShipyard", "antimatterReactor"], buildPower: 0, assistRange: 0, sensorRange: 540,
+    weaponRangeMultiplier: 1.5, weaponDamageMultiplier: 0.9,
     weaponTypeId: "strategicArtillery",
     hardpoints: [
       { localX: -12, localZ: 6, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: "strategicArtillery" },
@@ -598,6 +603,14 @@ const STRUCTURE_BASE: Readonly<Record<StructureType, Omit<StructureDefinition, "
 export const STRUCTURES: Readonly<Record<StructureType, StructureDefinition>> = Object.fromEntries(
   Object.entries(STRUCTURE_BASE).map(([type, definition]) => [type, { ...definition, armorType: "fortified" as const }]),
 ) as unknown as Readonly<Record<StructureType, StructureDefinition>>;
+
+export function getStructureWeaponRange(structureType: StructureType, weaponTypeId: WeaponTypeId): number {
+  return WEAPONS[weaponTypeId].range * (STRUCTURES[structureType].weaponRangeMultiplier ?? 1);
+}
+
+export function getStructureWeaponDamage(structureType: StructureType, weaponTypeId: WeaponTypeId): number {
+  return WEAPONS[weaponTypeId].damage * (STRUCTURES[structureType].weaponDamageMultiplier ?? 1);
+}
 
 export const ALL_SHIP_CLASSES: readonly ShipClass[] = [
   "fighter", "fabricator", "frigate", "bomber", "flakFrigate", "torpedoFrigate",

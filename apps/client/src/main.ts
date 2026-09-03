@@ -61,7 +61,7 @@ import {
 } from "@space-rts/protocol";
 import { FIXED_DT } from "@space-rts/shared";
 import { ScalableBattleAudio } from "./audio-system";
-import { ProjectileVfx, getBatchedTurretGeometry } from "./combat-visuals";
+import { ProjectileVfx, getBatchedTurretGeometry, getTorpedoImpactPoint } from "./combat-visuals";
 import { STRUCTURE_TURRET_SCALE, getStructureModel } from "./structure-models";
 import { BatchedShipRenderer, CombatEffectRenderer } from "./batched-renderer";
 import { RenderStateBuilder, SHIP_CLASSES, VisualStressScenario, turretVisualHeight, type RenderQuality } from "./render-state";
@@ -595,6 +595,7 @@ interface EffectOrigin {
   vx: number;
   vz: number;
   shields: number;
+  yaw: number;
 }
 const effectOrigins = new Map<number, EffectOrigin>();
 const lastDamageEffectAt = new Map<number, number>();
@@ -1051,6 +1052,7 @@ function createPlayableScenario(): ReturnType<typeof createCombatScenario> {
   const scenario = createCombatScenario({
     seed,
     mapPreset,
+    varyStartingPositions: true,
     players: [
       { id: "pilot-blue", name: "Player Command", teamId: 1, color: 0x59a7ff },
       { id: "pilot-red", name: "AI Command", teamId: 2, color: 0xff5576, ai: true },
@@ -1283,7 +1285,13 @@ interface ClientVisibilityView {
   structures: readonly StructureState[];
   projectiles: readonly ProjectileState[];
   resourceNodes: readonly ResourceNodeState[];
-  targetsById: ReadonlyMap<number, { readonly x: number; readonly z: number; readonly radius: number }>;
+  targetsById: ReadonlyMap<number, {
+    readonly x: number;
+    readonly z: number;
+    readonly radius: number;
+    readonly yaw: number;
+    readonly isShip: boolean;
+  }>;
   verticalLaunchOwnerIds: ReadonlySet<number>;
 }
 
@@ -1331,6 +1339,8 @@ function buildClientVisibilityView(): ClientVisibilityView {
         x: target.x,
         z: target.z,
         radius: "class" in target ? SHIPS[target.class].radius : STRUCTURES[target.type].radius,
+        yaw: target.yaw,
+        isShip: "class" in target,
       }])),
       verticalLaunchOwnerIds: new Set([
         ...ships.filter((ship) => ship.class !== "bomber"
@@ -1363,6 +1373,8 @@ function buildClientVisibilityView(): ClientVisibilityView {
       x: target.x,
       z: target.z,
       radius: "class" in target ? SHIPS[target.class].radius : STRUCTURES[target.type].radius,
+      yaw: target.yaw,
+      isShip: "class" in target,
     }])),
     verticalLaunchOwnerIds: new Set([
       ...ships.filter((ship) => ship.class !== "bomber"
@@ -1521,9 +1533,9 @@ function localSensorDiscs(alpha: number): readonly { x: number; z: number; range
 
 const FOG_TEXTURE_SIZE = 384;
 const FOG_UPDATE_INTERVAL_MS = 160;
-const FOG_UNEXPLORED_ALPHA = 0.985;
-const FOG_EXPLORED_REVEAL = 0.62;
-const FOG_VISIBLE_REVEAL = 0.985;
+const FOG_UNEXPLORED_ALPHA = 0.995;
+const FOG_EXPLORED_REVEAL = 0.7;
+const FOG_VISIBLE_REVEAL = 0.995;
 const fogExploredCanvas = document.createElement("canvas");
 const fogVisibleCanvas = document.createElement("canvas");
 const fogCompositeCanvas = document.createElement("canvas");
@@ -1550,8 +1562,8 @@ const fogNoiseContext = fogCanvasContext(fogNoiseCanvas);
 const fogNoiseRandom = mulberry32(0xf06c0de);
 fogNoiseContext.clearRect(0, 0, fogNoiseCanvas.width, fogNoiseCanvas.height);
 for (let index = 0; index < 180; index += 1) {
-  const value = 34 + Math.floor(fogNoiseRandom() * 42);
-  fogNoiseContext.fillStyle = `rgba(${value * 0.45},${value * 0.8},${value},${0.08 + fogNoiseRandom() * 0.16})`;
+  const value = 38 + Math.floor(fogNoiseRandom() * 46);
+  fogNoiseContext.fillStyle = `rgba(${value * 0.45},${value * 0.8},${value},${0.1 + fogNoiseRandom() * 0.18})`;
   const size = fogNoiseRandom() > 0.86 ? 2 : 1;
   fogNoiseContext.fillRect(
     Math.floor(fogNoiseRandom() * fogNoiseCanvas.width),
@@ -1560,7 +1572,7 @@ for (let index = 0; index < 180; index += 1) {
     size,
   );
 }
-fogNoiseContext.strokeStyle = "rgba(71, 126, 151, .055)";
+fogNoiseContext.strokeStyle = "rgba(71, 126, 151, .09)";
 fogNoiseContext.lineWidth = 1;
 for (let offset = -64; offset < 64; offset += 12) {
   fogNoiseContext.beginPath();
@@ -1568,6 +1580,14 @@ for (let offset = -64; offset < 64; offset += 12) {
   fogNoiseContext.lineTo(offset + 64, 0);
   fogNoiseContext.stroke();
 }
+fogNoiseContext.strokeStyle = "rgba(50, 91, 112, .045)";
+for (let offset = 0; offset < 128; offset += 24) {
+  fogNoiseContext.beginPath();
+  fogNoiseContext.moveTo(offset, 0);
+  fogNoiseContext.lineTo(offset - 64, 64);
+  fogNoiseContext.stroke();
+}
+const fogUnexploredNoisePattern = fogResizeContext.createPattern(fogNoiseCanvas, "repeat");
 
 function createFogTexture(canvas: HTMLCanvasElement): THREE.CanvasTexture {
   const texture = new THREE.CanvasTexture(canvas);
@@ -1791,18 +1811,30 @@ function updateFogOfWar(now: number, alpha = 1, force = false): void {
   fogCompositeContext.clearRect(0, 0, FOG_TEXTURE_SIZE, FOG_TEXTURE_SIZE);
   fogCompositeContext.fillStyle = `rgba(1, 4, 10, ${FOG_UNEXPLORED_ALPHA})`;
   fogCompositeContext.fillRect(0, 0, FOG_TEXTURE_SIZE, FOG_TEXTURE_SIZE);
-  const noisePattern = fogCompositeContext.createPattern(fogNoiseCanvas, "repeat");
-  if (noisePattern) {
-    fogCompositeContext.fillStyle = noisePattern;
-    fogCompositeContext.globalAlpha = 0.9;
-    fogCompositeContext.fillRect(0, 0, FOG_TEXTURE_SIZE, FOG_TEXTURE_SIZE);
-  }
-
   // Keep explored territory visibly dimmed while current sensor coverage cuts almost completely clear.
   fogCompositeContext.globalCompositeOperation = "destination-out";
   fogCompositeContext.globalAlpha = FOG_EXPLORED_REVEAL;
   fogCompositeContext.filter = "blur(2px)";
   fogCompositeContext.drawImage(fogExploredCanvas, 0, 0);
+
+  // Restrict the scan-noise hatch to territory that has never been explored.
+  // Reusing the resize canvas avoids another texture or GPU pass.
+  fogResizeContext.globalCompositeOperation = "source-over";
+  fogResizeContext.globalAlpha = 1;
+  fogResizeContext.filter = "none";
+  fogResizeContext.clearRect(0, 0, FOG_TEXTURE_SIZE, FOG_TEXTURE_SIZE);
+  if (fogUnexploredNoisePattern) {
+    fogResizeContext.fillStyle = fogUnexploredNoisePattern;
+    fogResizeContext.fillRect(0, 0, FOG_TEXTURE_SIZE, FOG_TEXTURE_SIZE);
+    fogResizeContext.globalCompositeOperation = "destination-out";
+    fogResizeContext.drawImage(fogExploredCanvas, 0, 0);
+    fogCompositeContext.globalCompositeOperation = "source-over";
+    fogCompositeContext.globalAlpha = 0.95;
+    fogCompositeContext.filter = "none";
+    fogCompositeContext.drawImage(fogResizeCanvas, 0, 0);
+  }
+
+  fogCompositeContext.globalCompositeOperation = "destination-out";
   fogCompositeContext.globalAlpha = FOG_VISIBLE_REVEAL;
   fogCompositeContext.filter = "none";
   fogCompositeContext.drawImage(fogVisibleCanvas, 0, 0);
@@ -2644,7 +2676,7 @@ function inferNetworkCombatEvents(
     if (projectile) {
       hitProjectileIds.add(projectile.id);
       const owner = projectile.ownerShipId === null ? undefined : beforeShips.get(projectile.ownerShipId);
-      if (owner?.class !== "fighter") {
+      if (projectile.weaponTypeId === "torpedo" || owner?.class !== "fighter") {
         const speed = Math.max(0.001, Math.hypot(projectile.vx, projectile.vz));
         const targetRadius = "class" in target ? SHIPS[target.class].radius : STRUCTURES[target.type].radius;
         events.push({
@@ -2659,9 +2691,9 @@ function inferNetworkCombatEvents(
   const afterProjectileIds = new Set(after.projectiles.map((projectile) => projectile.id));
   const elapsedTicks = Math.max(1, after.state.tick - before.state.tick);
   for (const projectile of before.projectiles) {
-    if (afterProjectileIds.has(projectile.id) || hitProjectileIds.has(projectile.id) || projectile.ownerShipId === null) continue;
-    const owner = beforeShips.get(projectile.ownerShipId);
-    if (owner?.class === "fighter") continue;
+    if (afterProjectileIds.has(projectile.id) || hitProjectileIds.has(projectile.id)) continue;
+    const owner = projectile.ownerShipId === null ? undefined : beforeShips.get(projectile.ownerShipId);
+    if (projectile.weaponTypeId !== "torpedo" && owner?.class === "fighter") continue;
     const targetStillVisible = projectile.targetEntityId !== null && after.visibleEntityIds.has(projectile.targetEntityId);
     if (!targetStillVisible && projectile.lifetimeTicks > elapsedTicks + 2) continue;
     events.push({
@@ -4015,22 +4047,22 @@ function rememberEffectOrigins(view: ClientVisibilityView): void {
   for (const ship of view.ships) {
     visibleIds.add(ship.id);
     const origin = effectOrigins.get(ship.id) ?? {
-      x: 0, y: 0, z: 0, radius: 0, color: 0, isShip: true, vx: 0, vz: 0, shields: 0,
+      x: 0, y: 0, z: 0, radius: 0, color: 0, isShip: true, vx: 0, vz: 0, shields: 0, yaw: 0,
     };
     origin.x = ship.x; origin.y = ship.y + 3; origin.z = ship.z;
     origin.radius = SHIPS[ship.class].radius; origin.color = colorForTeam(ship.teamId);
-    origin.isShip = true; origin.vx = ship.vx; origin.vz = ship.vz; origin.shields = ship.shields;
+    origin.isShip = true; origin.vx = ship.vx; origin.vz = ship.vz; origin.shields = ship.shields; origin.yaw = ship.yaw;
     effectOrigins.set(ship.id, origin);
   }
   for (const structure of view.structures) {
     visibleIds.add(structure.id);
     const origin = effectOrigins.get(structure.id) ?? {
-      x: 0, y: 0, z: 0, radius: 0, color: 0, isShip: false, vx: 0, vz: 0, shields: 0,
+      x: 0, y: 0, z: 0, radius: 0, color: 0, isShip: false, vx: 0, vz: 0, shields: 0, yaw: 0,
     };
     origin.x = structure.x; origin.y = 8; origin.z = structure.z;
     origin.radius = STRUCTURES[structure.type].radius;
     origin.color = colorForPlayer(structure.ownerPlayerId, structure.teamId);
-    origin.isShip = false; origin.vx = 0; origin.vz = 0; origin.shields = structure.shields;
+    origin.isShip = false; origin.vx = 0; origin.vz = 0; origin.shields = structure.shields; origin.yaw = structure.yaw;
     effectOrigins.set(structure.id, origin);
   }
   for (const id of effectOrigins.keys()) {
@@ -4073,6 +4105,9 @@ function isEventVisible(
 function processEvents(events: SimulationEvent[]): void {
   const detonatedProjectileIds = new Set(events.flatMap(
     (event) => event.type === "projectileDetonated" ? [event.projectileId] : [],
+  ));
+  const hitTargetsByProjectileId = new Map(events.flatMap(
+    (event) => event.type === "hit" ? [[event.projectileId, event.targetId] as const] : [],
   ));
   for (const event of events) {
     if (event.type === "commandAccepted" && event.unitIds.length > 0) {
@@ -4182,22 +4217,27 @@ function processEvents(events: SimulationEvent[]): void {
         siegeArtillery: { y: 11, size: 5.2 },
         strategicArtillery: { y: 14, size: 8.2 },
       }[event.weaponTypeId];
-      let impactOrigin: EffectOrigin | undefined;
+      let impactOrigin = effectOrigins.get(hitTargetsByProjectileId.get(event.projectileId) ?? -1);
       let nearestImpactDistance = Infinity;
-      for (const origin of effectOrigins.values()) {
-        const distance = Math.hypot(origin.x - event.x, origin.z - event.z);
-        if (distance <= origin.radius + 12 && distance < nearestImpactDistance) {
-          impactOrigin = origin;
-          nearestImpactDistance = distance;
+      if (!impactOrigin) {
+        for (const origin of effectOrigins.values()) {
+          const distance = Math.hypot(origin.x - event.x, origin.z - event.z);
+          if (distance <= origin.radius + 12 && distance < nearestImpactDistance) {
+            impactOrigin = origin;
+            nearestImpactDistance = distance;
+          }
         }
       }
       const impactY = impactOrigin?.y ?? style.y;
+      const impactPoint = event.weaponTypeId === "torpedo" && impactOrigin
+        ? getTorpedoImpactPoint(event.projectileId, impactOrigin)
+        : event;
       const impactSize = event.weaponTypeId === "torpedo" && impactOrigin
         ? THREE.MathUtils.clamp(impactOrigin.radius * 0.22, style.size, 13)
         : style.size;
-      if (stressScenario.activeCount === 0 && isEffectVisible(event.x, impactY, event.z)) {
+      if (stressScenario.activeCount === 0 && isEffectVisible(impactPoint.x, impactY, impactPoint.z)) {
         combatEffects.spawnProjectileDetonation(
-          event.x, impactY, event.z, WEAPONS[event.weaponTypeId].color, impactSize, performance.now(),
+          impactPoint.x, impactY, impactPoint.z, WEAPONS[event.weaponTypeId].color, impactSize, performance.now(),
         );
       }
     } else if (event.type === "destroyed") {
