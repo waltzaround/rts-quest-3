@@ -211,6 +211,9 @@ interface VerticalLaunchFlight {
   readonly impactZ: number | undefined;
 }
 
+/** Ticks over which a missile that overshot its aim point eases back onto the simulation track. */
+const MISS_RELEASE_TICKS = 5;
+
 function torpedoThrustScale(ageTicks: number): number {
   const launchProgress = THREE.MathUtils.clamp((ageTicks - 2) / 6, 0, 1);
   const easedLaunch = launchProgress * launchProgress * (3 - 2 * launchProgress);
@@ -294,6 +297,12 @@ function projectileVisualPose(
     0,
     WEAPONS.torpedo.projectileLifetimeTicks - projectile.lifetimeTicks - 1 + alpha,
   );
+  // A missile that outlives its planned flight has missed its aim point. Release it
+  // back onto the simulation's real track so it visibly overshoots and flies on until
+  // the authoritative detonation, instead of freezing on the stale impact point.
+  const overrunTicks = Math.max(0, ageTicks - flight.totalFlightTicks);
+  const missProgress = THREE.MathUtils.clamp(overrunTicks / MISS_RELEASE_TICKS, 0, 1);
+  const missBlend = missProgress * missProgress * (3 - 2 * missProgress);
   const progress = THREE.MathUtils.clamp(ageTicks / flight.totalFlightTicks, 0, 1);
   if (progress <= flight.boostProgress) {
     const boostPhase = progress / flight.boostProgress;
@@ -315,13 +324,14 @@ function projectileVisualPose(
   const trackX = THREE.MathUtils.lerp(flight.launchX, x, pitchBlend);
   const trackZ = THREE.MathUtils.lerp(flight.launchZ, z, pitchBlend);
   const landingProgress = THREE.MathUtils.clamp((arcProgress - 0.48) / 0.52, 0, 1);
-  const landingBlend = landingProgress * landingProgress * (3 - 2 * landingProgress);
+  const landingBlend = landingProgress * landingProgress * (3 - 2 * landingProgress) * (1 - missBlend);
   const visualX = flight.impactX === undefined ? trackX : THREE.MathUtils.lerp(trackX, flight.impactX, landingBlend);
   const visualZ = flight.impactZ === undefined ? trackZ : THREE.MathUtils.lerp(trackZ, flight.impactZ, landingBlend);
   const relativeHeight = flight.boostHeight * (1 - arcProgress)
     + 4 * flight.arcLift * arcProgress * (1 - arcProgress);
   const heightDerivative = -flight.boostHeight + 4 * flight.arcLift * (1 - 2 * arcProgress);
-  const slope = THREE.MathUtils.clamp(heightDerivative / flight.totalDistance, -8, 8);
+  // Level the nose back out once the missile is coasting past a missed target.
+  const slope = THREE.MathUtils.clamp(heightDerivative / flight.totalDistance, -8, 8) * (1 - missBlend);
   const directionScale = 1 / Math.hypot(1, slope);
   let landingDirectionX = horizontalX;
   let landingDirectionZ = horizontalZ;
