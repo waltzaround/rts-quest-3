@@ -703,6 +703,7 @@ interface EffectOrigin {
   vz: number;
   shields: number;
   yaw: number;
+  shipClass?: ShipClass;
 }
 const effectOrigins = new Map<number, EffectOrigin>();
 const lastDamageEffectAt = new Map<number, number>();
@@ -3686,7 +3687,7 @@ function updateVisuals(alpha: number, now: number): void {
     benchmarkActive ? undefined : clientView.targetsById,
     benchmarkActive ? undefined : clientView.verticalLaunchOwnerIds,
   );
-  combatEffects.update(now);
+  combatEffects.update(now, camera);
   battleAudio.update(source.ships, camera, now, paused || landingLobbyActive);
   updateDebugVisuals(benchmarkActive);
   updateRallyVisuals(benchmarkActive);
@@ -3734,7 +3735,7 @@ function emitStressEffects(now: number): void {
     if (index % 2 === 0) {
       combatEffects.spawnDamageImpact(
         ship.x, ship.y, ship.z, radius,
-        stressEffectCursor + index, index % 4 === 0 ? 18 : 5, index % 4 !== 0, now,
+        stressEffectCursor + index, index % 4 === 0 ? 18 : 5, index % 4 !== 0, now, ship.class, ship.yaw,
       );
     }
     if (index % 5 === 0) {
@@ -4185,12 +4186,13 @@ function rememberEffectOrigins(view: ClientVisibilityView): void {
   const visibleIds = new Set<number>();
   for (const ship of view.ships) {
     visibleIds.add(ship.id);
-    const origin = effectOrigins.get(ship.id) ?? {
+    const origin: EffectOrigin = effectOrigins.get(ship.id) ?? {
       x: 0, y: 0, z: 0, radius: 0, color: 0, isShip: true, vx: 0, vz: 0, shields: 0, yaw: 0,
     };
     origin.x = ship.x; origin.y = ship.y + 3; origin.z = ship.z;
     origin.radius = SHIPS[ship.class].radius; origin.color = colorForTeam(ship.teamId);
     origin.isShip = true; origin.vx = ship.vx; origin.vz = ship.vz; origin.shields = ship.shields; origin.yaw = ship.yaw;
+    origin.shipClass = ship.class;
     effectOrigins.set(ship.id, origin);
   }
   for (const structure of view.structures) {
@@ -4340,8 +4342,8 @@ function processEvents(events: SimulationEvent[]): void {
           && now - (lastDamageEffectAt.get(event.targetId) ?? -Infinity) >= 55
           && isEffectVisible(origin.x, origin.y, origin.z)) {
           combatEffects.spawnDamageImpact(
-            origin.x, origin.y, origin.z, origin.radius,
-            event.projectileId, event.damage, shielded, now,
+            origin.x, origin.y - (origin.isShip ? 3 : 0), origin.z, origin.radius,
+            event.projectileId, event.damage, shielded, now, origin.shipClass, origin.yaw,
           );
           lastDamageEffectAt.set(event.targetId, now);
         }

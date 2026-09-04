@@ -5,9 +5,12 @@ import {
   SHIPS,
   SHIP_TURRET_SCALES,
   getFighterSquadMemberPose,
+  type ShipClass,
 } from "@space-rts/game-core";
 import { getBatchedTurretGeometry, getShipHullGeometries, type HullGeometrySet } from "./combat-visuals";
 import { SHIP_THRUSTERS } from "./ship-layout";
+import { createShipSurfaceMaterial } from "./ship-materials";
+import { createBreachGeometry, createBreachMaterial, getShipDamageSites } from "./ship-damage";
 import {
   MAX_RENDER_SHIPS,
   MAX_RENDER_TURRETS,
@@ -284,8 +287,6 @@ const HEALTH_BAR_AMBER = new THREE.Color(0xf1bd5a);
 const HEALTH_BAR_RED = new THREE.Color(0xff5674);
 const DAMAGE_SCORCH = new THREE.Color(0x24130d);
 const ARTILLERY_REVEAL = new THREE.Color(0xffb35c);
-const DAMAGE_EMBER = new THREE.Color(0xff6a24);
-const DAMAGE_EMBER_HOT = new THREE.Color(0xffc04f);
 const MAX_DAMAGE_INSTANCES = 256;
 const DAMAGE_VISIBLE_CLASS_IDS = new Set([2, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
 
@@ -341,14 +342,8 @@ export class BatchedShipRenderer {
   private lastUpdateAt = 0;
 
   constructor(scene: THREE.Scene) {
-    const hullMaterial = new THREE.MeshStandardMaterial({
-      color: 0xc1ced6, emissive: 0x102b3b, emissiveIntensity: 0.68,
-      metalness: 0.7, roughness: 0.36, flatShading: true,
-    });
-    const armorMaterial = new THREE.MeshStandardMaterial({
-      color: 0x8e9da7, emissive: 0x0b1d29, emissiveIntensity: 0.58,
-      metalness: 0.78, roughness: 0.32, flatShading: true,
-    });
+    const hullMaterial = createShipSurfaceMaterial("hull");
+    const armorMaterial = createShipSurfaceMaterial("armor");
     const darkMaterial = new THREE.MeshStandardMaterial({
       color: 0x1b2b36, emissive: 0x07141d, emissiveIntensity: 0.72,
       metalness: 0.62, roughness: 0.46, flatShading: true,
@@ -371,6 +366,7 @@ export class BatchedShipRenderer {
     for (let classId = 0; classId < SHIP_CLASSES.length; classId += 1) {
       const shipClass = SHIP_CLASSES[classId]!;
       const geometry = getShipHullGeometries(shipClass);
+      getShipDamageSites(shipClass);
       // Adaptive squad LOD never expands more than two members once the fleet
       // is large enough to approach MAX_RENDER_SHIPS. Keeping this bounded at
       // 2x avoids uploading worst-case five-member buffers for every layer.
@@ -456,19 +452,8 @@ export class BatchedShipRenderer {
       MAX_RENDER_SHIPS,
       true,
     );
-    const damageGeometry = mergeGeometries([
-      new THREE.IcosahedronGeometry(0.72, 0),
-      new THREE.ConeGeometry(0.72, 2.8, 5).toNonIndexed().translate(0, 1.6, 0),
-      new THREE.ConeGeometry(0.46, 2.1, 5).toNonIndexed().translate(0.55, 1.25, 0.18),
-    ], false)!;
     this.damageBatch = createBatch(
-      damageGeometry,
-      new THREE.MeshBasicMaterial({
-        color: 0xffffff, transparent: true, opacity: 0.72,
-        blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
-      }),
-      MAX_DAMAGE_INSTANCES,
-      true,
+      createBreachGeometry(), createBreachMaterial(this.thrusterTime), MAX_DAMAGE_INSTANCES, true,
     );
     this.damageBatch.mesh.renderOrder = 2;
     this.healthBarBackgroundBatch.mesh.renderOrder = 44;
@@ -533,10 +518,10 @@ export class BatchedShipRenderer {
       this.matrix.toArray(this.shipMatrices, index * 16);
       this.color.setHex(state.shipColor[index]!);
       const health = state.shipHealth[index]!;
-      this.tint.copy(this.color).lerp(this.white, 0.58).multiplyScalar(0.62 + health * 0.38);
+      this.tint.copy(this.color).lerp(this.white, 0.78).multiplyScalar(0.87 + health * 0.13);
       this.lightTint.copy(this.color).lerp(this.white, 0.72);
       if (state.shipRevealed[index]) this.tint.lerp(ARTILLERY_REVEAL, 0.22 + Math.sin(now * 0.014) * 0.08);
-      if (health < 0.7) this.tint.lerp(DAMAGE_SCORCH, Math.min(0.58, (0.7 - health) * 0.92));
+      if (health < 0.7) this.tint.lerp(DAMAGE_SCORCH, Math.min(0.16, (0.7 - health) * 0.25));
       if (health < 0.3) this.color.multiplyScalar(0.62 + Math.abs(Math.sin(now * 0.012 + state.shipIds[index]!)) * 0.38);
       const lod = state.shipLod[index]! as VisualLod;
       const classId = state.shipClass[index]!;
@@ -758,25 +743,17 @@ export class BatchedShipRenderer {
     const shipClass = SHIP_CLASSES[classId]!;
     const radius = SHIPS[shipClass].radius;
     const shipId = state.shipIds[shipIndex]!;
-    const breachCount = health < 0.22 && this.quality === "high" ? 2 : 1;
+    const sites = getShipDamageSites(shipClass);
+    const severity = Math.min(1, (0.7 - health) / 0.7);
+    const breachCount = this.quality === "low" ? 1 : health < 0.3 ? 3 : health < 0.5 ? 2 : 1;
     this.matrix.fromArray(this.shipMatrices, shipIndex * 16);
-    for (let breach = 0; breach < breachCount && this.damageBatch.count < MAX_DAMAGE_INSTANCES; breach += 1) {
-      const phase = shipId * 1.618 + breach * 2.71;
-      const pulse = 0.82 + Math.abs(Math.sin(now * 0.009 + phase)) * 0.38;
-      const severity = Math.min(1, (0.7 - health) / 0.7);
-      this.position.set(
-        Math.sin(phase * 1.7) * radius * 0.38,
-        radius * (0.1 + Math.abs(Math.sin(phase * 0.73)) * 0.12),
-        Math.cos(phase * 1.31) * radius * 0.42,
-      );
-      const size = Math.max(0.75, radius * (0.055 + severity * 0.045)) * pulse;
-      this.scale.set(size, size * (0.9 + severity * 0.45), size);
-      this.localMatrix.compose(this.position, this.identityQuaternion, this.scale).premultiply(this.matrix);
-      this.writeInstance(
-        this.damageBatch,
-        this.localMatrix,
-        health < 0.28 ? DAMAGE_EMBER_HOT : DAMAGE_EMBER,
-      );
+    for (let breach = 0; breach < Math.min(breachCount, sites.length) && this.damageBatch.count < MAX_DAMAGE_INSTANCES; breach += 1) {
+      const site = sites[(shipId + breach * 5) % sites.length]!;
+      const size = Math.max(0.55, radius * (0.026 + severity * 0.025));
+      this.scale.set(size, size, size * 1.25);
+      this.localMatrix.compose(site.position, site.orientation, this.scale).premultiply(this.matrix);
+      this.color.setRGB(severity, ((shipId * 7 + breach * 13) % 31) / 31, 0);
+      this.writeInstance(this.damageBatch, this.localMatrix, this.color);
     }
   }
 
@@ -832,6 +809,10 @@ class EffectPool {
   private readonly scaleScratch = new THREE.Vector3();
   private readonly colorScratch = new THREE.Color();
   private readonly xAxis = new THREE.Vector3(1, 0, 0);
+  private readonly rotation = new THREE.Euler();
+  private readonly direction = new THREE.Vector3();
+  private readonly up = new THREE.Vector3(0, 1, 0);
+  private readonly opacity: THREE.InstancedBufferAttribute;
 
   constructor(
     scene: THREE.Scene,
@@ -849,11 +830,38 @@ class EffectPool {
     this.velocity = new Float32Array(capacity * 3);
     this.scale = new Float32Array(capacity);
     this.color = new Uint32Array(capacity);
-    this.mesh = new THREE.InstancedMesh(geometry, new THREE.MeshBasicMaterial({
+    this.opacity = new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1);
+    this.opacity.setUsage(THREE.DynamicDrawUsage);
+    geometry.setAttribute("effectOpacity", this.opacity);
+    const material = new THREE.MeshBasicMaterial({
       color: 0xffffff, transparent: true, opacity, blending,
-      depthWrite: blending === THREE.NormalBlending, side: THREE.DoubleSide,
+      depthWrite: false, side: THREE.DoubleSide,
       toneMapped: blending === THREE.NormalBlending,
-    }), capacity);
+    });
+    material.onBeforeCompile = shader => {
+      shader.vertexShader = shader.vertexShader
+        .replace("#include <common>", `#include <common>
+          attribute float effectOpacity;
+          varying float vEffectOpacity;
+          varying vec2 vEffectPoint;`)
+        .replace("#include <begin_vertex>", `#include <begin_vertex>
+          vEffectOpacity = effectOpacity;
+          vEffectPoint = position.xy;`);
+      shader.fragmentShader = shader.fragmentShader
+        .replace("#include <common>", `#include <common>
+          varying float vEffectOpacity;
+          varying vec2 vEffectPoint;`)
+        .replace("#include <color_fragment>", `#include <color_fragment>
+          diffuseColor.a *= vEffectOpacity;
+          ${mode === EffectMode.Flash ? `
+          float radius = length(vEffectPoint);
+          float glow = max(0.0, 1.0 - radius);
+          diffuseColor.a *= glow * glow;
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.7, 1.5, 1.1), pow(glow, 8.0) * vEffectOpacity);
+          ` : ""}`);
+    };
+    material.customProgramCacheKey = () => `combat-effect-${mode}`;
+    this.mesh = new THREE.InstancedMesh(geometry, material, capacity);
     this.mesh.count = 0;
     this.mesh.frustumCulled = false;
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -879,7 +887,7 @@ class EffectPool {
     this.usedCount = Math.min(this.capacity, this.usedCount + 1);
   }
 
-  update(now: number): void {
+  update(now: number, camera?: THREE.Camera): void {
     let visible = 0;
     for (let index = 0; index < this.usedCount; index += 1) {
       const age = now - this.born[index]!;
@@ -898,19 +906,30 @@ class EffectPool {
         : this.mode === EffectMode.Ring
         ? baseScale * (0.25 + progress * 1.9)
         : this.mode === EffectMode.Debris
-          ? baseScale * (1 - progress * 0.55)
-          : baseScale * Math.sin(Math.PI * Math.min(1, progress * 1.1));
+          ? baseScale
+          : baseScale * (0.65 + Math.sqrt(progress) * 0.9);
       this.scaleScratch.setScalar(Math.max(0.001, animatedScale));
       if (this.mode === EffectMode.Ripple || this.mode === EffectMode.Ring) this.quaternion.setFromAxisAngle(this.xAxis, Math.PI / 2);
-      else this.quaternion.setFromEuler(new THREE.Euler(progress * 4 + index, progress * 6, progress * 3));
+      else if (this.mode === EffectMode.Flash && camera) this.quaternion.copy(camera.quaternion);
+      else if (this.mode === EffectMode.Debris && (this.mesh.material as THREE.MeshBasicMaterial).blending === THREE.AdditiveBlending) {
+        this.direction.set(this.velocity[positionIndex]!, this.velocity[positionIndex + 1]!, this.velocity[positionIndex + 2]!);
+        if (this.direction.lengthSq() > 0) this.quaternion.setFromUnitVectors(this.up, this.direction.normalize());
+        this.scaleScratch.set(animatedScale * 0.3, animatedScale * (2.6 - progress * 1.7), animatedScale * 0.3);
+      } else this.quaternion.setFromEuler(this.rotation.set(progress * 4 + index, progress * 6, progress * 3));
       this.matrix.compose(this.positionScratch, this.quaternion, this.scaleScratch);
       this.mesh.setMatrixAt(visible, this.matrix);
       this.mesh.setColorAt(visible, this.colorScratch.setHex(this.color[index]!));
+      this.opacity.setX(visible, this.mode === EffectMode.Debris
+        ? 1 - THREE.MathUtils.smoothstep(progress, 0.55, 1)
+        : (1 - progress) ** 2);
       visible += 1;
     }
     this.activeCount = visible;
     this.mesh.count = visible;
     if (visible > 0) {
+      this.opacity.clearUpdateRanges();
+      this.opacity.addUpdateRange(0, visible);
+      this.opacity.needsUpdate = true;
       this.mesh.instanceMatrix.clearUpdateRanges();
       this.mesh.instanceMatrix.addUpdateRange(0, visible * 16);
       this.mesh.instanceMatrix.needsUpdate = true;
@@ -1052,13 +1071,13 @@ export class CombatEffectRenderer {
   private quality: RenderQuality = "medium";
 
   constructor(scene: THREE.Scene) {
-    this.muzzle = new EffectPool(scene, new THREE.OctahedronGeometry(1, 0), 512, EffectMode.Flash, 0.95);
+    this.muzzle = new EffectPool(scene, new THREE.PlaneGeometry(2, 2), 512, EffectMode.Flash, 0.95);
     this.shield = new EffectPool(scene, new THREE.RingGeometry(0.86, 1, 16), 512, EffectMode.Ripple, 0.18);
-    this.flash = new EffectPool(scene, new THREE.IcosahedronGeometry(1, 1), 256, EffectMode.Flash, 0.78);
+    this.flash = new EffectPool(scene, new THREE.PlaneGeometry(2, 2), 256, EffectMode.Flash, 0.92);
     this.shock = new EffectPool(scene, new THREE.RingGeometry(0.82, 1, 28), 256, EffectMode.Ring, 0.36);
     this.debris = new EffectPool(scene, new THREE.TetrahedronGeometry(1, 0), 768, EffectMode.Debris, 0.72);
     this.wreck = new EffectPool(
-      scene, new THREE.BoxGeometry(1.8, 0.7, 3.2), 512, EffectMode.Debris, 0.86, THREE.NormalBlending,
+      scene, new THREE.OctahedronGeometry(1, 0).scale(1.1, 0.3, 1.9), 512, EffectMode.Debris, 0.96, THREE.NormalBlending,
     );
     this.beams = new BeamPool(scene);
   }
@@ -1077,11 +1096,16 @@ export class CombatEffectRenderer {
   spawnDamageImpact(
     x: number, y: number, z: number, radius: number,
     seed: number, damage: number, shielded: boolean, now: number,
+    shipClass?: ShipClass, yaw = 0,
   ): void {
     const angle = seed * 2.399963;
-    const hitX = x + Math.sin(angle) * radius * 0.7;
-    const hitY = y + radius * 0.12;
-    const hitZ = z + Math.cos(angle) * radius * 0.7;
+    const sites = shipClass ? getShipDamageSites(shipClass) : undefined;
+    const site = sites?.length ? sites[Math.abs(seed) % sites.length] : undefined;
+    const localX = site?.position.x ?? Math.sin(angle) * radius * 0.32;
+    const localZ = site?.position.z ?? Math.cos(angle) * radius * 0.5;
+    const hitX = x + Math.cos(yaw) * localX + Math.sin(yaw) * localZ;
+    const hitY = y + (site?.position.y ?? radius * 0.22);
+    const hitZ = z - Math.sin(yaw) * localX + Math.cos(yaw) * localZ;
     if (shielded) {
       const rippleSize = Math.min(radius * 0.22, Math.max(0.65, radius * 0.14 + Math.sqrt(damage) * 0.06));
       this.shield.spawn(hitX, hitY, hitZ, rippleSize, 0xa8e9ff, now, 165);
@@ -1091,7 +1115,8 @@ export class CombatEffectRenderer {
     const blastSize = Math.min(radius * 0.3, Math.max(0.75, radius * 0.07 + damageScale * 1.5));
     this.muzzle.spawn(hitX, hitY, hitZ, blastSize * 0.72, 0xffffff, now, 105);
     this.flash.spawn(hitX, hitY, hitZ, blastSize, 0xffb04f, now, 235);
-    this.shock.spawn(hitX, hitY, hitZ, blastSize * 0.92, 0xff6a2a, now, 310);
+    // Ordinary impacts throw hot metal; only large blasts get a shock ring.
+    if (damage > 60) this.shock.spawn(hitX, hitY, hitZ, blastSize * 0.8, 0xff8844, now, 230);
 
     // Hull fragments reuse the fixed debris pool. Counts remain deliberately
     // small because sustained fleet fire can generate hundreds of hits/second.
@@ -1181,13 +1206,13 @@ export class CombatEffectRenderer {
     }
   }
 
-  update(now: number): void {
-    this.muzzle.update(now);
-    this.shield.update(now);
-    this.flash.update(now);
-    this.shock.update(now);
-    this.debris.update(now);
-    this.wreck.update(now);
+  update(now: number, camera?: THREE.Camera): void {
+    this.muzzle.update(now, camera);
+    this.shield.update(now, camera);
+    this.flash.update(now, camera);
+    this.shock.update(now, camera);
+    this.debris.update(now, camera);
+    this.wreck.update(now, camera);
     this.beams.update(now);
   }
 

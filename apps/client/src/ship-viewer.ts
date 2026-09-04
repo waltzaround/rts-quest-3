@@ -15,6 +15,9 @@ import { STRUCTURE_TURRET_SCALE, getStructureModel } from "./structure-models";
 import { getBatchedTurretGeometry, getShipHullGeometries } from "./ship-hulls";
 import { SHIP_THRUSTERS, turretDeckHeight } from "./ship-layout";
 import { WEAPON_TYPES } from "./render-state";
+import { createShipSurfaceMaterial } from "./ship-materials";
+import { createBreachGeometry, createBreachMaterial, getShipDamageSites } from "./ship-damage";
+import { CombatEffectRenderer } from "./batched-renderer";
 
 const params = new URLSearchParams(location.search);
 const focusClass = params.get("class") as ShipClass | null;
@@ -46,17 +49,43 @@ scene.add(new THREE.GridHelper(1_200, 40, 0x18303c, 0x0d1a22));
 const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 1, 6_000);
 const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = true;
+const effects = new CombatEffectRenderer(scene);
+effects.setQuality("high");
+const damageTime = { value: 0 };
+const breachMaterial = createBreachMaterial(damageTime);
+const breachGeometry = createBreachGeometry();
+const damagePreviews: Array<{ mesh: THREE.InstancedMesh; shipClass: ShipClass }> = [];
+const previewHealth = document.getElementById("health") as HTMLInputElement;
+previewHealth.value = params.get("health") ?? "100";
+const damageMatrix = new THREE.Matrix4();
+const damageScale = new THREE.Vector3();
+const damageColor = new THREE.Color();
 
-const tint = teamColor.clone().lerp(new THREE.Color(0xffffff), 0.58);
+function updateDamagePreview(): void {
+  const health = Number(previewHealth.value) / 100;
+  document.getElementById("health-value")!.textContent = `${Math.round(health * 100)}%`;
+  for (const { mesh, shipClass } of damagePreviews) {
+    const sites = getShipDamageSites(shipClass);
+    const severity = Math.max(0, (0.7 - health) / 0.7);
+    mesh.count = health >= 0.7 || lodMode === "far" ? 0 : Math.min(sites.length, health < 0.3 ? 3 : health < 0.5 ? 2 : 1);
+    for (let i = 0; i < mesh.count; i += 1) {
+      const site = sites[(1 + i * 5) % sites.length]!;
+      const size = Math.max(0.55, SHIPS[shipClass].radius * (0.026 + severity * 0.025));
+      damageScale.set(size, size, size * 1.25);
+      damageMatrix.compose(site.position, site.orientation, damageScale);
+      mesh.setMatrixAt(i, damageMatrix);
+      mesh.setColorAt(i, damageColor.setRGB(severity, ((7 + i * 13) % 31) / 31, 0));
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  }
+}
+previewHealth.addEventListener("input", updateDamagePreview);
+
+const tint = teamColor.clone().lerp(new THREE.Color(0xffffff), 0.78);
 const materials = {
-  hull: new THREE.MeshStandardMaterial({
-    color: new THREE.Color(0xc1ced6).multiply(tint), emissive: 0x102b3b, emissiveIntensity: 0.68,
-    metalness: 0.7, roughness: 0.36, flatShading: true,
-  }),
-  armor: new THREE.MeshStandardMaterial({
-    color: new THREE.Color(0x8e9da7).multiply(tint), emissive: 0x0b1d29, emissiveIntensity: 0.58,
-    metalness: 0.78, roughness: 0.32, flatShading: true,
-  }),
+  hull: createShipSurfaceMaterial("hull"),
+  armor: createShipSurfaceMaterial("armor"),
   dark: new THREE.MeshStandardMaterial({
     color: 0x1b2b36, emissive: 0x07141d, emissiveIntensity: 0.72,
     metalness: 0.62, roughness: 0.46, flatShading: true,
@@ -72,6 +101,8 @@ const materials = {
     flatShading: true, vertexColors: true,
   }),
 };
+materials.hull.color.multiply(tint);
+materials.armor.color.multiply(tint);
 
 type HullLayer = keyof ReturnType<typeof getShipHullGeometries>;
 const LAYERS_BY_LOD: Record<string, ReadonlyArray<HullLayer>> = {
@@ -110,7 +141,7 @@ function buildShip(shipClass: ShipClass): THREE.Group {
     }
   }
   const thrusters = SHIP_THRUSTERS[shipClass];
-  for (const offset of thrusters.offsets) {
+  for (const offset of lodMode === "far" || lodMode === "large" ? [] : thrusters.offsets) {
     const plume = new THREE.Mesh(
       new THREE.ConeGeometry(thrusters.width, thrusters.length * 0.7, 7, 1, true),
       materials.engine,
@@ -120,6 +151,11 @@ function buildShip(shipClass: ShipClass): THREE.Group {
     plume.renderOrder = 1;
     group.add(plume);
   }
+  const breaches = new THREE.InstancedMesh(breachGeometry, breachMaterial, 3);
+  breaches.frustumCulled = false;
+  breaches.renderOrder = 2;
+  group.add(breaches);
+  damagePreviews.push({ mesh: breaches, shipClass });
   return group;
 }
 
@@ -203,19 +239,62 @@ const single = placements.length === 1 ? placements[0]! : null;
 const centerX = single ? single.group.position.x : maxX / 2;
 const centerZ = single ? 0 : rowZ / 2;
 controls.target.set(centerX, single ? single.radius * 0.3 : 0, centerZ);
-const distance = single ? single.radius * 3.2 : structureTypes.length > 0 ? 700 : 520;
+const distance = (single ? single.radius * 3.2 : structureTypes.length > 0 ? 700 : 520) / Math.min(1, innerWidth / innerHeight);
 camera.position.set(centerX - distance * 0.55, distance * 0.7, centerZ + distance * 0.75);
 
 const turretVertexRows = WEAPON_TYPES.map((weapon) => `${weapon}: ${getBatchedTurretGeometry(weapon).getAttribute("position").count}`);
-document.getElementById("info")!.textContent = `LOD ${lodMode} · turret verts ${turretVertexRows.join(" | ")}`;
+const modelInfo = `LOD ${lodMode} · turret verts ${turretVertexRows.join(" | ")}`;
+updateDamagePreview();
+const classSelect = document.getElementById("ship-class") as HTMLSelectElement;
+for (const shipClass of ALL_SHIP_CLASSES) classSelect.add(new Option(shipClass, shipClass));
+classSelect.value = focusClass ?? "all";
+classSelect.addEventListener("change", () => {
+  if (classSelect.value === "all") params.delete("class");
+  else params.set("class", classSelect.value);
+  params.delete("structures"); params.delete("structure");
+  params.set("health", previewHealth.value);
+  location.search = params.toString();
+});
+const lodSelect = document.getElementById("lod") as HTMLSelectElement;
+lodSelect.value = lodMode;
+lodSelect.addEventListener("change", () => {
+  params.set("lod", lodSelect.value);
+  params.set("health", previewHealth.value);
+  location.search = params.toString();
+});
+let impactSeed = 0;
+let lastImpact = 0;
+function previewImpact(shielded: boolean): void {
+  if (!classes.length) return;
+  const index = impactSeed % classes.length;
+  const shipClass = classes[index]!;
+  const placement = placements[index]!;
+  effects.spawnDamageImpact(placement.group.position.x, 0, placement.group.position.z,
+    placement.radius, impactSeed++, 45, shielded, performance.now(), shipClass);
+}
+document.getElementById("impact")!.addEventListener("click", () => previewImpact(false));
+document.getElementById("shield-impact")!.addEventListener("click", () => previewImpact(true));
+document.getElementById("explosion")!.addEventListener("click", () => {
+  if (!classes.length) return;
+  const placement = placements[0]!;
+  effects.spawnShipDeath(placement.group.position.x, 0, placement.group.position.z,
+    teamColor.getHex(), placement.radius, 0, 0, impactSeed++, performance.now());
+});
 
 const projected = new THREE.Vector3();
-function frame(): void {
+function frame(now = performance.now()): void {
   controls.update();
+  damageTime.value = now * 0.001;
+  if ((document.getElementById("repeat-impacts") as HTMLInputElement).checked && now - lastImpact > 650) {
+    previewImpact(false);
+    lastImpact = now;
+  }
+  effects.update(now, camera);
   renderer.setSize(innerWidth, innerHeight, false);
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.render(scene, camera);
+  document.getElementById("info")!.textContent = `${renderer.info.render.calls} draws · ${renderer.info.render.triangles.toLocaleString()} triangles · ${effects.activeCount} effects\n${modelInfo}`;
   for (const placement of placements) {
     projected.copy(placement.group.position);
     projected.y += placement.radius * 0.9;
