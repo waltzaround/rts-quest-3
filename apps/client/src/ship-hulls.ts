@@ -1,7 +1,9 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { SHIPS, SHIP_TURRET_SCALES, type ShipClass, type WeaponTypeId } from "@space-rts/game-core";
+import { SHIPS, SHIP_TURRET_SCALES, type FactionId, type ShipClass, type WeaponTypeId } from "@space-rts/game-core";
 import { BARBETTE_HEIGHT, SHIP_THRUSTERS, turretDeckHeight } from "./ship-layout";
+import { buildFleetHull } from "./fleet-designs";
+import { buildFactionHull, buildFactionTurret } from "./faction-models";
 
 /**
  * Procedural low-poly hulls and turrets.
@@ -9,15 +11,15 @@ import { BARBETTE_HEIGHT, SHIP_THRUSTERS, turretDeckHeight } from "./ship-layout
  * Every ship is assembled from six geometry layers that the batched renderer
  * draws as separate instanced meshes:
  *
- * - `hull`   main body, team tinted. The only layer drawn at Far LOD, so it
- *            must carry the silhouette on its own and stay cheap.
- * - `armor`  darker team-tinted plating, decks, towers, barbettes, pods.
- *            Drawn at Medium LOD, so structural masses live here.
+ * - `hull`   satin grey structural chassis. Medium uses a simplified construction;
+ *            Far uses a separately baked, flat silhouette with open spaces.
+ * - `armor`  pale plating, command blisters, weapon foundations and pods.
+ *            Major masses survive Medium LOD; fine details are Close only.
  * - `dark`   near-black recesses, ribs, shrouds, masts, fins. Close LOD only.
  * - `accent` team-coloured glow strips and rings. Drawn even in large battles.
  * - `light`  white glow: window bands, bow stripes, hazard stripes, plaques,
  *            running lights. Close LOD only.
- * - `engine` additive exhaust cones.
+ * - `engine` legacy exhaust layer; fleet plumes use the shared thruster batch.
  *
  * Coordinates are ship-local: +Z is the bow, +Y is up, +X is starboard.
  */
@@ -94,7 +96,7 @@ export function box(size: Vec3, position: Vec3, rotation: Vec3 = [0, 0, 0]): THR
  * Its widest ring retains the original footprint; detail costs less than a
  * beveled extrusion and is baked once, shared by every instance of the class.
  */
-function loft(points: ReadonlyArray<readonly [number, number]>, rings: readonly Vec3[]): THREE.BufferGeometry {
+export function loft(points: ReadonlyArray<readonly [number, number]>, rings: readonly Vec3[]): THREE.BufferGeometry {
   let outline = [...points];
   const area = outline.reduce((sum, p, i) => {
     const next = outline[(i + 1) % outline.length]!;
@@ -127,12 +129,12 @@ function loft(points: ReadonlyArray<readonly [number, number]>, rings: readonly 
   return geometry;
 }
 
-function hullShell(points: ReadonlyArray<readonly [number, number]>, height: number, base: number, _bevel = 0): THREE.BufferGeometry {
+export function hullShell(points: ReadonlyArray<readonly [number, number]>, height: number, base: number, _bevel = 0): THREE.BufferGeometry {
   return loft(points, [[0.62, 0.94, base - height * 0.45], [1, 1, base + height * 0.38], [0.86, 0.97, base + height]]);
 }
 
 /** Six-sided armor module with a raked front and sloped flanks. */
-function armorBlock(size: Vec3, position: Vec3, rotation: Vec3 = [0, 0, 0]): THREE.BufferGeometry {
+export function armorBlock(size: Vec3, position: Vec3, rotation: Vec3 = [0, 0, 0]): THREE.BufferGeometry {
   const [w, h, d] = size;
   if (w < 1.5 || h < 0.6 || d < 2) return box(size, position, rotation);
   const outline: Array<[number, number]> = [
@@ -143,7 +145,7 @@ function armorBlock(size: Vec3, position: Vec3, rotation: Vec3 = [0, 0, 0]): THR
 }
 
 /** Painted surface mark, two triangles instead of a tiny solid box. */
-function deckMark(width: number, depth: number, position: Vec3, rotation: Vec3 = [0, 0, 0]): THREE.BufferGeometry {
+export function deckMark(width: number, depth: number, position: Vec3, rotation: Vec3 = [0, 0, 0]): THREE.BufferGeometry {
   return transformed(new THREE.PlaneGeometry(width, depth).rotateX(-Math.PI / 2), position, rotation);
 }
 
@@ -449,437 +451,57 @@ function barbetteRadius(shipClass: ShipClass, weaponTypeId: WeaponTypeId): numbe
   }
 }
 
-// ---------------------------------------------------------------------------
-// Hull builders
-// ---------------------------------------------------------------------------
+const hullGeometries = new Map<string, HullGeometrySet>();
 
-function fighterGeometry(): HullGeometrySet {
-  // Designed at 1/0.32 scale so the small craft keeps sensible detail sizes.
-  const kit = new ShipKit();
-  kit.add(
-    "hull",
-    hullShell([[0, 13], [-2.6, 6], [-2.2, -8], [0, -11], [2.2, -8], [2.6, 6]], 2.6, 0.6, 0.3),
-    hullShell([[-2, 5], [-10.8, 0.5], [-9.2, -5.2], [-2.1, -2]], 1.05, 0.1, 0.16),
-    hullShell([[2, 5], [10.8, 0.5], [9.2, -5.2], [2.1, -2]], 1.05, 0.1, 0.16),
-  );
-  kit.add(
-    "armor",
-    box([1.7, 1.3, 9], [0, 3.6, -0.5]),
-    box([2.0, 1.2, 4.2], [0, 3.7, 6]),
-    cylinder(1.0, 1.15, 1.2, [0, 4.4, 6.5], 8),
-  );
-  kit.pair("armor", (side) => armorBlock([1.4, 1.6, 5.6], [side * 1.6, 1.4, -7.4]));
-  kit.pair("armor", (side) => armorBlock([1.3, 1.0, 3.6], [side * 9.3, 1.4, -2.4]));
-  kit.add(
-    "dark",
-    transformed(new THREE.OctahedronGeometry(2.1, 0), [0, 3.9, 1.6], [0.12, 0, 0], [0.9, 0.62, 1.3]),
-    box([4.4, 0.5, 1.2], [0, 1.8, -4.6]),
-  );
-  kit.pair("dark", (side) => tube(1.05, 2.2, [side * 1.6, 1.4, -10.4], 6));
-  kit.pair("dark", (side) => box([5.2, 0.14, 0.22], [side * 5.6, 1.72, -1.4], [0, side * -0.42, 0]));
-  kit.add("accent", box([0.4, 0.26, 6.5], [0, 4.35, -1]));
-  kit.pair("accent", (side) => box([5.4, 0.3, 0.42], [side * 5.4, 1.5, -0.2], [0, side * 0.42, 0]));
-  kit.pair("accent", (side) => tube(1.1, 0.4, [side * 1.6, 1.4, -11.3], 6));
-  kit.add("light", box([2.2, 0.24, 0.7], [0, 3.32, 10.2]));
-  kit.pair("light", (side) => box([0.5, 0.4, 0.75], [side * 9.3, 1.95, -3.6]));
-  kit.pair("engine", (side) => cone(0.95, 2.8, [side * 1.6, 1.4, -12.6], 6));
-  return kit.build(0.32);
-}
-
-function bomberGeometry(): HullGeometrySet {
-  // Designed at 1/0.42 scale. Torpedo pylons sit on the forward wing roots.
-  const kit = new ShipKit();
-  kit.add(
-    "hull",
-    hullShell([[0, 16], [-4.5, 9], [-5, -9], [0, -13], [5, -9], [4.5, 9]], 3.6, 1.0, 0.42),
-    hullShell([[-3.2, 8], [-13.5, 2], [-12, -5.5], [-5, -7], [-3.8, -1]], 1.8, 0.4, 0.25),
-    hullShell([[3.2, 8], [13.5, 2], [12, -5.5], [5, -7], [3.8, -1]], 1.8, 0.4, 0.25),
-  );
-  kit.add("armor", armorBlock([3.2, 1.6, 12], [0, 5.2, 0]), armorBlock([2.8, 1.4, 3.6], [0, 6.2, 5]));
-  kit.pair("armor", (side) => armorBlock([3.6, 3.4, 13], [side * 7.6, 2.6, -3]));
-  kit.pair("armor", (side) => armorBlock([3.2, 2.0, 6], [side * 6.67, 4.6, 9.5]));
-  kit.pair("armor", (side) => armorBlock([3.6, 1.5, 3.6], [side * 6.67, 5.65, 10]));
-  kit.pair("accent", (side) => ring(1.55, 0.3, [side * 6.67, 6.2, 10]));
-  kit.add("dark", transformed(new THREE.OctahedronGeometry(2.6, 0), [0, 7.2, 6.5], [0.1, 0, 0], [0.95, 0.66, 1.25]));
-  kit.pair("dark", (side) => tube(1.65, 3.2, [side * 7.6, 1.6, -10.8], 7));
-  for (const z of [-6, -2.5, 1]) kit.pair("dark", (side) => box([3.9, 2.6, 0.36], [side * 7.6, 2.6, z]));
-  kit.add("accent", box([0.6, 0.26, 10], [0, 6.05, 0]));
-  kit.pair("accent", (side) => box([0.5, 0.3, 8], [side * 7.6, 4.45, -3]));
-  kit.add("light", box([3.0, 0.22, 0.7], [0, 4.75, 13]), box([2.6, 0.22, 0.7], [0, 4.75, 11.3]));
-  kit.pair("light", (side) => box([1.2, 0.2, 0.2], [side * 6.67, 6.45, 8.0]));
-  kit.pair("light", (side) => box([0.65, 0.45, 1.0], [side * 8.9, 4.4, -9.2]));
-  kit.hazard(0, 6.05, -4.5, 3.0, 1.2, 3);
-  kit.pair("engine", (side) => cone(1.55, 4.2, [side * 7.6, 1.2, -13.2], 7));
-  return kit.build(0.42);
-}
-
-function fabricatorGeometry(): HullGeometrySet {
-  // Industrial tug: forward manipulator arms, ribbed cargo modules, rear bridge.
-  const kit = new ShipKit();
-  kit.add(
-    "hull",
-    hullShell([[-2.1, 10], [-5, 7], [-5.5, -7], [-3.5, -11.5], [3.5, -11.5], [5.5, -7], [5, 7], [2.1, 10]], 4.5, 0.6, 0.5),
-  );
-  kit.add("armor", armorBlock([11.5, 0.9, 0.9], [0, 6.0, 7.2]));
-  kit.pair("armor", (side) => armorBlock([1.4, 1.4, 8.5], [side * 4.6, 3.8, 11], [0, side * -0.12, 0]));
-  kit.pair("armor", (side) => armorBlock([2.2, 0.8, 1.6], [side * 4.0, 3.8, 15.4]));
-  kit.pair("armor", (side) => armorBlock([1.2, 0.5, 2.0], [side * 3.4, 3.8, 16.4], [0, side * 0.5, 0]));
-  kit.module(-6.6, 3.2, -1, 3.2, 3.2, 7.5, 3);
-  kit.module(6.6, 3.2, -1, 3.2, 3.2, 7.5, 3);
-  kit.tower(0, 5.1, -7.4, 4.2, 3.2, 1.9, true);
-  kit.barbettes("fabricator");
-  kit.engines("fabricator", 1.5, { width: 9.5, height: 3.8, depth: 3.5 });
-  kit.trench(0, 5.1, 1.5, 1.6, 7, false);
-  kit.pair("accent", (side) => box([0.5, 0.3, 6.5], [side * 4.6, 4.55, 11], [0, side * -0.12, 0]));
-  kit.pair("light", (side) => box([0.6, 0.6, 0.6], [side * 4.2, 3.8, 15.6]));
-  kit.hazard(-6.6, 4.9, -1, 3.0, 1.4, 3);
-  kit.hazard(6.6, 4.9, -1, 3.0, 1.4, 3);
-  kit.bowBands(5.15, 8.4, 6, 2, 1.4);
-  kit.plaque(2.2, 5.15, 4.2, 1.8, 1.1);
-  kit.fins(-5.9, 2.4, -12.2, 2, 2.4, 2.2, 1.6);
-  kit.fins(5.9, 2.4, -12.2, 2, 2.4, 2.2, 1.6);
-  return kit.build();
-}
-
-function frigateHull(kit: ShipKit, shipClass: ShipClass, points: ReadonlyArray<readonly [number, number]>): void {
-  kit.add("hull", hullShell(points, 4.4, 0.6, 0.5));
-  kit.engines(shipClass, 1.75, { width: 12, height: 4.2, depth: 5 });
-  kit.fins(-6.6, 2.6, -14.4, 3, 2.6, 2.4, 1.7);
-  kit.fins(6.6, 2.6, -14.4, 3, 2.6, 2.4, 1.7);
-  kit.hazard(0, 4.75, -13.4, 6, 1.2, 5);
-}
-
-function frigateGeometry(): HullGeometrySet {
-  const kit = new ShipKit();
-  frigateHull(kit, "frigate", [[-2.1, 17], [-5, 13], [-6, -9], [-4, -15], [4, -15], [6, -9], [5, 13], [2.1, 17]]);
-  kit.add("armor", armorBlock([13, 1.6, 9], [0, 5.6, 8]));
-  kit.pair("armor", (side) => armorBlock([4, 2.4, 7], [side * 7.5, 3.4, -1]));
-  kit.tower(0, 5.0, -6.5, 5, 4, 2.6);
-  kit.barbettes("frigate");
-  kit.trench(0, 6.4, 8, 1.6, 7);
-  for (const z of [-3.2, -1, 1.2]) kit.pair("dark", (side) => box([4.4, 1.9, 0.34], [side * 7.5, 3.4, z]));
-  kit.pair("accent", (side) => box([0.5, 0.28, 5.5], [side * 7.5, 4.65, -1]));
-  kit.add("accent", box([0.5, 0.26, 6], [0, 5.15, 0.5]));
-  kit.prow(16.6, 11.5, 4.4, 5.0, 1.1, 5);
-  kit.plaque(-7.5, 4.65, -1, 2.0, 1.2);
-  kit.pair("light", (side) => box([0.5, 0.4, 1.0], [side * 9.3, 3.6, -1]));
-  return kit.build();
-}
-
-function flakFrigateGeometry(): HullGeometrySet {
-  const kit = new ShipKit();
-  frigateHull(kit, "flakFrigate", [[-2.5, 18], [-6, 13], [-7, -9], [-4.5, -15], [4.5, -15], [7, -9], [6, 13], [2.5, 18]]);
-  kit.add("armor", armorBlock([16, 1.6, 8.5], [0, 5.6, 6.5]));
-  kit.pair("armor", (side) => armorBlock([4.2, 2.4, 7], [side * 8, 3.4, -2]));
-  kit.tower(0, 5.0, -8.5, 5, 4, 2.6, false);
-  // Phased array radar panel behind the bridge.
-  kit.add("dark", box([4.8, 2.6, 0.5], [0, 10.4, -11.2]), cylinder(0.3, 0.4, 2.4, [0, 8.9, -11.2], 6));
-  kit.add("accent", box([4.2, 0.3, 0.3], [0, 10.4, -10.85]));
-  kit.add("light", box([0.5, 0.5, 0.5], [0, 12.0, -11.2]));
-  kit.barbettes("flakFrigate");
-  for (const z of [-4.2, -2, 0.2]) kit.pair("dark", (side) => box([4.6, 1.9, 0.34], [side * 8, 3.4, z]));
-  kit.pair("accent", (side) => box([0.5, 0.28, 5.5], [side * 8, 4.65, -2]));
-  kit.prow(17.6, 11, 5.2, 5.0, 1.1, 6);
-  kit.hazard(-8, 4.65, -2, 2.6, 1.0, 3);
-  kit.plaque(8, 4.65, -2, 2.0, 1.2);
-  kit.pair("light", (side) => box([0.5, 0.4, 1.0], [side * 10, 3.6, -2]));
-  return kit.build();
-}
-
-function torpedoFrigateGeometry(): HullGeometrySet {
-  const kit = new ShipKit();
-  frigateHull(kit, "torpedoFrigate", [[-2.1, 18], [-5, 14], [-6, -10], [-4, -16], [4, -16], [6, -10], [5, 14], [2.1, 18]]);
-  // Side launcher racks carrying the four torpedo mounts.
-  kit.pair("armor", (side) => armorBlock([4.6, 2.6, 13.5], [side * 6.4, 4.9, 5.5]));
-  kit.pair("armor", (side) => armorBlock([4.2, 2.2, 5], [side * 7.2, 3.3, -5]));
-  kit.add("armor", armorBlock([5, 1.2, 12], [0, 5.5, 5]));
-  kit.tower(0, 5.0, -9.5, 5, 4, 2.6);
-  kit.barbettes("torpedoFrigate");
-  // Torpedo tube cells on the rack fronts.
-  for (const x of [-1.2, 0, 1.2]) {
-    kit.pair("dark", (side) => box([0.9, 0.9, 0.5], [side * 6.4 + x, 4.9, 12.3]));
-  }
-  kit.pair("accent", (side) => box([4.4, 0.24, 0.3], [side * 6.4, 5.7, 12.3]));
-  for (const z of [-6.5, -4.5]) kit.pair("dark", (side) => box([4.6, 1.7, 0.34], [side * 7.2, 3.3, z]));
-  kit.add("accent", box([0.5, 0.26, 10], [0, 6.15, 5]));
-  kit.hazard(-6.4, 6.25, 5.5, 3.2, 1.2, 4);
-  kit.hazard(6.4, 6.25, 5.5, 3.2, 1.2, 4);
-  kit.prow(17.6, 12.5, 4.4, 5.0, 1.1, 5);
-  kit.plaque(0, 6.15, -1.5, 2.0, 1.2);
-  kit.pair("light", (side) => box([0.5, 0.4, 1.0], [side * 9.3, 3.5, -5]));
-  return kit.build();
-}
-
-function artilleryFrigateGeometry(): HullGeometrySet {
-  const kit = new ShipKit();
-  frigateHull(kit, "artilleryFrigate", [[-1.9, 19], [-4.5, 14], [-5.5, -9], [-3.5, -16], [3.5, -16], [5.5, -9], [4.5, 14], [1.9, 19]]);
-  // Gun cradle with recoil rails and stabiliser outriggers.
-  kit.add("armor", armorBlock([6.5, 2.2, 10], [0, 5.9, 7]), armorBlock([8.5, 3.2, 5], [0, 5.4, -13]));
-  kit.pair("armor", (side) => armorBlock([0.9, 0.9, 13], [side * 3.6, 6.3, 11]));
-  kit.pair("armor", (side) => armorBlock([2.8, 2.2, 8], [side * 7.4, 3.2, -4]));
-  kit.tower(0, 5.0, -8.5, 4.6, 3.6, 2.4);
-  kit.barbettes("artilleryFrigate");
-  for (const z of [-6.5, -4, -1.5]) kit.pair("dark", (side) => box([3.2, 1.7, 0.34], [side * 7.4, 3.2, z]));
-  kit.pair("accent", (side) => box([0.5, 0.28, 10], [side * 3.6, 6.8, 11]));
-  kit.hazard(-4.6, 5.15, 7, 2.2, 3.4, 3);
-  kit.hazard(4.6, 5.15, 7, 2.2, 3.4, 3);
-  kit.prow(18.6, 12.5, 3.9, 5.0, 1.1, 4.4);
-  kit.plaque(-7.4, 4.35, -4, 2.0, 1.2);
-  kit.add("dark", box([7.5, 0.4, 0.4], [0, 7.2, -13]), box([7.5, 0.4, 0.4], [0, 6.2, -15.3]));
-  kit.pair("light", (side) => box([0.5, 0.4, 1.0], [side * 9.0, 3.4, -4]));
-  return kit.build();
-}
-
-function destroyerHull(kit: ShipKit, shipClass: ShipClass, points: ReadonlyArray<readonly [number, number]>): void {
-  kit.add("hull", hullShell(points, 5.6, 0.8, 0.7));
-  kit.engines(shipClass, 2.2, { width: 24, height: 6, depth: 7 });
-  kit.fins(-13, 3.8, -26, 3, 4, 3.2, 2.2);
-  kit.fins(13, 3.8, -26, 3, 4, 3.2, 2.2);
-  kit.hazard(0, 6.95, -24.5, 10, 1.4, 7);
-}
-
-function destroyerGeometry(): HullGeometrySet {
-  const kit = new ShipKit();
-  destroyerHull(kit, "destroyer", [[-3.4, 30], [-8, 22], [-10, -14], [-7, -24], [7, -24], [10, -14], [8, 22], [3.4, 30]]);
-  kit.add("armor", armorBlock([18, 2.0, 12], [0, 7.4, 12]), armorBlock([4.5, 1.4, 16], [0, 7.1, -2]));
-  kit.pair("armor", (side) => armorBlock([6, 3.2, 10], [side * 11, 4.6, 2]));
-  kit.pair("armor", (side) => armorBlock([5, 2.6, 7], [side * 10, 4.2, -6]));
-  kit.tower(0, 6.4, -12.5, 9, 8, 3.4);
-  kit.module(-9.4, 3.4, 16, 2.2, 2.8, 14, 3);
-  kit.module(9.4, 3.4, 16, 2.2, 2.8, 14, 3);
-  kit.barbettes("destroyer");
-  kit.trench(0, 7.8, -2, 1.8, 13);
-  for (const z of [-1.5, 1.5, 4.5]) kit.pair("dark", (side) => box([6.4, 2.5, 0.36], [side * 11, 4.6, z]));
-  kit.pair("dark", (side) => box([5.4, 2.0, 0.36], [side * 10, 4.2, -7.5]));
-  kit.pair("accent", (side) => box([0.6, 0.3, 8], [side * 11, 6.25, 2]));
-  kit.pair("accent", (side) => box([0.6, 0.3, 5], [side * 10, 5.55, -6]));
-  kit.prow(29.6, 19, 7.2, 6.4, 1.5, 8);
-  kit.groove(0, 6.45, 18, 15);
-  kit.groove(0, 8.45, 8, 16);
-  kit.plaque(-11, 6.25, -1, 3.0, 1.6);
-  kit.hazard(11, 6.25, 6, 3.4, 1.4, 4);
-  kit.pair("light", (side) => box([0.6, 0.5, 1.4], [side * 13.5, 4.8, 2]));
-  kit.mast(-3.2, 8.4, -5, 5.5);
-  return kit.build();
-}
-
-function artilleryDestroyerGeometry(): HullGeometrySet {
-  const kit = new ShipKit();
-  destroyerHull(kit, "artilleryDestroyer", [[-3.1, 29], [-7.5, 21], [-9.5, -13], [-6.5, -23], [6.5, -23], [9.5, -13], [7.5, 21], [3.1, 29]]);
-  // Twin siege gun cradle deck with bracing beams and a heavy aft counter-mass.
-  kit.add("armor", armorBlock([16, 2.4, 12], [0, 7.6, 12]), armorBlock([14, 5, 8], [0, 6.0, -14]));
-  kit.pair("armor", (side) => armorBlock([1.1, 1.1, 18], [side * 9.2, 7.9, 12]));
-  kit.pair("armor", (side) => armorBlock([4, 3, 9], [side * 12, 4, -5]));
-  kit.tower(0, 8.5, -13.5, 7, 5, 2.4);
-  kit.module(-9, 3.4, 15, 2.2, 2.8, 14, 3);
-  kit.module(9, 3.4, 15, 2.2, 2.8, 14, 3);
-  kit.barbettes("artilleryDestroyer");
-  for (const z of [-17, -14, -11]) kit.add("dark", box([14.4, 3.9, 0.4], [0, 6.0, z]));
-  for (const z of [-8, -5, -2]) kit.pair("dark", (side) => box([4.4, 2.3, 0.36], [side * 12, 4, z]));
-  kit.pair("accent", (side) => box([0.6, 0.3, 14], [side * 9.2, 8.55, 12]));
-  kit.add("accent", box([0.7, 0.3, 12], [0, 6.5, 0]));
-  kit.pair("dark", (side) => box([1.6, 1.6, 6], [side * 3.4, 7.6, 3]));
-  kit.hazard(-9.2, 8.55, 5, 1.6, 2.6, 3);
-  kit.hazard(9.2, 8.55, 5, 1.6, 2.6, 3);
-  kit.hazard(0, 8.9, -17.5, 10, 1.4, 6);
-  kit.prow(28.6, 18.5, 6.6, 6.4, 1.5, 7.5);
-  kit.plaque(-12, 5.6, -5, 2.6, 1.6);
-  kit.pair("light", (side) => box([0.6, 0.5, 1.4], [side * 14.2, 4.5, -5]));
-  kit.mast(3.4, 8.5, -10.5, 5.5);
-  return kit.build();
-}
-
-function cruiserHull(kit: ShipKit, shipClass: ShipClass, points: ReadonlyArray<readonly [number, number]>): void {
-  kit.add("hull", hullShell(points, 7, 1, 0.8));
-  kit.engines(shipClass, 2.7, { width: 30, height: 7.5, depth: 9 });
-  kit.fins(-16.5, 4.5, -37, 4, 5, 4, 2.6);
-  kit.fins(16.5, 4.5, -37, 4, 5, 4, 2.6);
-  kit.hazard(0, 8.3, -35.5, 14, 1.6, 8);
-}
-
-function cruiserGeometry(): HullGeometrySet {
-  const kit = new ShipKit();
-  cruiserHull(kit, "cruiser", [[-5.0, 36], [-12, 28], [-13, -22], [-9, -34], [9, -34], [13, -22], [12, 28], [5.0, 36]]);
-  kit.add("hull", hullShell([[-3.4, 28], [-8, 22], [-9, -22], [-6, -30], [6, -30], [9, -22], [8, 22], [3.4, 28]], 1.6, 8, 0.4));
-  // Forward gun deck, raised midship spine with a lit trench, long broadside
-  // sponsons, aft torpedo deck, and a tall bridge tower.
-  kit.add(
-    "armor",
-    armorBlock([24, 2.4, 14], [0, 9.2, 20]),
-    armorBlock([10, 2.6, 22], [0, 9.3, 2]),
-    armorBlock([22, 2.2, 8], [0, 9.1, -12]),
-    armorBlock([18, 1.6, 6], [0, 8.6, -18]),
-  );
-  kit.pair("armor", (side) => armorBlock([8, 4, 30], [side * 16, 6, 4]));
-  kit.module(-8.5, 9.6, 8, 5, 3, 9, 4);
-  kit.module(8.5, 9.6, 8, 5, 3, 9, 4);
-  kit.tower(0, 8.0, -26, 12, 7, 4);
-  kit.module(-12.6, 4.6, 18, 2.6, 3.2, 20, 3);
-  kit.module(12.6, 4.6, 18, 2.6, 3.2, 20, 3);
-  kit.barbettes("cruiser");
-  kit.trench(0, 10.6, 2, 2.4, 19);
-  for (const z of [-8, -4, 12, 16]) kit.pair("dark", (side) => box([8.4, 3.2, 0.4], [side * 16, 6, z]));
-  kit.pair("accent", (side) => box([0.7, 0.3, 26], [side * 16, 8.15, 4]));
-  kit.pair("accent", (side) => box([0.7, 0.3, 6], [side * 7, 10.35, -12]));
-  kit.hangar(-7, 9.1, -8.0, 4.5, 1.6);
-  kit.hangar(7, 9.1, -8.0, 4.5, 1.6);
-  kit.prow(35.6, 27.5, 10.6, 8.0, 2.0, 12);
-  kit.groove(0, 10.45, 16, 20);
-  kit.plaque(-16, 8.15, -6, 4, 2.2);
-  kit.hazard(16, 8.15, -6, 4, 1.8, 5);
-  kit.hazard(-8.5, 11.2, 8, 3.6, 1.4, 4);
-  for (const z of [-10, -2, 6, 14]) kit.pair("light", (side) => box([0.5, 0.36, 1.2], [side * 19.6, 8.15, z]));
-  kit.mast(-4.5, 9.4, -20, 7);
-  return kit.build();
-}
-
-function artilleryCruiserGeometry(): HullGeometrySet {
-  const kit = new ShipKit();
-  cruiserHull(kit, "artilleryCruiser", [[-4.6, 38], [-11, 30], [-13, -24], [-9, -36], [9, -36], [13, -24], [11, 30], [4.6, 38]]);
-  // Twin strategic guns on a braced gantry deck, heavy recoil mass aft.
-  kit.add(
-    "armor",
-    armorBlock([26, 3, 18], [0, 9.5, 20]),
-    armorBlock([22, 6, 12], [0, 7, -16]),
-    armorBlock([8, 2.2, 22], [0, 9.1, 0]),
-  );
-  kit.pair("armor", (side) => armorBlock([1.4, 1.4, 26], [side * 13.8, 9.8, 16]));
-  kit.pair("armor", (side) => armorBlock([1.4, 1.4, 26], [side * 4.6, 12.2, 14]));
-  kit.pair("armor", (side) => armorBlock([5, 4, 14], [side * 16, 5, -4]));
-  kit.tower(0, 10.0, -20, 9, 6, 3);
-  kit.module(-12.2, 4.6, 16, 2.6, 3.2, 24, 4);
-  kit.module(12.2, 4.6, 16, 2.6, 3.2, 24, 4);
-  kit.barbettes("artilleryCruiser");
-  for (const z of [-20, -16, -12]) kit.add("dark", box([22.4, 4.8, 0.44], [0, 7, z]));
-  for (const z of [-9, -5, -1, 3]) kit.pair("dark", (side) => box([5.4, 3.2, 0.4], [side * 16, 5, z]));
-  kit.pair("dark", (side) => box([2, 2, 8], [side * 9, 12.3, 12]));
-  kit.pair("accent", (side) => box([0.7, 0.3, 22], [side * 13.8, 10.6, 16]));
-  kit.add("accent", box([0.8, 0.3, 18], [0, 10.35, 0]));
-  kit.hazard(-13.8, 10.7, 4, 1.8, 3, 3);
-  kit.hazard(13.8, 10.7, 4, 1.8, 3, 3);
-  kit.hazard(0, 10.1, -21.5, 16, 1.6, 8);
-  kit.prow(37.6, 29.5, 9.6, 8.0, 2.0, 11);
-  kit.plaque(-16, 7.1, -4, 3.6, 2.2);
-  kit.plaque(0, 10.25, 6, 3.6, 2.2);
-  kit.pair("light", (side) => box([0.6, 0.5, 1.6], [side * 18.7, 5.6, -4]));
-  kit.mast(4, 11.8, -13, 7);
-  return kit.build();
-}
-
-function carrierGeometry(): HullGeometrySet {
-  const kit = new ShipKit();
-  // Central keel with a lit flight trench, twin side decks carrying the
-  // weapons, hangar mouths on the bow faces, and an offset aft island.
-  kit.add("hull", hullShell([[-3.4, 40], [-8, 32], [-9, -30], [-6, -42], [6, -42], [9, -30], [8, 32], [3.4, 40]], 8, 1, 0.8));
-  kit.pair("hull", (side) => hullShell(
-    side < 0
-      ? [[-9, 30], [-32, 26], [-34, -26], [-24, -38], [-9, -30]]
-      : [[9, 30], [32, 26], [34, -26], [24, -38], [9, -30]],
-    5,
-    1.5,
-    0.6,
-  ));
-  kit.engines("carrier", 2.4, { width: 40, height: 8, depth: 8 });
-  kit.fins(-21, 5, -42, 4, 5.5, 4, 2.6);
-  kit.fins(21, 5, -42, 4, 5.5, 4, 2.6);
-  kit.pair("armor", (side) => armorBlock([22, 0.9, 54], [side * 21.5, 6.95, -2]));
-  kit.pair("armor", (side) => armorBlock([6, 3.2, 8], [side * 30, 5.2, 24]));
-  kit.add("armor", armorBlock([12, 1.6, 60], [0, 9.6, -2]));
-  kit.tower(0, 10.4, -28, 10, 9, 4);
-  kit.tower(0, 10.4, -12, 5, 4, 2, false);
-  kit.barbettes("carrier");
-  kit.trench(0, 10.4, 4, 5, 46);
-  kit.hangar(-21, 4.4, 27.2, 12, 3.2);
-  kit.hangar(21, 4.4, 27.2, 12, 3.2);
-  for (const z of [-24, -12, 0, 12, 24]) kit.pair("light", (side) => box([0.5, 0.36, 1.6], [side * 31.4, 7.5, z]));
-  kit.pair("dark", (side) => box([0.22, 0.14, 50], [side * 30.4, 7.45, -2]));
-  kit.pair("dark", (side) => box([0.22, 0.14, 50], [side * 12.4, 7.45, -2]));
-  kit.pair("accent", (side) => box([0.6, 0.3, 46], [side * 27, 7.5, -4]));
-  kit.hazard(-21, 7.5, 22, 8, 1.6, 6);
-  kit.hazard(21, 7.5, 22, 8, 1.6, 6);
-  kit.hazard(0, 9.1, -40.5, 18, 1.6, 9);
-  kit.prow(39.6, 31, 7.2, 9.0, 2.0, 8);
-  kit.plaque(-21, 7.5, -30, 4.5, 2.4);
-  kit.plaque(21, 7.5, -30, 4.5, 2.4);
-  kit.mast(4, 14.4, -23, 8);
-  return kit.build();
-}
-
-function battleshipGeometry(): HullGeometrySet {
-  const kit = new ShipKit();
-  // Tiered fore decks with superfiring rail barbettes, broadside sponsons,
-  // twin-tower midship citadel, and an aft beam deck.
-  kit.add(
-    "hull",
-    hullShell([[-5.9, 56], [-14, 40], [-18, -28], [-12, -50], [12, -50], [18, -28], [14, 40], [5.9, 56]], 9, 1, 1),
-    hullShell([[-4.2, 42], [-10, 30], [-11, -30], [-8, -42], [8, -42], [11, -30], [10, 30], [4.2, 42]], 2.4, 10, 0.6),
-  );
-  kit.engines("battleship", 2.9, { width: 42, height: 9, depth: 10 });
-  kit.fins(-22.5, 5.5, -50, 4, 6, 4.5, 2.8);
-  kit.fins(22.5, 5.5, -50, 4, 6, 4.5, 2.8);
-  kit.add(
-    "armor",
-    armorBlock([14, 2.4, 14], [0, 11.2, 34]),
-    armorBlock([22, 3.0, 14], [0, 11.5, 21]),
-    armorBlock([30, 3.6, 14], [0, 11.8, 6]),
-    armorBlock([32, 2.6, 16], [0, 11.3, -26]),
-  );
-  kit.pair("armor", (side) => armorBlock([8, 4, 20], [side * 16, 7, -6]));
-  kit.pair("armor", (side) => armorBlock([8, 3, 10], [side * 18, 7.5, -22]));
-  kit.tower(0, 13.6, -6, 12, 10, 4);
-  kit.tower(0, 12.6, -37, 8, 6, 3);
-  kit.module(-17.2, 5.5, 18, 3, 4, 36, 5);
-  kit.module(17.2, 5.5, 18, 3, 4, 36, 5);
-  kit.module(-14.5, 11.3, 22, 5, 2.6, 10, 3);
-  kit.module(14.5, 11.3, 22, 5, 2.6, 10, 3);
-  kit.barbettes("battleship");
-  kit.trench(0, 13.6, 6, 3, 10);
-  for (const z of [-13, -8, -3, 2]) kit.pair("dark", (side) => box([8.4, 3.2, 0.44], [side * 16, 7, z]));
-  for (const z of [-25, -20]) kit.pair("dark", (side) => box([8.4, 2.4, 0.44], [side * 18, 7.5, z]));
-  kit.pair("accent", (side) => box([0.7, 0.3, 16], [side * 16, 9.15, -6]));
-  kit.add(
-    "accent",
-    box([12, 0.3, 0.6], [0, 12.45, 27.2]),
-    box([20, 0.3, 0.6], [0, 13.05, 13.2]),
-    box([28, 0.3, 0.6], [0, 13.65, -1.2]),
-  );
-  kit.prow(55.6, 41.5, 12.2, 10.0, 2.6, 14);
-  kit.groove(0, 10.05, 40, 24);
-  kit.groove(0, 12.45, 30, 12);
-  kit.plaque(-16, 9.15, 0, 4.5, 2.4);
-  kit.hazard(16, 9.15, 0, 4.5, 2, 5);
-  kit.hazard(0, 12.65, -33, 24, 1.8, 10);
-  for (const z of [-30, -14, 2, 18]) kit.pair("light", (side) => box([0.6, 0.5, 1.6], [side * 18.4, 10.1, z]));
-  kit.mast(-5, 20.4, -8, 9);
-  return kit.build();
-}
-
-const hullGeometries = new Map<ShipClass, HullGeometrySet>();
-
-export function getShipHullGeometries(shipClass: ShipClass): HullGeometrySet {
-  const cached = hullGeometries.get(shipClass);
+export function getShipHullGeometries(shipClass: ShipClass, faction: FactionId = "industrial"): HullGeometrySet {
+  const key = `${faction}:${shipClass}`;
+  const cached = hullGeometries.get(key);
   if (cached) return cached;
-  const geometry = buildHull(shipClass);
-  hullGeometries.set(shipClass, geometry);
+  if (faction !== "industrial") {
+    const geometry = buildFactionHull(shipClass, faction);
+    hullGeometries.set(key, geometry);
+    return geometry;
+  }
+  const geometry = buildFleetHull(shipClass);
+  // Bridge any gap between an unchanged weapon origin and the newly sculpted
+  // deck. Do this once at construction time, never during rendering.
+  if (shipClass !== "fighter") {
+    const surfaces = [new THREE.Mesh(geometry.hull), new THREE.Mesh(geometry.armor)];
+    const ray = new THREE.Raycaster();
+    const supports: THREE.BufferGeometry[] = [];
+    const mediumMounts: THREE.BufferGeometry[] = [];
+    for (const hp of SHIPS[shipClass].hardpoints) {
+      const base = turretDeckHeight(shipClass, hp.localX, hp.localZ, hp.weaponTypeId) - BARBETTE_HEIGHT;
+      ray.set(new THREE.Vector3(hp.localX, base - 0.01, hp.localZ), new THREE.Vector3(0, -1, 0));
+      const hit = ray.intersectObjects(surfaces)[0];
+      const mediumHeight = BARBETTE_HEIGHT + (hit?.distance ?? 0);
+      const mediumRadius = SHIP_TURRET_SCALES[shipClass] * (hp.weaponTypeId === "pointDefense" ? 1.8 : 2.5);
+      mediumMounts.push(cylinder(mediumRadius * 0.85, mediumRadius, mediumHeight,
+        [hp.localX, base + BARBETTE_HEIGHT - mediumHeight / 2, hp.localZ], 4, true));
+      if (!hit || hit.distance < 0.3) continue;
+      const height = base - hit.point.y + 0.2;
+      const radius = SHIP_TURRET_SCALES[shipClass] * (hp.weaponTypeId === "pointDefense" ? 1.8 : 2.5);
+      supports.push(cylinder(radius * 0.85, radius * 1.2, height, [hp.localX, base - height / 2, hp.localZ], 6));
+    }
+    surfaces.forEach(surface => (surface.material as THREE.Material).dispose());
+    geometry.hull.userData.medium = merge([geometry.hull.userData.medium as THREE.BufferGeometry, ...mediumMounts]);
+    if (supports.length) {
+      const userData = geometry.hull.userData;
+      geometry.hull = merge([geometry.hull, ...supports]);
+      geometry.hull.userData = userData;
+    }
+  }
+  hullGeometries.set(key, geometry);
   return geometry;
 }
 
-function buildHull(shipClass: ShipClass): HullGeometrySet {
-  switch (shipClass) {
-    case "fighter": return fighterGeometry();
-    case "bomber": return bomberGeometry();
-    case "fabricator": return fabricatorGeometry();
-    case "frigate": return frigateGeometry();
-    case "flakFrigate": return flakFrigateGeometry();
-    case "torpedoFrigate": return torpedoFrigateGeometry();
-    case "artilleryFrigate": return artilleryFrigateGeometry();
-    case "destroyer": return destroyerGeometry();
-    case "artilleryDestroyer": return artilleryDestroyerGeometry();
-    case "cruiser": return cruiserGeometry();
-    case "artilleryCruiser": return artilleryCruiserGeometry();
-    case "carrier": return carrierGeometry();
-    case "battleship": return battleshipGeometry();
-  }
+/** Flat role silhouette for tiny ships and large-battle LOD, generated once. */
+export function getShipSilhouetteGeometry(shipClass: ShipClass, faction: FactionId = "industrial"): THREE.BufferGeometry {
+  return getShipHullGeometries(shipClass, faction).hull.userData.silhouette as THREE.BufferGeometry;
+}
+
+export function getShipMediumGeometry(shipClass: ShipClass, layer: "hull" | "armor", faction: FactionId = "industrial"): THREE.BufferGeometry {
+  return getShipHullGeometries(shipClass, faction)[layer].userData.medium as THREE.BufferGeometry;
 }
 
 // ---------------------------------------------------------------------------
@@ -891,7 +513,7 @@ function turretBase(radius: number, tall: boolean): THREE.BufferGeometry {
   const baseHeight = tall ? 0.7 : 0.5;
   return merge([
     cylinder(radius * 0.88, radius, baseHeight, [0, baseHeight / 2, 0], 8),
-    box([radius * 1.45, 1.2, radius * 1.6], [0, baseHeight + 0.6, -radius * 0.12]),
+    armorBlock([radius * 1.45, 1.2, radius * 1.6], [0, baseHeight + 0.6, -radius * 0.12]),
   ]);
 }
 
@@ -1041,11 +663,17 @@ function applyVertexShade(geometry: THREE.BufferGeometry, shade: number): THREE.
   return geometry;
 }
 
-const batchedTurretGeometries = new Map<WeaponTypeId, THREE.BufferGeometry>();
+const batchedTurretGeometries = new Map<string, THREE.BufferGeometry>();
 
-export function getBatchedTurretGeometry(weaponTypeId: WeaponTypeId): THREE.BufferGeometry {
-  const cached = batchedTurretGeometries.get(weaponTypeId);
+export function getBatchedTurretGeometry(weaponTypeId: WeaponTypeId, faction: FactionId = "industrial"): THREE.BufferGeometry {
+  const key = `${faction}:${weaponTypeId}`;
+  const cached = batchedTurretGeometries.get(key);
   if (cached) return cached;
+  if (faction !== "industrial") {
+    const geometry = buildFactionTurret(weaponTypeId, faction);
+    batchedTurretGeometries.set(key, geometry);
+    return geometry;
+  }
   const parts = makeTurretGeometry("frigate", weaponTypeId);
   const geometry = merge([
     applyVertexShade(parts.mount, 0.4),
@@ -1053,6 +681,6 @@ export function getBatchedTurretGeometry(weaponTypeId: WeaponTypeId): THREE.Buff
     applyVertexShade(parts.dark, 0.18),
     applyVertexShade(parts.accent, 1),
   ]);
-  batchedTurretGeometries.set(weaponTypeId, geometry);
+  batchedTurretGeometries.set(key, geometry);
   return geometry;
 }

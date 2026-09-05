@@ -3,6 +3,7 @@ import type { Vec2 } from "@space-rts/shared";
 export type PlayerId = string;
 export type TeamId = number;
 export type EntityId = number;
+export type FactionId = "industrial" | "brood" | "concord";
 export type ShipClass =
   | "fighter"
   | "fabricator"
@@ -31,6 +32,8 @@ export type WeaponTypeId =
 export type ArmorType = "light" | "plated" | "heavy" | "fortified";
 export type DamageProfile = "rapid" | "flak" | "plasma" | "ordnance" | "penetrating" | "siege";
 export type StructureType =
+  | "creepNode"
+  | "pylon"
   | "commandCore"
   | "extractor"
   | "deepCoreExtractor"
@@ -69,6 +72,15 @@ export interface AiCommanderSettings {
   personality: AiPersonality;
 }
 
+/** Scouted intelligence and ongoing orders; serialized so AI survives replay/reconnect. */
+export interface AiPlanState {
+  knownStructures: Array<{ id: EntityId; type: StructureType; x: number; z: number }>;
+  searchIndex: number;
+  recoveringShipIds: EntityId[];
+  constructionWatch?: { key: string; progress: number; lastProgressTick: number };
+  blockedSites?: Array<{ x: number; z: number; untilTick: number }>;
+}
+
 export interface EconomyState {
   alloy: number;
   energy: number;
@@ -83,6 +95,7 @@ export interface EconomyState {
 
 export interface PlayerState {
   id: PlayerId;
+  faction: FactionId;
   name: string;
   teamId: TeamId;
   color: number;
@@ -275,6 +288,11 @@ export type EconomyCommand =
       structureId: EntityId;
     })
   | (EconomyCommandBase & {
+      type: "setWarpPoint";
+      structureId: EntityId;
+      position: Vec2;
+    })
+  | (EconomyCommandBase & {
       type: "setRallyPoint";
       structureId: EntityId;
       position: Vec2;
@@ -294,6 +312,9 @@ export type CommandResult =
 
 export interface ShipState {
   id: EntityId;
+  faction?: FactionId;
+  broodNestId?: EntityId;
+  lastDamageTick?: number;
   ownerPlayerId: PlayerId;
   teamId: TeamId;
   class: ShipClass;
@@ -384,6 +405,9 @@ export interface StructureState {
   productionQueue: ProductionQueueItem[];
   repeatProduction: boolean;
   rallyPoint: Vec2;
+  warpPoint?: Vec2;
+  broodClass?: ShipClass;
+  broodProgress?: number;
   constructionSequence?: number;
   upgradeSourceType?: StructureType;
   upgradeSourceHealth?: number;
@@ -410,7 +434,7 @@ export type SimulationEvent =
   | { type: "victory"; tick: number; winnerTeamId: TeamId };
 
 export interface SimulationState {
-  version: 9;
+  version: 11;
   seed: number;
   mapPreset?: "orbital-ring" | "crossfire" | "open-expanse" | "asteroid-belt" | "spiral-arms" | "shattered-core" | "amazon-tunnel" | "core-rush" | "star-fortress";
   tick: number;
@@ -424,10 +448,12 @@ export interface SimulationState {
   resourceNodes: ResourceNodeState[];
   obstacles: ObstacleState[];
   visibility: TeamVisibilityState[];
+  territories: TerritoryFieldState[];
   projectiles: ProjectileState[];
   commandQueue: GameCommand[];
   aiPlayerIds: PlayerId[];
   aiCommanders: Record<PlayerId, AiCommanderSettings>;
+  aiPlans?: Record<PlayerId, AiPlanState>;
   status: "playing" | "finished";
   winnerTeamId: TeamId | null;
   checksum: number;
@@ -435,8 +461,21 @@ export interface SimulationState {
 
 export type PlayerViewRelationship = "self" | "ally" | "hostile" | "omniscient";
 
+/** Creep can outlive its source while receding; pylon fields vanish with their source. */
+export interface TerritoryFieldState {
+  id: EntityId;
+  ownerPlayerId: PlayerId;
+  teamId: TeamId;
+  kind: "creep" | "pylon";
+  x: number;
+  z: number;
+  radius: number;
+  maxRadius: number;
+}
+
 export interface PlayerViewPlayerState {
   id: PlayerId;
+  faction: FactionId;
   name: string;
   teamId: TeamId;
   color: number;
@@ -461,6 +500,9 @@ export interface PlayerViewTurretState {
 
 export interface PlayerViewShipState {
   id: EntityId;
+  faction?: FactionId;
+  broodNestId?: EntityId;
+  lastDamageTick?: number;
   ownerPlayerId: PlayerId;
   teamId: TeamId;
   relationship: PlayerViewRelationship;
@@ -497,6 +539,9 @@ export interface PlayerViewStructureState {
   productionQueue: ProductionQueueItem[];
   repeatProduction: boolean;
   rallyPoint: Vec2 | null;
+  warpPoint?: Vec2;
+  broodClass?: ShipClass;
+  broodProgress?: number;
   revealedUntilTick?: number;
 }
 
@@ -524,7 +569,8 @@ export interface PlayerViewProjectileState {
 
 export interface PlayerViewState {
   version: 1;
-  simulationVersion: 9;
+  simulationVersion: 11;
+  territories: TerritoryFieldState[];
   tick: number;
   viewerPlayerId: PlayerId;
   viewerTeamId: TeamId;
@@ -543,7 +589,8 @@ export interface PlayerViewState {
 
 export interface TeamViewState {
   version: 1;
-  simulationVersion: 9;
+  simulationVersion: 11;
+  territories: TerritoryFieldState[];
   tick: number;
   viewerPlayerId: null;
   viewerTeamId: TeamId;
@@ -562,7 +609,8 @@ export interface TeamViewState {
 
 export interface OmniscientViewState {
   version: 1;
-  simulationVersion: 9;
+  simulationVersion: 11;
+  territories: TerritoryFieldState[];
   tick: number;
   players: PlayerViewPlayerState[];
   teams: TeamState[];

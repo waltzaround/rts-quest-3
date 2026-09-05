@@ -1,0 +1,12 @@
+{"completed":1,"total":12,"id":"orbital-1729-industrial-vs-brood-1","winner":"timeout","seconds":1800,"wallSeconds":101.202237458,"shipsProduced":[769,475],"coreHull":[1,1]}
+{"completed":2,"total":12,"id":"orbital-1729-industrial-vs-brood-2","winner":"timeout","seconds":1800,"wallSeconds":96.35215445799999,"shipsProduced":[485,843],"coreHull":[1,1]}
+{"completed":3,"total":12,"id":"orbital-1729-industrial-vs-concord-1","winner":"industrial","seconds":480.05,"wallSeconds":3.932828790999978,"shipsProduced":[105,17],"coreHull":[1,0]}
+{"completed":4,"total":12,"id":"orbital-1729-industrial-vs-concord-2","winner":"industrial","seconds":805.7,"wallSeconds":6.402509832999989,"shipsProduced":[55,118],"coreHull":[0,1]}
+{"completed":5,"total":12,"id":"orbital-1729-brood-vs-concord-1","winner":"timeout","seconds":1800,"wallSeconds":47.3935385,"shipsProduced":[861,389],"coreHull":[1,1]}
+{"completed":6,"total":12,"id":"orbital-1729-brood-vs-concord-2","winner":"concord","seconds":529,"wallSeconds":4.884045042000013,"shipsProduced":[48,114],"coreHull":[1,0]}
+{"completed":7,"total":12,"id":"orbital-7384-industrial-vs-brood-1","winner":"timeout","seconds":1800,"wallSeconds":64.327868333,"shipsProduced":[706,528],"coreHull":[1,1]}
+{"completed":8,"total":12,"id":"orbital-7384-industrial-vs-brood-2","winner":"timeout","seconds":1800,"wallSeconds":61.61659020799998,"shipsProduced":[601,657],"coreHull":[1,1]}
+{"completed":9,"total":12,"id":"orbital-7384-industrial-vs-concord-1","winner":"industrial","seconds":374.35,"wallSeconds":3.2102807499999764,"shipsProduced":[81,12],"coreHull":[1,0]}
+{"completed":10,"total":12,"id":"orbital-7384-industrial-vs-concord-2","winner":"timeout","seconds":1800,"wallSeconds":47.690511958000016,"shipsProduced":[308,709],"coreHull":[1,1]}
+{"completed":11,"total":12,"id":"orbital-7384-brood-vs-concord-1","winner":"timeout","seconds":1800,"wallSeconds":49.91859066599997,"shipsProduced":[987,326],"coreHull":[1,1]}
+{"completed":12,"total":12,"id":"orbital-7384-brood-vs-concord-2","winner":"timeout","seconds":1800,"wallSeconds":33.753075167000006,"shipsProduced":[306,529],"coreHull":[1,1]}

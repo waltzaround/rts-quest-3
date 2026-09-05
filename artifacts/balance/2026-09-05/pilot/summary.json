@@ -1,0 +1,281 @@
+{
+  "sourceHash": "cd1e840ee186b0f82e0ebf481696e8f2fc6836f381943116419fdf32e3ff98c6",
+  "backend": "box3d-wasm",
+  "crossFactionGames": 6,
+  "mirrorGames": 0,
+  "outcomes": {
+    "timeout": 4,
+    "victory": 2
+  },
+  "decisiveMedianSeconds": 504.525,
+  "decisiveRangeSeconds": [
+    480.05,
+    529
+  ],
+  "firstContactMedianSeconds": 62.05,
+  "noContactGames": 0,
+  "victoriesBySlot": {
+    "slot-1": 2
+  },
+  "simulatedMinutes": 56.8175,
+  "wallSeconds": 35.320978917999994,
+  "matchups": [
+    {
+      "profile": "all",
+      "pair": "brood vs concord",
+      "games": 2,
+      "wins": {
+        "brood": 0,
+        "concord": 1
+      },
+      "timeouts": 1,
+      "mutualCoreLoss": 0,
+      "medianDecisiveSeconds": 529
+    },
+    {
+      "profile": "all",
+      "pair": "brood vs industrial",
+      "games": 2,
+      "wins": {
+        "brood": 0,
+        "industrial": 0
+      },
+      "timeouts": 2,
+      "mutualCoreLoss": 0,
+      "medianDecisiveSeconds": null
+    },
+    {
+      "profile": "all",
+      "pair": "concord vs industrial",
+      "games": 2,
+      "wins": {
+        "concord": 0,
+        "industrial": 1
+      },
+      "timeouts": 1,
+      "mutualCoreLoss": 0,
+      "medianDecisiveSeconds": 480.05
+    },
+    {
+      "profile": "orbital",
+      "pair": "brood vs concord",
+      "games": 2,
+      "wins": {
+        "brood": 0,
+        "concord": 1
+      },
+      "timeouts": 1,
+      "mutualCoreLoss": 0,
+      "medianDecisiveSeconds": 529
+    },
+    {
+      "profile": "orbital",
+      "pair": "brood vs industrial",
+      "games": 2,
+      "wins": {
+        "brood": 0,
+        "industrial": 0
+      },
+      "timeouts": 2,
+      "mutualCoreLoss": 0,
+      "medianDecisiveSeconds": null
+    },
+    {
+      "profile": "orbital",
+      "pair": "concord vs industrial",
+      "games": 2,
+      "wins": {
+        "concord": 0,
+        "industrial": 1
+      },
+      "timeouts": 1,
+      "mutualCoreLoss": 0,
+      "medianDecisiveSeconds": 480.05
+    }
+  ],
+  "factions": {
+    "industrial": {
+      "appearances": 4,
+      "wins": 1,
+      "losses": 0,
+      "timeouts": 3,
+      "producedByClass": {
+        "fabricator": 6,
+        "bomber": 125,
+        "frigate": 24,
+        "fighter": 250,
+        "torpedoFrigate": 3,
+        "destroyer": 9,
+        "flakFrigate": 11,
+        "cruiser": 4,
+        "artilleryFrigate": 1,
+        "artilleryDestroyer": 1
+      },
+      "lostByClass": {
+        "bomber": 87,
+        "fighter": 172,
+        "frigate": 16,
+        "torpedoFrigate": 2,
+        "destroyer": 1,
+        "flakFrigate": 4,
+        "fabricator": 1
+      },
+      "meanProduced": 108.5,
+      "meanLost": 70.75,
+      "medianFirstCombatSeconds": 48.425,
+      "medianFirstBuilderSeconds": 13.5,
+      "neverBuiltMobileBuilder": 0,
+      "medianFirstTerritoryNodeSeconds": null,
+      "neverBuiltTerritoryNode": 4,
+      "meanSupplyEfficiency": 0.5139891329780084,
+      "fractionSupplyBelow90Percent": 0.8004385964912281,
+      "fractionFightingInOwnField": 0.0,
+      "fractionReadyBlockedYardTime": 0.0,
+      "fractionNestsAtCap": null,
+      "fractionNestsUncovered": null,
+      "meanFinalCombatShips": 36.5,
+      "meanPeakCombatShips": 44.5,
+      "meanAlloySpent": 36834.48399756081,
+      "meanEnergySpent": 47208.09350898781,
+      "checkpointCombatShips": {
+        "60": {
+          "mean": 2.5,
+          "median": 2.5,
+          "n": 4
+        },
+        "180": {
+          "mean": 19,
+          "median": 20.0,
+          "n": 4
+        },
+        "300": {
+          "mean": 23.5,
+          "median": 27.0,
+          "n": 4
+        },
+        "600": {
+          "mean": 28.666666666666668,
+          "median": 29,
+          "n": 3
+        }
+      }
+    },
+    "brood": {
+      "appearances": 4,
+      "wins": 0,
+      "losses": 1,
+      "timeouts": 3,
+      "producedByClass": {
+        "fighter": 481,
+        "fabricator": 10,
+        "destroyer": 14,
+        "bomber": 32
+      },
+      "lostByClass": {
+        "fighter": 402,
+        "fabricator": 4,
+        "destroyer": 9,
+        "bomber": 22
+      },
+      "meanProduced": 134.25,
+      "meanLost": 109.25,
+      "medianFirstCombatSeconds": 5.6,
+      "medianFirstBuilderSeconds": 121.0,
+      "neverBuiltMobileBuilder": 0,
+      "medianFirstTerritoryNodeSeconds": 68.0,
+      "neverBuiltTerritoryNode": 0,
+      "meanSupplyEfficiency": 0.9598541698752827,
+      "fractionSupplyBelow90Percent": 0.13396307428080723,
+      "fractionFightingInOwnField": 0.15546076240774595,
+      "fractionReadyBlockedYardTime": 0.0,
+      "fractionNestsAtCap": 0.5638018824255516,
+      "fractionNestsUncovered": 0.0,
+      "meanFinalCombatShips": 23.5,
+      "meanPeakCombatShips": 28.75,
+      "meanAlloySpent": 20701.215106568252,
+      "meanEnergySpent": 57548.5786364819,
+      "checkpointCombatShips": {
+        "60": {
+          "mean": 12,
+          "median": 12.0,
+          "n": 4
+        },
+        "180": {
+          "mean": 10.75,
+          "median": 11.0,
+          "n": 4
+        },
+        "300": {
+          "mean": 11.75,
+          "median": 12.0,
+          "n": 4
+        },
+        "600": {
+          "mean": 31.333333333333332,
+          "median": 32,
+          "n": 3
+        }
+      }
+    },
+    "concord": {
+      "appearances": 4,
+      "wins": 1,
+      "losses": 1,
+      "timeouts": 2,
+      "producedByClass": {
+        "fabricator": 7,
+        "frigate": 41,
+        "fighter": 103,
+        "torpedoFrigate": 9,
+        "destroyer": 12
+      },
+      "lostByClass": {
+        "fighter": 77,
+        "frigate": 24,
+        "fabricator": 5,
+        "torpedoFrigate": 4,
+        "destroyer": 4
+      },
+      "meanProduced": 43.0,
+      "meanLost": 28.5,
+      "medianFirstCombatSeconds": 27.924999999999997,
+      "medianFirstBuilderSeconds": 18.1,
+      "neverBuiltMobileBuilder": 0,
+      "medianFirstTerritoryNodeSeconds": 122.4,
+      "neverBuiltTerritoryNode": 0,
+      "meanSupplyEfficiency": 0.4921407089843046,
+      "fractionSupplyBelow90Percent": 0.7786328655500226,
+      "fractionFightingInOwnField": 0.148493057907213,
+      "fractionReadyBlockedYardTime": 0.0007658922644881287,
+      "fractionNestsAtCap": null,
+      "fractionNestsUncovered": null,
+      "meanFinalCombatShips": 14,
+      "meanPeakCombatShips": 21.5,
+      "meanAlloySpent": 22584.83036824796,
+      "meanEnergySpent": 31483.94673662489,
+      "checkpointCombatShips": {
+        "60": {
+          "mean": 4,
+          "median": 4.0,
+          "n": 4
+        },
+        "180": {
+          "mean": 13,
+          "median": 13.0,
+          "n": 4
+        },
+        "300": {
+          "mean": 11,
+          "median": 13.0,
+          "n": 4
+        },
+        "600": {
+          "mean": 12,
+          "median": 12.0,
+          "n": 2
+        }
+      }
+    }
+  },
+  "mirrorResults": []
+}

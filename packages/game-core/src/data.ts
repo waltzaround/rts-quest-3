@@ -30,10 +30,12 @@ export function calculateProfiledDamage(
   rawDamage: number,
   shields: number,
   armorType: ArmorType,
+  shieldResistance = 1,
 ): { shieldDamage: number; hullDamage: number; rawDamage: number } {
   const weapon = WEAPONS[weaponTypeId];
-  const shieldDamage = Math.min(Math.max(0, shields), rawDamage * weapon.shieldMultiplier);
-  const rawConsumedByShields = weapon.shieldMultiplier > 0 ? shieldDamage / weapon.shieldMultiplier : 0;
+  const shieldMultiplier = weapon.shieldMultiplier * shieldResistance;
+  const shieldDamage = Math.min(Math.max(0, shields), rawDamage * shieldMultiplier);
+  const rawConsumedByShields = shieldMultiplier > 0 ? shieldDamage / shieldMultiplier : 0;
   const remainingRawDamage = Math.max(0, rawDamage - rawConsumedByShields);
   return {
     rawDamage,
@@ -361,6 +363,18 @@ export const SHIP_ECONOMY: Readonly<Record<ShipClass, ShipEconomyDefinition>> = 
 };
 
 const STRUCTURE_BASE: Readonly<Record<StructureType, Omit<StructureDefinition, "armorType">>> = {
+  creepNode: {
+    type: "creepNode", radius: 17, maxHealth: 700, maxShield: 0,
+    alloyCost: 220, energyCost: 100, buildTicks: 160,
+    alloyIncome: 0, energyIncome: 0, energyUpkeep: 0, alloyStorage: 0, energyStorage: 0,
+    requiredStructures: ["commandCore"], buildPower: 0, assistRange: 0, sensorRange: 300,
+  },
+  pylon: {
+    type: "pylon", radius: 18, maxHealth: 550, maxShield: 450,
+    alloyCost: 300, energyCost: 240, buildTicks: 220,
+    alloyIncome: 0, energyIncome: 0, energyUpkeep: 0, alloyStorage: 0, energyStorage: 0,
+    requiredStructures: ["commandCore"], buildPower: 0, assistRange: 0, sensorRange: 320,
+  },
   commandCore: {
     type: "commandCore", radius: 38, maxHealth: 5_500, maxShield: 1_600,
     alloyCost: 0, energyCost: 0, buildTicks: 1,
@@ -627,6 +641,7 @@ export const DEFENSIVE_STRUCTURE_TYPES = [
 export const RESOURCE_EXTRACTOR_TYPES = ["extractor", "deepCoreExtractor", "singularityHarvester"] as const;
 
 export const BUILDABLE_STRUCTURE_TYPES = [
+  "creepNode", "pylon",
   "extractor", "solarArray", "storage", "fabricator", "shipyard",
   "fleetShipyard", "capitalShipyard",
   "fusionReactor", "deepCoreExtractor",

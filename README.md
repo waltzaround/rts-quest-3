@@ -4,6 +4,8 @@ This repository implements the deterministic foundation, fleet controls, multi-t
 
 ## Run it
 
+The faction prototype adds **Brood** (capped, automatically replenishing nests and creep bonuses) and **Concord** (pylon warp deployment and shield bonuses). Choose factions on the local skirmish screen or under each commander in a multiplayer lobby. See [faction rules and controls](./docs/factions.md).
+
 ```bash
 pnpm install
 pnpm dev
@@ -23,7 +25,7 @@ The host can issue a single-claim **Team View** token from the lobby. A live obs
 
 Battle audio is generated locally and starts after the first interaction. Weapon-specific transient, mechanical, energy, and impact layers are spatially prioritized through a fixed 32-voice pool, while the quieter engine bed is summarized into at most 12 nearby fleet clusters with ship-class-dependent tone. The audio graph therefore stays bounded even in multi-thousand-ship stress scenarios; use the `SND` control in the top bar to mute it.
 
-Combat rendering uses weapon-specific cadence and silhouettes: autocannons and point defence fire deterministic machine-gun bursts, plasma fires paired pulses, railguns and torpedoes remain deliberate single shots, and heavy ships mount instantaneous beam emitters. Thruster exhaust, beam ribbons, explosions, secondary detonations, and drifting wreck chunks all use fixed instanced or pooled budgets. Close LOD receives multi-nozzle exhaust, medium LOD collapses each ship to one plume, and distant tactical contacts skip exhaust entirely so large battles remain bounded.
+Combat rendering uses weapon-specific cadence and silhouettes: autocannons and point defence fire deterministic machine-gun bursts, plasma fires paired pulses, railguns and torpedoes remain deliberate single shots, and heavy ships mount instantaneous beam emitters. Thruster exhaust, beam ribbons, explosions, secondary detonations, and drifting wreck chunks all use fixed instanced or pooled budgets. Close and medium LOD keep exhaust on the actual engine nozzles, using four soft-shaded triangles per plume; distant contacts skip exhaust. Healthy fighter squads retain all five craft at every 3D LOD. Large fleets simplify each craft’s geometry instead of dropping members, and fixed guns, muzzle flashes and tracer launches share the same animated craft pose.
 
 ## Local multiplayer
 
@@ -55,7 +57,9 @@ The tests cover deterministic replay/checksums, replay seek/resume and tamper re
 
 ## Architecture
 
-- `apps/client`: Three.js renderer (procedural ship hulls and turrets live in `src/ship-hulls.ts`, structures in `src/structure-models.ts`, shared deck/thruster layout in `src/ship-layout.ts`; open `/viewer.html` on the dev server to inspect every ship class, or `/viewer.html?structures=1` for every structure),  multiplayer lobby, projected-view interpolation, fog/minimap filtering, command routing, resources and structures, placement and production UI, RTS controls, batched ship/turret rendering with LOD, pooled effects, tactical camera, bounded spatial audio, and debug/stress visualization.
+- `apps/client`: Three.js renderer (fleet silhouettes and architecture in `src/fleet-designs.ts`, geometry primitives and turrets in `src/ship-hulls.ts`, structures in `src/structure-models.ts`, shared deck/thruster layout in `src/ship-layout.ts`; open `/viewer.html` on the dev server to compare ships at their actual scale, switch detail tiers, adjust hull health and preview impact/destruction effects, or `/viewer.html?structures=1` for structures), multiplayer lobby, projected-view interpolation, fog/minimap filtering, command routing, resources and structures, placement and production UI, RTS controls, batched ship/turret rendering with LOD, pooled effects, tactical camera, bounded spatial audio, and debug/stress visualization.
+
+Ship surface markings share the existing material passes. Model detail follows camera zoom, with one shared tier and transition history per ship class across all factions; moving across the view, orbiting, or emerging from fog does not lower a ship's detail. Class size, render quality and viewport resolution still determine the zoom thresholds. Medium detail retains the major armor masses, while wide views use flat silhouettes that preserve openings and class profiles. Off-screen culling, large-fleet budgets and strategic icons remain active. Damage sites are sampled from actual hull surfaces once per class; scorch patches and transient combat effects use fixed instance pools. Client tests guard the pre-redesign aggregate geometry budgets at all three detail tiers, physical footprints, damage attachment and effect pool limits. The hull palette uses satin grey plating, restrained markings and neutral lighting. Open `/viewer.html?class=fighter&lod=medium&firing=1` to inspect the five-member squad and its gun origins; fighter tests also cover maximum instance capacity, damage thresholds, snapshot burst ownership and nozzle placement.
 - `apps/worker`: Cloudflare gateway and persistent Match Durable Object with slots, teams/FFA, ready/host controls, AI players, validated command batches, a 20 Hz canonical simulation, private persistence, per-player/team 10 Hz tactical views and checksums, team-spectator grants, replay capture/transfer, and reconnect handling.
 - `packages/game-core`: renderer-free deterministic economy, technology progression, assisted construction, production, enemy commander, RTS steering, Box3D body synchronization, sensors, visibility-safe player/team/omniscient projection, replay recording/playback, ships, turrets, spatial targeting, projectiles, damage, victory, and checksums.
 - `packages/box3d-wasm`: the shared Erin Catto Box3D boundary. Browsers use the inline build; Workers import the exact same binary as a precompiled module through Worker-safe static Embind closures.
@@ -65,3 +69,5 @@ The tests cover deterministic replay/checksums, replay seek/resume and tamper re
 Cloudflare forbids runtime WASM compilation and dynamic JavaScript generation. The Worker therefore bundles the Box3D binary as a precompiled module and applies a checked-in patch that replaces the upstream Embind code generators with static closures. Browser and Worker simulations use the same planar circle world; bodies are rebuilt from canonical state each tick so persistence and reconnects never depend on hidden solver caches.
 
 See [TODO.md](./TODO.md) for current scope, next steps, and performance risks.
+
+Cross-platform determinism checks: see [Mac/PC verification](docs/determinism.md) for recording the same combat scenarios, rerunning them on a second machine, and locating the first exact-state or gameplay-checksum mismatch.

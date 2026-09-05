@@ -1,5 +1,6 @@
 import * as THREE from "three";
-import { STRUCTURES, type StructureType, type WeaponTypeId } from "@space-rts/game-core";
+import { STRUCTURES, type FactionId, type StructureType, type WeaponTypeId } from "@space-rts/game-core";
+import { buildFactionStructure } from "./faction-models";
 import { BARBETTE_HEIGHT } from "./ship-layout";
 import {
   ShipKit,
@@ -35,7 +36,7 @@ export interface StructureModel {
 /** Structure turrets are widened but keep their Z so barrel tips stay on the muzzle offsets. */
 export const STRUCTURE_TURRET_SCALE: THREE.Vector3 = new THREE.Vector3(1.35, 1.3, 1);
 
-const models = new Map<StructureType, StructureModel>();
+const models = new Map<string, StructureModel>();
 
 function barbetteRadius(weaponTypeId: WeaponTypeId): number {
   switch (weaponTypeId) {
@@ -402,6 +403,22 @@ function battery(kit: ShipKit, type: StructureType): number {
 
 function buildBody(type: StructureType, kit: ShipKit): number {
   switch (type) {
+    case "creepNode": {
+      kit.add("hull", transformed(new THREE.IcosahedronGeometry(11, 1), [0, 6, 0]));
+      for (let index = 0; index < 6; index += 1) {
+        const angle = index * Math.PI / 3;
+        kit.add("armor", cylinder(1, 4, 13, [Math.sin(angle) * 10, 4, Math.cos(angle) * 10], 5));
+      }
+      kit.add("accent", transformed(new THREE.IcosahedronGeometry(5, 1), [0, 14, 0]));
+      return 8;
+    }
+    case "pylon": {
+      kit.add("dark", cylinder(14, 16, 4, [0, 0, 0], 6));
+      kit.add("armor", cylinder(2, 8, 12, [0, 8, 0], 4));
+      kit.add("accent", transformed(new THREE.OctahedronGeometry(10), [0, 24, 0], [0, 0, 0], [0.65, 1.4, 0.65]));
+      kit.add("light", ring(11, 1, [0, 15, 0], 32));
+      return 8;
+    }
     case "commandCore": return commandCore(kit);
     case "extractor": return extractor(kit, 1);
     case "deepCoreExtractor": return extractor(kit, 2);
@@ -437,19 +454,24 @@ function buildBody(type: StructureType, kit: ShipKit): number {
 
 const SHIPYARD_SCALE: Partial<Record<StructureType, number>> = { fleetShipyard: 1.28, capitalShipyard: 1.72 };
 
-export function getStructureModel(type: StructureType): StructureModel {
-  const cached = models.get(type);
+export function getStructureModel(type: StructureType, faction: FactionId = "industrial"): StructureModel {
+  const key = `${faction}:${type}`;
+  const cached = models.get(key);
   if (cached) return cached;
   const kit = new ShipKit();
-  const deck = buildBody(type, kit);
-  const scale = SHIPYARD_SCALE[type] ?? 1;
-  const body = kit.build(scale);
+  const alien = faction === "industrial" ? null : buildFactionStructure(type, faction);
+  const deck = alien?.deck ?? buildBody(type, kit);
+  const scale = alien ? 1 : SHIPYARD_SCALE[type] ?? 1;
+  const body = alien?.body ?? kit.build(scale);
   const turretHeight = deck * scale + BARBETTE_HEIGHT;
   const mountKit = new ShipKit();
   for (const hardpoint of hardpointsOf(type)) {
-    mountKit.barbette(hardpoint.localX, turretHeight, hardpoint.localZ, barbetteRadius(hardpoint.weaponTypeId));
+    if (faction === "industrial") mountKit.barbette(hardpoint.localX, turretHeight, hardpoint.localZ, barbetteRadius(hardpoint.weaponTypeId));
+    else mountKit.add("armor", cylinder(barbetteRadius(hardpoint.weaponTypeId) * 0.8,
+      barbetteRadius(hardpoint.weaponTypeId) * 1.2, turretHeight,
+      [hardpoint.localX, turretHeight / 2, hardpoint.localZ], faction === "brood" ? 7 : 4));
   }
   const model: StructureModel = { body, mounts: mountKit.build(), turretHeight };
-  models.set(type, model);
+  models.set(key, model);
   return model;
 }

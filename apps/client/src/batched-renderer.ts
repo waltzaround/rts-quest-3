@@ -2,14 +2,20 @@ import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import {
   FIGHTER_SQUAD_OFFSETS,
+  FACTION_IDS,
   SHIPS,
   SHIP_TURRET_SCALES,
-  getFighterSquadMemberPose,
   type ShipClass,
+  type FactionId,
 } from "@space-rts/game-core";
 import { getBatchedTurretGeometry, getShipHullGeometries, type HullGeometrySet } from "./combat-visuals";
+import { fighterMemberCount, fighterMemberMatrix, fighterMuzzlePosition } from "./fighter-visuals";
+import { FighterWakes } from "./fighter-wakes";
+import { createWeaponTrailMaterial, getWeaponStyle, weaponFactionIndex } from "./weapon-appearance";
 import { SHIP_THRUSTERS } from "./ship-layout";
-import { createShipSurfaceMaterial } from "./ship-materials";
+import { createShipSurfaceMaterial, FACTION_SURFACES } from "./ship-materials";
+import { createShipLivery } from "./ship-livery";
+import { getShipSilhouetteGeometry, getShipMediumGeometry } from "./ship-hulls";
 import { createBreachGeometry, createBreachMaterial, getShipDamageSites } from "./ship-damage";
 import {
   MAX_RENDER_SHIPS,
@@ -28,15 +34,6 @@ interface InstanceBatch {
   count: number;
   capacity: number;
   colored: boolean;
-}
-
-interface FighterFormationVisual {
-  yaw: number;
-  lastSeen: number;
-}
-
-function wrappedAngleDelta(angle: number): number {
-  return Math.atan2(Math.sin(angle), Math.cos(angle));
 }
 
 export interface BatchedRendererMetrics {
@@ -203,61 +200,47 @@ function createSelectionGeometry(): THREE.BufferGeometry {
   return geometry;
 }
 
-function createThrusterTrailGeometry(): THREE.BufferGeometry {
-  // Two cheap shells share one instance and draw call. The inner shell gives
-  // the plume a white-hot core instead of requiring a second instanced batch.
-  const outer = new THREE.ConeGeometry(1, 1, 9, 2, true);
-  outer.rotateX(-Math.PI / 2);
-  outer.setAttribute("thrusterLayer", new THREE.BufferAttribute(
-    new Float32Array(outer.getAttribute("position").count), 1,
-  ));
-  const core = new THREE.ConeGeometry(1, 1, 7, 1, true);
-  core.rotateX(-Math.PI / 2);
-  core.scale(0.46, 0.46, 0.72);
-  core.translate(0, 0, 0.14);
-  core.setAttribute("thrusterLayer", new THREE.BufferAttribute(
-    new Float32Array(core.getAttribute("position").count).fill(1), 1,
-  ));
-  const merged = mergeGeometries([outer, core], false);
-  if (!merged) throw new Error("Unable to build thruster geometry");
-  return merged;
+export function createThrusterTrailGeometry(): THREE.BufferGeometry {
+  // Two crossed ribbons: four triangles per nozzle, with soft shader edges.
+  const horizontal = new THREE.PlaneGeometry(2, 1).rotateX(Math.PI / 2);
+  const vertical = horizontal.clone().rotateZ(Math.PI / 2);
+  const geometry = mergeGeometries([horizontal, vertical], false)!;
+  horizontal.dispose(); vertical.dispose();
+  return geometry;
 }
 
-function createThrusterMaterial(time: { value: number }): THREE.MeshBasicMaterial {
+export function createThrusterMaterial(time: { value: number }): THREE.MeshBasicMaterial {
   const material = new THREE.MeshBasicMaterial({
-    color: 0xffffff, transparent: true, opacity: 0.52,
+    color: 0xb6e7ff, transparent: true, opacity: 0.64,
     blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false,
   });
   material.onBeforeCompile = (shader) => {
     shader.uniforms.thrusterTime = time;
     shader.vertexShader = shader.vertexShader
       .replace("#include <common>", `#include <common>
-        attribute float thrusterLayer;
-        varying float vThrusterAxial;
-        varying float vThrusterLayer;
-        varying float vThrusterPhase;`)
+        varying vec2 vPlumeUv;
+        varying float vPlumePhase;`)
       .replace("#include <begin_vertex>", `#include <begin_vertex>
-        vThrusterAxial = clamp(position.z + 0.5, 0.0, 1.0);
-        vThrusterLayer = thrusterLayer;
-        vThrusterPhase = dot(instanceMatrix[3].xz, vec2(0.071, 0.113));`);
+        vPlumeUv = vec2(uv.x * 2.0 - 1.0, position.z + 0.5);
+        vPlumePhase = dot(instanceMatrix[3].xz, vec2(0.071, 0.113));`);
     shader.fragmentShader = shader.fragmentShader
       .replace("#include <common>", `#include <common>
         uniform float thrusterTime;
-        varying float vThrusterAxial;
-        varying float vThrusterLayer;
-        varying float vThrusterPhase;`)
-      .replace("#include <opaque_fragment>", `
-        float plumeNoise = sin(vThrusterAxial * 31.0 - thrusterTime * 10.5 + vThrusterPhase);
-        plumeNoise += sin(vThrusterAxial * 13.0 + thrusterTime * 6.7 + vThrusterPhase * 1.9) * 0.5;
-        float tipFade = smoothstep(0.015, vThrusterLayer > 0.5 ? 0.22 : 0.34, vThrusterAxial);
-        float nozzleHeat = smoothstep(0.18, 1.0, vThrusterAxial);
-        float shimmer = 0.86 + plumeNoise * (0.065 + (1.0 - vThrusterAxial) * 0.055);
-        diffuseColor.a *= tipFade * shimmer * (vThrusterLayer > 0.5 ? 0.82 : 0.58);
-        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.92, 0.985, 1.0),
-          nozzleHeat * (vThrusterLayer > 0.5 ? 0.92 : 0.34));
-        #include <opaque_fragment>`);
+        varying vec2 vPlumeUv;
+        varying float vPlumePhase;`)
+      .replace("#include <color_fragment>", `#include <color_fragment>
+        float axial = clamp(vPlumeUv.y, 0.0, 1.0);
+        float width = mix(0.16, 0.76, pow(axial, 0.65));
+        float radial = abs(vPlumeUv.x) / width;
+        float feather = exp(-radial * radial * 4.5) * (1.0 - smoothstep(0.72, 1.0, radial));
+        float core = exp(-radial * radial * 28.0) * pow(axial, 2.0);
+        float tip = smoothstep(0.0, 0.55, axial);
+        float shock = 0.9 + 0.1 * sin(axial * 27.0 - thrusterTime * 8.0 + vPlumePhase);
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.85, 0.96, 1.0), core * 0.85);
+        diffuseColor.a *= feather * tip * shock;
+      `);
   };
-  material.customProgramCacheKey = () => "layered-thruster-v1";
+  material.customProgramCacheKey = () => "soft-nozzle-plume-v2";
   return material;
 }
 
@@ -278,17 +261,13 @@ const QUALITY_ENGINE_SCALE: Readonly<Record<RenderQuality, number>> = { low: 0.7
 const TACTICAL_SCALE = [12.5, 11, 12.5, 11.5, 13.5, 13.5, 14, 15, 15.5, 16.5, 17.5, 18.5, 20] as const;
 const TACTICAL_SELECTION_RADIUS = [18, 16, 18, 17, 19, 19, 20, 22, 23, 24, 26, 27, 29] as const;
 const CLOSE_SELECTION_RADIUS = [22, 13, 17, 7.5, 18, 19, 19, 29, 31, 42, 45, 56, 64] as const;
-const THRUSTER_COLOR = [
-  0x8ff7ff, 0x79f0c8, 0x78e8ff, 0x72dfff, 0x82f3ff, 0x77dcff, 0xffd37a,
-  0x68cfff, 0xffc06a, 0x77c5ff, 0xffb86b, 0x9abaff, 0xffbd78,
-] as const;
 const HEALTH_BAR_GREEN = new THREE.Color(0x63df8c);
 const HEALTH_BAR_AMBER = new THREE.Color(0xf1bd5a);
 const HEALTH_BAR_RED = new THREE.Color(0xff5674);
 const DAMAGE_SCORCH = new THREE.Color(0x24130d);
 const ARTILLERY_REVEAL = new THREE.Color(0xffb35c);
 const MAX_DAMAGE_INSTANCES = 256;
-const DAMAGE_VISIBLE_CLASS_IDS = new Set([2, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+const DAMAGE_VISIBLE_CLASS_IDS = new Set([1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
 
 export class BatchedShipRenderer {
   readonly group = new THREE.Group();
@@ -303,7 +282,7 @@ export class BatchedShipRenderer {
 
   private readonly hullBatches: Array<Array<Partial<Record<HullLayer, InstanceBatch>>>> = Array.from(
     { length: 4 },
-    () => Array.from({ length: SHIP_CLASSES.length }, () => ({})),
+    () => Array.from({ length: SHIP_CLASSES.length * FACTION_IDS.length }, () => ({})),
   );
   private readonly turretBatches: InstanceBatch[] = [];
   private readonly allBatches: InstanceBatch[] = [];
@@ -314,7 +293,9 @@ export class BatchedShipRenderer {
   private readonly healthBarFillBatch: InstanceBatch;
   private readonly damageBatch: InstanceBatch;
   private readonly thrusterTime = { value: 0 };
+  private readonly fighterWakes = new FighterWakes();
   private readonly shipMatrices = new Float32Array(MAX_RENDER_SHIPS * 16);
+  private readonly fighterMatrices = new Float32Array(MAX_RENDER_SHIPS * FIGHTER_SQUAD_OFFSETS.length * 16);
   private readonly matrix = new THREE.Matrix4();
   private readonly localMatrix = new THREE.Matrix4();
   private readonly memberMatrix = new THREE.Matrix4();
@@ -322,16 +303,16 @@ export class BatchedShipRenderer {
   private readonly quaternion = new THREE.Quaternion();
   private readonly yawQuaternion = new THREE.Quaternion();
   private readonly bankQuaternion = new THREE.Quaternion();
-  private readonly memberQuaternion = new THREE.Quaternion();
-  private readonly memberYawQuaternion = new THREE.Quaternion();
-  private readonly memberBankQuaternion = new THREE.Quaternion();
-  private readonly fighterFormations = new Map<number, FighterFormationVisual>();
+  private readonly pitchQuaternion = new THREE.Quaternion();
+  private readonly pitchAxis = new THREE.Vector3(1, 0, 0);
+  private readonly visibleShipIndices = new Map<number, number>();
+  private renderState: InterpolatedRenderState | undefined;
   private readonly position = new THREE.Vector3();
-  private readonly memberPosition = new THREE.Vector3();
   private readonly scale = new THREE.Vector3(1, 1, 1);
   private readonly color = new THREE.Color();
   private readonly tint = new THREE.Color();
   private readonly lightTint = new THREE.Color();
+  private readonly exhaustColor = new THREE.Color();
   private readonly white = new THREE.Color(0xffffff);
   private readonly forwardAxis = new THREE.Vector3(0, 0, 1);
   private readonly identityQuaternion = new THREE.Quaternion();
@@ -339,17 +320,24 @@ export class BatchedShipRenderer {
   private readonly screenRight = new THREE.Vector3();
   private readonly screenUp = new THREE.Vector3();
   private quality: RenderQuality = "medium";
-  private lastUpdateAt = 0;
 
-  constructor(scene: THREE.Scene) {
-    const hullMaterial = createShipSurfaceMaterial("hull");
-    const armorMaterial = createShipSurfaceMaterial("armor");
+  // Allocate only combinations present in a match. Empty factions/classes
+  // carry no instance buffers or draw calls, including their turret batches.
+  private ensureModel(classId: number, factionId: number): number {
+    const modelId = factionId * SHIP_CLASSES.length + classId;
+    if (this.hullBatches[VisualLod.Close]![modelId]!.hull) return modelId;
+    const faction = FACTION_IDS[factionId] ?? "industrial";
+    const shipClass = SHIP_CLASSES[classId]!;
+    const geometry = getShipHullGeometries(shipClass, faction);
+    const livery = faction === "industrial" ? createShipLivery([geometry.hull, geometry.armor]) : undefined;
+    const hullMaterial = createShipSurfaceMaterial("hull", faction, livery);
+    const armorMaterial = createShipSurfaceMaterial("armor", faction, livery);
     const darkMaterial = new THREE.MeshStandardMaterial({
-      color: 0x1b2b36, emissive: 0x07141d, emissiveIntensity: 0.72,
+      color: FACTION_SURFACES[faction].dark, emissive: 0x07141d, emissiveIntensity: 0.72,
       metalness: 0.62, roughness: 0.46, flatShading: true,
     });
     const accentMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
-    const lightMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
+    const lightMaterial = new THREE.MeshBasicMaterial({ color: FACTION_SURFACES[faction].glow, toneMapped: false });
     const engineMaterial = new THREE.MeshBasicMaterial({
       color: 0xffffff, transparent: true, opacity: 0.82,
       blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false,
@@ -363,26 +351,25 @@ export class BatchedShipRenderer {
       engine: engineMaterial,
     };
 
-    for (let classId = 0; classId < SHIP_CLASSES.length; classId += 1) {
-      const shipClass = SHIP_CLASSES[classId]!;
-      const geometry = getShipHullGeometries(shipClass);
-      getShipDamageSites(shipClass);
-      // Adaptive squad LOD never expands more than two members once the fleet
-      // is large enough to approach MAX_RENDER_SHIPS. Keeping this bounded at
-      // 2x avoids uploading worst-case five-member buffers for every layer.
-      const detailedCapacity = shipClass === "fighter" ? MAX_RENDER_SHIPS * 2 : MAX_RENDER_SHIPS;
+    {
+      getShipDamageSites(shipClass, faction);
+      // Simplify geometry, never remove operational squad members. Capacity
+      // covers five craft even when every visible entity is a fighter squad.
+      const detailedCapacity = shipClass === "fighter" ? MAX_RENDER_SHIPS * FIGHTER_SQUAD_OFFSETS.length : MAX_RENDER_SHIPS;
       for (const lod of [VisualLod.Close, VisualLod.Medium] as const) {
         const layers = lod === VisualLod.Close ? CLOSE_LAYERS : MEDIUM_LAYERS;
         for (const layer of layers) {
+          if (geometry[layer].getAttribute("position").count === 0) continue;
           const colored = layer === "hull" || layer === "armor" || layer === "accent" || layer === "light" || layer === "engine";
-          const batch = createBatch(geometry[layer], layerMaterials[layer], detailedCapacity, colored);
-          this.hullBatches[lod]![classId]![layer] = batch;
+          const batch = createBatch(lod === VisualLod.Medium && (layer === "hull" || layer === "armor")
+            ? getShipMediumGeometry(shipClass, layer, faction) : geometry[layer], layerMaterials[layer], detailedCapacity, colored);
+          this.hullBatches[lod]![modelId]![layer] = batch;
           this.allBatches.push(batch);
           this.group.add(batch.mesh);
         }
       }
-      const farBatch = createBatch(geometry.hull, new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false }), MAX_RENDER_SHIPS, true);
-      this.hullBatches[VisualLod.Far]![classId]!.hull = farBatch;
+      const farBatch = createBatch(getShipSilhouetteGeometry(shipClass, faction), new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false, side: THREE.DoubleSide }), detailedCapacity, true);
+      this.hullBatches[VisualLod.Far]![modelId]!.hull = farBatch;
       this.allBatches.push(farBatch);
       this.group.add(farBatch.mesh);
       const tacticalBatch = createBatch(
@@ -395,22 +382,27 @@ export class BatchedShipRenderer {
         true,
       );
       tacticalBatch.mesh.renderOrder = 40;
-      this.hullBatches[VisualLod.Tactical]![classId]!.hull = tacticalBatch;
+      this.hullBatches[VisualLod.Tactical]![modelId]!.hull = tacticalBatch;
       this.allBatches.push(tacticalBatch);
       this.group.add(tacticalBatch.mesh);
     }
 
-    const turretMaterial = new THREE.MeshStandardMaterial({
+    if (!this.turretBatches[factionId * WEAPON_TYPES.length]) {
+      const turretMaterial = new THREE.MeshStandardMaterial({
       color: 0xffffff, emissive: 0x061017, emissiveIntensity: 0.5, metalness: 0.72, roughness: 0.34,
       flatShading: true, vertexColors: true,
     });
-    for (const weaponType of WEAPON_TYPES) {
-      const batch = createBatch(getBatchedTurretGeometry(weaponType), turretMaterial, MAX_RENDER_TURRETS, true);
-      this.turretBatches.push(batch);
+    for (let weaponId = 0; weaponId < WEAPON_TYPES.length; weaponId++) {
+      const batch = createBatch(getBatchedTurretGeometry(WEAPON_TYPES[weaponId]!, faction), turretMaterial, MAX_RENDER_TURRETS, true);
+      this.turretBatches[factionId * WEAPON_TYPES.length + weaponId] = batch;
       this.allBatches.push(batch);
       this.group.add(batch.mesh);
     }
+    }
+    return modelId;
+  }
 
+  constructor(scene: THREE.Scene) {
     this.selectionBatch = createBatch(
       createSelectionGeometry(),
       new THREE.MeshBasicMaterial({
@@ -430,7 +422,7 @@ export class BatchedShipRenderer {
     this.thrusterBatch = createBatch(
       createThrusterTrailGeometry(),
       createThrusterMaterial(this.thrusterTime),
-      MAX_RENDER_SHIPS * 2,
+      MAX_RENDER_SHIPS * FIGHTER_SQUAD_OFFSETS.length * 2,
       true,
     );
     const healthBarGeometry = new THREE.PlaneGeometry(1, 1);
@@ -465,7 +457,7 @@ export class BatchedShipRenderer {
     );
     this.group.add(
       this.selectionBatch.mesh, this.shieldBatch.mesh, this.thrusterBatch.mesh,
-      this.healthBarBackgroundBatch.mesh, this.healthBarFillBatch.mesh, this.damageBatch.mesh,
+      this.healthBarBackgroundBatch.mesh, this.healthBarFillBatch.mesh, this.damageBatch.mesh, this.fighterWakes.mesh,
     );
     scene.add(this.group);
   }
@@ -476,8 +468,9 @@ export class BatchedShipRenderer {
   }
 
   clearHistory(): void {
-    this.fighterFormations.clear();
-    this.lastUpdateAt = 0;
+    this.fighterWakes.clear();
+    this.visibleShipIndices.clear();
+    this.renderState = undefined;
   }
 
   update(
@@ -490,20 +483,32 @@ export class BatchedShipRenderer {
     showHealthBars = true,
   ): void {
     this.thrusterTime.value = now * 0.001;
+    this.fighterWakes.beginFrame(visualTick, this.quality);
+    for (let index = 0; index < state.shipCount; index++) this.ensureModel(state.shipClass[index]!, state.shipFaction[index]!);
+    for (let modelId = 0; modelId < SHIP_CLASSES.length * FACTION_IDS.length; modelId += 1) {
+      const hull = this.hullBatches[VisualLod.Medium]![modelId]!.hull;
+      if (!hull) continue;
+      const shipClass = SHIP_CLASSES[modelId % SHIP_CLASSES.length]!;
+      const faction = FACTION_IDS[Math.floor(modelId / SHIP_CLASSES.length)]!;
+      hull.mesh.geometry = state.shipCount > 768
+        ? getShipSilhouetteGeometry(shipClass, faction)
+        : getShipMediumGeometry(shipClass, "hull", faction);
+    }
     for (const batch of this.allBatches) batch.count = 0;
     this.metrics.shipInstances = state.shipCount;
     this.metrics.turretInstances = state.turretCount;
     this.metrics.thrusterInstances = 0;
     this.metrics.selectedShields = 0;
     const enginePulse = 0.94 + Math.sin(now * 0.018) * 0.09;
-    const deltaSeconds = this.lastUpdateAt === 0 ? 1 / 60 : Math.min(0.05, Math.max(0, (now - this.lastUpdateAt) / 1_000));
-    this.lastUpdateAt = now;
+    this.renderState = state;
+    this.visibleShipIndices.clear();
     this.billboardQuaternion.copy(camera.quaternion);
     this.screenRight.set(1, 0, 0).applyQuaternion(this.billboardQuaternion);
     this.screenUp.set(0, 1, 0).applyQuaternion(this.billboardQuaternion);
     const focalPixels = Math.max(1, viewportHeight) / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
 
     for (let index = 0; index < state.shipCount; index += 1) {
+      this.visibleShipIndices.set(state.shipIds[index]!, index);
       const positionIndex = index * 3;
       this.position.set(
         state.shipPosition[positionIndex]!,
@@ -512,19 +517,31 @@ export class BatchedShipRenderer {
       );
       this.yawQuaternion.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, state.shipYaw[index]!);
       this.bankQuaternion.setFromAxisAngle(this.forwardAxis, state.shipBank[index]!);
-      this.quaternion.multiplyQuaternions(this.yawQuaternion, this.bankQuaternion);
+      this.pitchQuaternion.setFromAxisAngle(this.pitchAxis, state.shipPitch[index]!);
+      this.quaternion.multiplyQuaternions(this.yawQuaternion, this.pitchQuaternion).multiply(this.bankQuaternion);
       this.scale.set(1, 1, 1);
       this.matrix.compose(this.position, this.quaternion, this.scale);
       this.matrix.toArray(this.shipMatrices, index * 16);
       this.color.setHex(state.shipColor[index]!);
       const health = state.shipHealth[index]!;
-      this.tint.copy(this.color).lerp(this.white, 0.78).multiplyScalar(0.87 + health * 0.13);
-      this.lightTint.copy(this.color).lerp(this.white, 0.72);
-      if (state.shipRevealed[index]) this.tint.lerp(ARTILLERY_REVEAL, 0.22 + Math.sin(now * 0.014) * 0.08);
-      if (health < 0.7) this.tint.lerp(DAMAGE_SCORCH, Math.min(0.16, (0.7 - health) * 0.25));
-      if (health < 0.3) this.color.multiplyScalar(0.62 + Math.abs(Math.sin(now * 0.012 + state.shipIds[index]!)) * 0.38);
-      const lod = state.shipLod[index]! as VisualLod;
       const classId = state.shipClass[index]!;
+      const modelId = state.shipFaction[index]! * SHIP_CLASSES.length + classId;
+      const faction = FACTION_IDS[state.shipFaction[index]!] ?? "industrial";
+      const requestedLod = state.shipLod[index]! as VisualLod;
+      const lod = classId === 0 && state.shipCount > 768 && requestedLod === VisualLod.Close
+        ? VisualLod.Medium : requestedLod;
+      // Industrial surfaces use the owner color only inside their paint mask.
+      this.tint.copy(this.color).lerp(this.white, faction === "industrial" ? 0 : 0.9).multiplyScalar(0.87 + health * 0.13);
+      this.lightTint.copy(this.color).lerp(this.white, 0.72);
+      if (state.shipRevealed[index]) {
+        const reveal = 0.22 + Math.sin(now * 0.014) * 0.08;
+        this.tint.lerp(ARTILLERY_REVEAL, reveal);
+      }
+      if (health < 0.7) {
+        const scorch = Math.min(0.16, (0.7 - health) * 0.25);
+        this.tint.lerp(DAMAGE_SCORCH, scorch);
+      }
+      if (health < 0.3) this.color.multiplyScalar(0.62 + Math.abs(Math.sin(now * 0.012 + state.shipIds[index]!)) * 0.38);
 
       if (lod === VisualLod.Close || lod === VisualLod.Medium) {
         const layers = lod === VisualLod.Close
@@ -532,52 +549,26 @@ export class BatchedShipRenderer {
           : state.shipCount > 768
             ? LARGE_BATTLE_MEDIUM_LAYERS
             : MEDIUM_LAYERS;
-        const fighterCraftCount = Math.max(1, Math.ceil(health * FIGHTER_SQUAD_OFFSETS.length));
-        const memberCount = classId !== 0
-          ? 1
-          : state.shipCount > 1_024
-            ? lod === VisualLod.Close ? Math.min(2, fighterCraftCount) : 1
-            : state.shipCount > 384
-              ? lod === VisualLod.Close ? Math.min(3, fighterCraftCount) : 1
-              : lod === VisualLod.Close
-                ? fighterCraftCount
-                : Math.min(3, fighterCraftCount);
+        const memberCount = classId === 0 ? fighterMemberCount(health) : 1;
         const centerX = this.position.x;
         const centerY = this.position.y;
         const centerZ = this.position.z;
-        const shipId = state.shipIds[index]!;
-        const desiredYaw = state.shipYaw[index]!;
-        let formationYaw = desiredYaw;
-        if (classId === 0) {
-          let formation = this.fighterFormations.get(shipId);
-          if (!formation || state.shipNewlyVisible[index]) {
-            formation = { yaw: desiredYaw, lastSeen: now };
-            this.fighterFormations.set(shipId, formation);
-          }
-          formation.yaw += wrappedAngleDelta(desiredYaw - formation.yaw) * Math.min(1, deltaSeconds * 2.6);
-          formation.lastSeen = now;
-          formationYaw = formation.yaw;
-        }
         for (let member = 0; member < memberCount; member += 1) {
           if (classId === 0) {
-            const pose = getFighterSquadMemberPose(shipId, member, visualTick);
-            const formationCosine = Math.cos(formationYaw);
-            const formationSine = Math.sin(formationYaw);
-            this.memberPosition.set(
-              centerX + formationCosine * pose.x + formationSine * pose.z,
-              centerY + pose.y,
-              centerZ - formationSine * pose.x + formationCosine * pose.z,
-            );
-            this.memberYawQuaternion.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, desiredYaw + pose.yaw);
-            const independentBank = pose.bank + state.shipBank[index]! * (member === 0 ? 1 : 0.28);
-            this.memberBankQuaternion.setFromAxisAngle(this.forwardAxis, independentBank);
-            this.memberQuaternion.multiplyQuaternions(this.memberYawQuaternion, this.memberBankQuaternion);
-            this.memberMatrix.compose(this.memberPosition, this.memberQuaternion, this.scale.set(1, 1, 1));
+            fighterMemberMatrix(this.memberMatrix, state.shipIds[index]!, member, visualTick,
+              centerX, centerY, centerZ, state.shipYaw[index]!, state.shipBank[index]!,
+              state.shipSpeed[index]!, state.shipEngagement[index]!, state.shipPitch[index]!);
+            this.memberMatrix.toArray(this.fighterMatrices, (index * FIGHTER_SQUAD_OFFSETS.length + member) * 16);
+            if (state.shipSpeed[index]! > 10) {
+              this.fighterWakes.write(state.shipIds[index]!, member, this.memberMatrix, this.color,
+                state.shipNewlyVisible[index] === 1);
+            }
           } else {
             this.memberMatrix.copy(this.matrix);
           }
           for (const layer of layers) {
-            const batch = this.hullBatches[lod]![classId]![layer]!;
+            const batch = this.hullBatches[lod]![modelId]![layer];
+            if (!batch) continue;
             if (layer === "engine") {
               this.scaleMatrix.makeScale(1, 1, enginePulse * state.shipEngine[index]! * QUALITY_ENGINE_SCALE[this.quality]);
               this.localMatrix.copy(this.memberMatrix).multiply(this.scaleMatrix);
@@ -589,17 +580,25 @@ export class BatchedShipRenderer {
               this.writeInstance(batch, this.memberMatrix, layerColor);
             }
           }
-          this.writeThrusters(state, index, lod, now, this.memberMatrix);
+          this.writeThrusters(state, index, now, this.memberMatrix);
         }
         this.position.set(centerX, centerY, centerZ);
       } else {
-        const batch = this.hullBatches[lod]![classId]!.hull!;
+        const batch = this.hullBatches[lod]![modelId]!.hull!;
         if (lod === VisualLod.Tactical) {
           const tacticalScale = (TACTICAL_SCALE[classId] ?? 28) * tacticalScaleMultiplier;
           this.scale.setScalar(tacticalScale);
           this.position.y = 1.5;
           this.localMatrix.compose(this.position, this.billboardQuaternion, this.scale);
           this.writeInstance(batch, this.localMatrix, this.color);
+        } else if (classId === 0) {
+          for (let member = 0; member < fighterMemberCount(health); member += 1) {
+            fighterMemberMatrix(this.memberMatrix, state.shipIds[index]!, member, visualTick,
+              this.position.x, this.position.y, this.position.z, state.shipYaw[index]!, state.shipBank[index]!,
+              state.shipSpeed[index]!, state.shipEngagement[index]!, state.shipPitch[index]!);
+            this.memberMatrix.toArray(this.fighterMatrices, (index * FIGHTER_SQUAD_OFFSETS.length + member) * 16);
+            this.writeInstance(batch, this.memberMatrix, this.color);
+          }
         } else {
           this.writeInstance(batch, this.matrix, this.color);
         }
@@ -630,10 +629,7 @@ export class BatchedShipRenderer {
       }
     }
 
-    for (const [shipId, formation] of this.fighterFormations) {
-      if (now - formation.lastSeen > 2_000) this.fighterFormations.delete(shipId);
-    }
-
+    this.fighterWakes.endFrame();
     for (let index = 0; index < state.turretCount; index += 1) {
       const ownerIndex = state.turretOwner[index]!;
       const classId = state.shipClass[ownerIndex]!;
@@ -652,12 +648,12 @@ export class BatchedShipRenderer {
       );
       this.localMatrix.scale(this.scale.set(turretScale, turretScale * verticalScale, turretScale));
       this.matrix.fromArray(this.shipMatrices, ownerIndex * 16).multiply(this.localMatrix);
-      this.color.setHex(state.turretColor[index]!);
-      this.writeInstance(this.turretBatches[state.turretType[index]!]!, this.matrix, this.color);
+      this.color.setHex(state.turretColor[index]!).lerp(this.white, 0.76);
+      this.writeInstance(this.turretBatches[state.shipFaction[ownerIndex]! * WEAPON_TYPES.length + state.turretType[index]!]!, this.matrix, this.color);
     }
 
-    this.metrics.activeBatches = 0;
-    this.metrics.transparentBatches = 0;
+    this.metrics.activeBatches = this.fighterWakes.mesh.visible ? 1 : 0;
+    this.metrics.transparentBatches = this.fighterWakes.mesh.visible ? 1 : 0;
     for (const batch of this.allBatches) {
       batch.mesh.count = batch.count;
       if (batch.count > 0) {
@@ -738,12 +734,13 @@ export class BatchedShipRenderer {
     now: number,
   ): void {
     if (!DAMAGE_VISIBLE_CLASS_IDS.has(classId) || this.damageBatch.count >= MAX_DAMAGE_INSTANCES) return;
+    if (state.shipCount > 768 && state.shipLod[shipIndex] !== VisualLod.Close) return;
     if (this.quality === "low" && health >= 0.35) return;
     if (state.shipCount > 1_024 && classId < 6) return;
     const shipClass = SHIP_CLASSES[classId]!;
     const radius = SHIPS[shipClass].radius;
     const shipId = state.shipIds[shipIndex]!;
-    const sites = getShipDamageSites(shipClass);
+    const sites = getShipDamageSites(shipClass, FACTION_IDS[state.shipFaction[shipIndex]!]!);
     const severity = Math.min(1, (0.7 - health) / 0.7);
     const breachCount = this.quality === "low" ? 1 : health < 0.3 ? 3 : health < 0.5 ? 2 : 1;
     this.matrix.fromArray(this.shipMatrices, shipIndex * 16);
@@ -757,31 +754,48 @@ export class BatchedShipRenderer {
     }
   }
 
+  getVisualPosition(shipId: number, target: THREE.Vector3): boolean {
+    const index = this.visibleShipIndices.get(shipId);
+    if (index === undefined || !this.renderState) return false;
+    target.fromArray(this.renderState.shipPosition, index * 3);
+    return true;
+  }
+
+  getFighterMuzzle(shipId: number, member: number, sequence: number, target: THREE.Vector3): boolean {
+    const state = this.renderState;
+    const index = this.visibleShipIndices.get(shipId);
+    if (!state || index === undefined || state.shipClass[index] !== 0
+      || state.shipLod[index]! >= VisualLod.Tactical
+      || member < 0 || member >= fighterMemberCount(state.shipHealth[index]!)) return false;
+    this.memberMatrix.fromArray(this.fighterMatrices, (index * FIGHTER_SQUAD_OFFSETS.length + member) * 16);
+    fighterMuzzlePosition(target, this.memberMatrix, sequence);
+    return true;
+  }
+
   private writeThrusters(
     state: InterpolatedRenderState,
     shipIndex: number,
-    lod: VisualLod.Close | VisualLod.Medium,
     now: number,
     shipMatrix: THREE.Matrix4,
   ): void {
     const classId = state.shipClass[shipIndex]!;
     const layout = SHIP_THRUSTERS[SHIP_CLASSES[classId]!];
     const offsets = layout.offsets;
-    const nozzleCount = lod === VisualLod.Close && this.quality !== "low" ? offsets.length : 1;
+    const nozzleCount = offsets.length;
     const engine = state.shipEngine[shipIndex]!;
     const pulse = 0.88 + Math.sin(now * 0.026 + state.shipIds[shipIndex]! * 0.73) * 0.12;
     const cruiseScale = state.shipCruising[shipIndex] ? 1.18 : 1;
-    const length = layout.length * (0.46 + engine * 0.62) * pulse
+    const length = layout.length * (0.15 + engine * 0.28) * pulse
       * QUALITY_ENGINE_SCALE[this.quality] * cruiseScale;
-    const width = layout.width * (0.72 + engine * 0.32);
+    const width = layout.width * (1.05 + engine * 0.22);
     const rear = layout.rear;
-    this.color.setHex(state.shipCruising[shipIndex] ? 0xa8efff : THRUSTER_COLOR[classId] ?? 0x77ddff);
+    this.exhaustColor.setHex(state.shipCruising[shipIndex] ? 0xc5edff : FACTION_SURFACES[FACTION_IDS[state.shipFaction[shipIndex]!]!].glow);
     for (let nozzle = 0; nozzle < nozzleCount && this.thrusterBatch.count < this.thrusterBatch.capacity; nozzle += 1) {
-      const offset = nozzleCount === 1 ? 0 : (offsets[nozzle] ?? 0);
+      const offset = offsets[nozzle] ?? 0;
       this.position.set(offset, layout.y, rear - length * 0.5);
       this.scale.set(width, width * 0.72, length);
       this.localMatrix.compose(this.position, this.identityQuaternion, this.scale).premultiply(shipMatrix);
-      this.writeInstance(this.thrusterBatch, this.localMatrix, this.color);
+      this.writeInstance(this.thrusterBatch, this.localMatrix, this.exhaustColor);
     }
     this.metrics.thrusterInstances = this.thrusterBatch.count;
   }
@@ -953,11 +967,10 @@ function createBeamMesh(opacity: number): THREE.Mesh {
   colors.setUsage(THREE.DynamicDrawUsage);
   geometry.setAttribute("position", positions);
   geometry.setAttribute("color", colors);
+  geometry.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(MAX_BEAMS * BEAM_VERTICES * 2), 2).setUsage(THREE.DynamicDrawUsage));
+  geometry.setAttribute("weaponEffect", new THREE.BufferAttribute(new Float32Array(MAX_BEAMS * BEAM_VERTICES * 2), 2).setUsage(THREE.DynamicDrawUsage));
   geometry.setDrawRange(0, 0);
-  const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
-    vertexColors: true, transparent: true, opacity,
-    blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false,
-  }));
+  const mesh = new THREE.Mesh(geometry, createWeaponTrailMaterial(opacity));
   mesh.frustumCulled = false;
   return mesh;
 }
@@ -973,6 +986,7 @@ class BeamPool {
   private readonly end = new Float32Array(MAX_BEAMS * 3);
   private readonly width = new Float32Array(MAX_BEAMS);
   private readonly color = new Uint32Array(MAX_BEAMS);
+  private readonly faction = new Uint8Array(MAX_BEAMS);
   private readonly glow = createBeamMesh(0.24);
   private readonly core = createBeamMesh(0.96);
   private readonly colorScratch = new THREE.Color();
@@ -986,7 +1000,7 @@ class BeamPool {
   spawn(
     startX: number, startY: number, startZ: number,
     endX: number, endY: number, endZ: number,
-    color: number, width: number, now: number, duration = 145,
+    color: number, width: number, now: number, duration = 145, faction: FactionId = "industrial",
   ): void {
     const index = this.cursor++ % MAX_BEAMS;
     const vectorIndex = index * 3;
@@ -999,6 +1013,7 @@ class BeamPool {
     this.end[vectorIndex + 1] = endY;
     this.end[vectorIndex + 2] = endZ;
     this.color[index] = color;
+    this.faction[index] = weaponFactionIndex(faction);
     this.width[index] = width;
     this.usedCount = Math.min(MAX_BEAMS, this.usedCount + 1);
   }
@@ -1011,6 +1026,8 @@ class BeamPool {
   private write(mesh: THREE.Mesh, now: number, widthScale: number, brightness: number): number {
     const positions = mesh.geometry.getAttribute("position") as THREE.BufferAttribute;
     const colors = mesh.geometry.getAttribute("color") as THREE.BufferAttribute;
+    const uv = mesh.geometry.getAttribute("uv") as THREE.BufferAttribute;
+    const effect = mesh.geometry.getAttribute("weaponEffect") as THREE.BufferAttribute;
     let vertex = 0;
     let visible = 0;
     for (let index = 0; index < this.usedCount; index += 1) {
@@ -1034,6 +1051,9 @@ class BeamPool {
       const sideZ = dx / length * halfWidth;
       const color = this.colorScratch.setHex(this.color[index]!);
       const fade = (1 - progress) * brightness;
+      for (let i = 0; i < 6; i++) effect.setXY(vertex + i, this.faction[index]!, age * 0.018 + index);
+      uv.setXY(vertex, 0, -1); uv.setXY(vertex + 1, 0, 1); uv.setXY(vertex + 2, 1, 1);
+      uv.setXY(vertex + 3, 0, -1); uv.setXY(vertex + 4, 1, 1); uv.setXY(vertex + 5, 1, -1);
       const writeVertex = (x: number, y: number, z: number): void => {
         positions.setXYZ(vertex, x, y, z);
         colors.setXYZ(vertex, color.r * fade, color.g * fade, color.b * fade);
@@ -1054,6 +1074,9 @@ class BeamPool {
       colors.clearUpdateRanges();
       colors.addUpdateRange(0, vertex * 3);
       colors.needsUpdate = true;
+      for (const attribute of [uv, effect]) {
+        attribute.clearUpdateRanges(); attribute.addUpdateRange(0, vertex * 2); attribute.needsUpdate = true;
+      }
     }
     mesh.geometry.setDrawRange(0, vertex);
     return visible;
@@ -1068,9 +1091,11 @@ export class CombatEffectRenderer {
   readonly debris: EffectPool;
   readonly wreck: EffectPool;
   readonly beams: BeamPool;
+  private spores?: EffectPool;
+  private facets?: EffectPool;
   private quality: RenderQuality = "medium";
 
-  constructor(scene: THREE.Scene) {
+  constructor(private readonly scene: THREE.Scene) {
     this.muzzle = new EffectPool(scene, new THREE.PlaneGeometry(2, 2), 512, EffectMode.Flash, 0.95);
     this.shield = new EffectPool(scene, new THREE.RingGeometry(0.86, 1, 16), 512, EffectMode.Ripple, 0.18);
     this.flash = new EffectPool(scene, new THREE.PlaneGeometry(2, 2), 256, EffectMode.Flash, 0.92);
@@ -1088,7 +1113,11 @@ export class CombatEffectRenderer {
     this.muzzle.spawn(x, y, z, size, color, now, 95);
   }
 
-  spawnMissileLaunch(x: number, y: number, z: number, color: number, now: number): void {
+  spawnMissileLaunch(x: number, y: number, z: number, color: number, now: number, faction: FactionId = "industrial"): void {
+    if (faction !== "industrial") {
+      this.spawnFactionBurst(x, y, z, color, 1.15, now, faction);
+      return;
+    }
     this.muzzle.spawn(x, y, z, 0.78, 0xffd69b, now, 175, 0, 16, 0);
     this.shock.spawn(x, y + 0.2, z, 1.15, color, now, 260);
   }
@@ -1096,10 +1125,11 @@ export class CombatEffectRenderer {
   spawnDamageImpact(
     x: number, y: number, z: number, radius: number,
     seed: number, damage: number, shielded: boolean, now: number,
-    shipClass?: ShipClass, yaw = 0,
+    shipClass?: ShipClass, yaw = 0, faction: FactionId = "industrial",
+    attackerFaction: FactionId = "industrial",
   ): void {
     const angle = seed * 2.399963;
-    const sites = shipClass ? getShipDamageSites(shipClass) : undefined;
+    const sites = shipClass ? getShipDamageSites(shipClass, faction) : undefined;
     const site = sites?.length ? sites[Math.abs(seed) % sites.length] : undefined;
     const localX = site?.position.x ?? Math.sin(angle) * radius * 0.32;
     const localZ = site?.position.z ?? Math.cos(angle) * radius * 0.5;
@@ -1113,6 +1143,10 @@ export class CombatEffectRenderer {
     }
     const damageScale = Math.min(1, Math.sqrt(damage) / 12);
     const blastSize = Math.min(radius * 0.3, Math.max(0.75, radius * 0.07 + damageScale * 1.5));
+    if (attackerFaction !== "industrial") {
+      this.spawnFactionBurst(hitX, hitY, hitZ, getWeaponStyle("plasma", attackerFaction).color, blastSize, now, attackerFaction);
+      return;
+    }
     this.muzzle.spawn(hitX, hitY, hitZ, blastSize * 0.72, 0xffffff, now, 105);
     this.flash.spawn(hitX, hitY, hitZ, blastSize, 0xffb04f, now, 235);
     // Ordinary impacts throw hot metal; only large blasts get a shock ring.
@@ -1135,9 +1169,9 @@ export class CombatEffectRenderer {
   spawnBeam(
     startX: number, startY: number, startZ: number,
     endX: number, endY: number, endZ: number,
-    color: number, width: number, now: number,
+    color: number, width: number, now: number, faction: FactionId = "industrial",
   ): void {
-    this.beams.spawn(startX, startY, startZ, endX, endY, endZ, color, width, now);
+    this.beams.spawn(startX, startY, startZ, endX, endY, endZ, color, width * (faction === "brood" ? 1.35 : 1), now, 145, faction);
     this.muzzle.spawn(startX, startY, startZ, width * 2.4, color, now, 125);
   }
 
@@ -1155,7 +1189,11 @@ export class CombatEffectRenderer {
     }
   }
 
-  spawnProjectileDetonation(x: number, y: number, z: number, color: number, size: number, now: number): void {
+  spawnProjectileDetonation(x: number, y: number, z: number, color: number, size: number, now: number, faction: FactionId = "industrial"): void {
+    if (faction !== "industrial") {
+      this.spawnFactionBurst(x, y, z, color, size, now, faction);
+      return;
+    }
     this.muzzle.spawn(x, y, z, Math.max(0.35, size * 0.7), size >= 5 ? 0xfff1c7 : color, now, 130);
     if (size < 1) return;
     this.flash.spawn(x, y, z, size, size >= 5 ? 0xffa24a : color, now, size >= 5 ? 320 : 210);
@@ -1170,6 +1208,32 @@ export class CombatEffectRenderer {
         now, 520 + index * 55,
         Math.sin(angle) * speed, 4 + index % 2 * 4, Math.cos(angle) * speed,
       );
+    }
+  }
+
+  private spawnFactionBurst(x: number, y: number, z: number, color: number, size: number, now: number, faction: FactionId): void {
+    this.muzzle.spawn(x, y, z, Math.max(0.3, size * 0.58), color, now, 115);
+    if (size < 1) return;
+    const count = this.quality === "low" ? 1 : this.quality === "medium" ? 2 : 3;
+    if (faction === "brood") {
+      // A rupturing membrane and a few heavy droplets, without smoke emitters.
+      this.spores ??= new EffectPool(this.scene, new THREE.IcosahedronGeometry(1), 256, EffectMode.Debris, 0.88, THREE.NormalBlending);
+      this.flash.spawn(x, y, z, size * 0.7, color, now, 260);
+      for (let i = 0; i < count; i++) {
+        const a = i * 2.39996 + x * 0.13 + z * 0.17;
+        const speed = 3 + size * 0.8;
+        this.spores.spawn(x, y, z, Math.max(0.2, size * 0.18), color, now, 380 + i * 70,
+          Math.sin(a) * speed, 2 + i, Math.cos(a) * speed);
+      }
+    } else {
+      // A clean diamond interference wave, followed by narrow crystal splinters.
+      this.facets ??= new EffectPool(this.scene, new THREE.RingGeometry(0.88, 1, 4), 128, EffectMode.Ring, 0.62);
+      this.facets.spawn(x, y, z, size * 0.82, color, now, 280);
+      for (let i = 0; i < count; i++) {
+        const a = i * Math.PI * 2 / count + x * 0.11;
+        this.debris.spawn(x, y, z, Math.max(0.18, size * 0.11), color, now, 210 + i * 40,
+          Math.sin(a) * (5 + size), 2, Math.cos(a) * (5 + size));
+      }
     }
   }
 
@@ -1214,17 +1278,21 @@ export class CombatEffectRenderer {
     this.debris.update(now, camera);
     this.wreck.update(now, camera);
     this.beams.update(now);
+    this.spores?.update(now, camera);
+    this.facets?.update(now, camera);
   }
 
   get activeCount(): number {
     return this.muzzle.activeCount + this.shield.activeCount + this.flash.activeCount
-      + this.shock.activeCount + this.debris.activeCount + this.wreck.activeCount + this.beams.activeCount;
+      + this.shock.activeCount + this.debris.activeCount + this.wreck.activeCount + this.beams.activeCount
+      + (this.spores?.activeCount ?? 0) + (this.facets?.activeCount ?? 0);
   }
 
   get poolUsage(): string {
     const active = this.activeCount;
     const capacity = this.muzzle.capacity + this.shield.capacity + this.flash.capacity
-      + this.shock.capacity + this.debris.capacity + this.wreck.capacity + this.beams.capacity;
+      + this.shock.capacity + this.debris.capacity + this.wreck.capacity + this.beams.capacity
+      + (this.spores?.capacity ?? 0) + (this.facets?.capacity ?? 0);
     return `${active} / ${capacity}`;
   }
 }

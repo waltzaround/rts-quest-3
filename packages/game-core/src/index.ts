@@ -84,3 +84,5 @@ export type {
   SharedRenderFrame,
 } from "./shared-render-buffer";
 export type * from "./types";
+export * from "./factions";
+export * from "./territory";

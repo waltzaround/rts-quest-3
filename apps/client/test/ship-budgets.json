@@ -1,0 +1,93 @@
+{
+  "fighter": {
+    "vertices": 1140,
+    "farVertices": 300,
+    "width": 7.033239364624023,
+    "length": 7.975764513015747,
+    "mediumVertices": 828
+  },
+  "fabricator": {
+    "vertices": 2250,
+    "farVertices": 180,
+    "width": 16.70185089111328,
+    "length": 31.86523723602295,
+    "mediumVertices": 978
+  },
+  "frigate": {
+    "vertices": 2478,
+    "farVertices": 264,
+    "width": 19.399999618530273,
+    "length": 34.79999923706055,
+    "mediumVertices": 1170
+  },
+  "bomber": {
+    "vertices": 1566,
+    "farVertices": 348,
+    "width": 11.575345993041992,
+    "length": 12.655369758605957,
+    "mediumVertices": 882
+  },
+  "flakFrigate": {
+    "vertices": 2610,
+    "farVertices": 264,
+    "width": 20.600000381469727,
+    "length": 36.0,
+    "mediumVertices": 1218
+  },
+  "torpedoFrigate": {
+    "vertices": 3078,
+    "farVertices": 264,
+    "width": 19.100000381469727,
+    "length": 36.79999923706055,
+    "mediumVertices": 1374
+  },
+  "artilleryFrigate": {
+    "vertices": 2514,
+    "farVertices": 264,
+    "width": 18.5,
+    "length": 38.0,
+    "mediumVertices": 954
+  },
+  "destroyer": {
+    "vertices": 3972,
+    "farVertices": 264,
+    "width": 28.399999618530273,
+    "length": 60.82200050354004,
+    "mediumVertices": 1860
+  },
+  "artilleryDestroyer": {
+    "vertices": 3684,
+    "farVertices": 264,
+    "width": 29.0,
+    "length": 59.5,
+    "mediumVertices": 1284
+  },
+  "cruiser": {
+    "vertices": 5568,
+    "farVertices": 444,
+    "width": 40.400001525878906,
+    "length": 79.70000076293945,
+    "mediumVertices": 2592
+  },
+  "artilleryCruiser": {
+    "vertices": 4224,
+    "farVertices": 264,
+    "width": 38,
+    "length": 82.17699813842773,
+    "mediumVertices": 1392
+  },
+  "carrier": {
+    "vertices": 5778,
+    "farVertices": 480,
+    "width": 69.2168197631836,
+    "length": 88.70000076293945,
+    "mediumVertices": 2994
+  },
+  "battleship": {
+    "vertices": 6654,
+    "farVertices": 444,
+    "width": 45.2400016784668,
+    "length": 113.5989990234375,
+    "mediumVertices": 3342
+  }
+}

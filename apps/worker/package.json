@@ -9,6 +9,7 @@
     "deploy": "wrangler deploy",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "verify:multiplayer": "node scripts/verify-lockstep.mjs",
+    "verify:lobbies": "node scripts/verify-lobby-browser.mjs",
     "verify:multiplayer:soak": "node scripts/verify-high-load.mjs",
     "verify:multiplayer:legacy": "node scripts/verify-multiplayer.mjs"
   },

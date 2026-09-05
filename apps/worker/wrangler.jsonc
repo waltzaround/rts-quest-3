@@ -9,11 +9,13 @@
   },
   "durable_objects": {
     "bindings": [
-      { "name": "MATCH", "class_name": "Match" }
+      { "name": "MATCH", "class_name": "Match" },
+      { "name": "LOBBY_DIRECTORY", "class_name": "LobbyDirectory" }
     ]
   },
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["Match"] }
+    { "tag": "v1", "new_sqlite_classes": ["Match"] },
+    { "tag": "v2", "new_sqlite_classes": ["LobbyDirectory"] }
   ],
   "observability": { "enabled": true }
 }

@@ -1,0 +1,165 @@
+{
+  "beforeSourceHash": "cd1e840ee186b0f82e0ebf481696e8f2fc6836f381943116419fdf32e3ff98c6",
+  "afterSourceHash": "8404b789d9e81c7cf4490826641064fae13c108d15110be6899bd85f7808ca76",
+  "crossFactionGames": 60,
+  "timeLimitSeconds": 600.0,
+  "beforeOutcomes": {
+    "timeout": 44,
+    "victory": 16
+  },
+  "afterOutcomes": {
+    "timeout": 52,
+    "victory": 8
+  },
+  "newlyDecisive": [
+    "orbital-7384-brood-vs-concord-2",
+    "tunnel-7384-industrial-vs-brood-1",
+    "pressure-1729-industrial-vs-brood-1",
+    "pressure-1729-industrial-vs-brood-2",
+    "pressure-7384-industrial-vs-brood-2",
+    "macro-7384-industrial-vs-brood-2"
+  ],
+  "newlyUnresolved": [
+    "orbital-1729-industrial-vs-concord-1",
+    "orbital-1729-brood-vs-concord-2",
+    "orbital-7384-industrial-vs-concord-1",
+    "open-1729-industrial-vs-concord-1",
+    "open-7384-industrial-vs-concord-2",
+    "tunnel-1729-industrial-vs-concord-2",
+    "pressure-7384-industrial-vs-concord-2",
+    "pressure-7384-brood-vs-concord-1",
+    "pressure-7384-brood-vs-concord-2",
+    "macro-1729-industrial-vs-concord-2",
+    "macro-1729-brood-vs-concord-1",
+    "macro-1729-brood-vs-concord-2",
+    "macro-7384-brood-vs-concord-1",
+    "macro-7384-brood-vs-concord-2"
+  ],
+  "checkpoints": {
+    "60": {
+      "industrial": {
+        "pairedAppearances": 40,
+        "before": {
+          "combatShips": 4.4,
+          "completedYards": 1,
+          "alloyIncome": 36.528
+        },
+        "after": {
+          "combatShips": 5.8,
+          "completedYards": 1,
+          "alloyIncome": 36.528
+        }
+      },
+      "brood": {
+        "pairedAppearances": 40,
+        "before": {
+          "combatShips": 12,
+          "completedYards": 1,
+          "alloyIncome": 36.528
+        },
+        "after": {
+          "combatShips": 11.95,
+          "completedYards": 1.8,
+          "alloyIncome": 36.528
+        }
+      },
+      "concord": {
+        "pairedAppearances": 40,
+        "before": {
+          "combatShips": 3.725,
+          "completedYards": 1,
+          "alloyIncome": 35.813
+        },
+        "after": {
+          "combatShips": 3,
+          "completedYards": 1,
+          "alloyIncome": 36.528
+        }
+      }
+    },
+    "300": {
+      "industrial": {
+        "pairedAppearances": 40,
+        "before": {
+          "combatShips": 24.85,
+          "completedYards": 1.95,
+          "alloyIncome": 74.48318956827246
+        },
+        "after": {
+          "combatShips": 15.325,
+          "completedYards": 2.575,
+          "alloyIncome": 98.61861557717444
+        }
+      },
+      "brood": {
+        "pairedAppearances": 40,
+        "before": {
+          "combatShips": 11.95,
+          "completedYards": 3.1,
+          "alloyIncome": 74.31282100651468
+        },
+        "after": {
+          "combatShips": 19.5,
+          "completedYards": 4.275,
+          "alloyIncome": 70.41122027779686
+        }
+      },
+      "concord": {
+        "pairedAppearances": 40,
+        "before": {
+          "combatShips": 12.85,
+          "completedYards": 1.825,
+          "alloyIncome": 47.811119027616975
+        },
+        "after": {
+          "combatShips": 18.45,
+          "completedYards": 2.1,
+          "alloyIncome": 62.77090977739575
+        }
+      }
+    },
+    "600": {
+      "industrial": {
+        "pairedAppearances": 26,
+        "before": {
+          "combatShips": 43.15384615384615,
+          "completedYards": 3.769230769230769,
+          "alloyIncome": 193.15202684169037
+        },
+        "after": {
+          "combatShips": 64.26923076923077,
+          "completedYards": 6.538461538461538,
+          "alloyIncome": 224.57663716503333
+        }
+      },
+      "brood": {
+        "pairedAppearances": 26,
+        "before": {
+          "combatShips": 27.692307692307693,
+          "completedYards": 5.653846153846154,
+          "alloyIncome": 142.6785203571926
+        },
+        "after": {
+          "combatShips": 41.53846153846154,
+          "completedYards": 9.384615384615385,
+          "alloyIncome": 110.75817721474051
+        }
+      },
+      "concord": {
+        "pairedAppearances": 24,
+        "before": {
+          "combatShips": 8.958333333333334,
+          "completedYards": 3.125,
+          "alloyIncome": 86.84181528360354
+        },
+        "after": {
+          "combatShips": 42.75,
+          "completedYards": 4.125,
+          "alloyIncome": 122.11636030417995
+        }
+      }
+    },
+    "1200": {},
+    "1800": {}
+  }
+}

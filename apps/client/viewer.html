@@ -5,27 +5,32 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Ship Viewer // Command Prompt</title>
     <style>
-      html, body { margin: 0; height: 100%; background: #05080d; color: #cfe4f2; font: 12px/1.4 ui-monospace, Menlo, monospace; overflow: hidden; }
+      html, body { margin: 0; height: 100%; background: #05080d; color: #cfe4f2; font: 14px/1.4 ui-monospace, Menlo, monospace; overflow: hidden; }
       #viewer { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
       #labels .label { position: fixed; transform: translate(-50%, -100%); padding: 2px 6px; background: rgba(4, 10, 16, 0.72); border: 1px solid rgba(120, 190, 230, 0.35); pointer-events: none; white-space: nowrap; letter-spacing: 0.06em; text-transform: uppercase; }
+      #labels .economy-label { max-width: 120px; white-space: normal; text-align: center; font-size: 11px; }
       #info { position: fixed; left: 12px; bottom: 10px; right: 12px; opacity: 0.75; white-space: pre-wrap; }
       #help { position: fixed; left: 12px; top: 10px; opacity: 0.75; }
       #tools { position: fixed; top: 42px; left: 12px; right: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
       #tools label { display: flex; align-items: center; gap: 6px; }
       select, button { background: #111c26; color: #cfe4f2; border: 1px solid #344b5a; border-radius: 4px; padding: 6px 8px; font: inherit; }
       button { cursor: pointer; } button:hover { background: #22394a; }
+      #tools [hidden] { display: none; }
       input[type=range] { width: 90px; accent-color: #dd9260; }
     </style>
   </head>
   <body>
     <canvas id="viewer"></canvas>
     <div id="labels"></div>
-    <div id="help">SHIP VIEWER · drag to orbit · wheel to zoom · ?class=cruiser · ?lod=close|medium|large|far · ?team=1-8</div>
+    <div id="help">FLEET ARCHIVE · drag to orbit · pinch to zoom</div>
     <div id="tools">
-      <label>Ship <select id="ship-class"><option value="all">Entire fleet</option></select></label>
+      <label>Faction <select id="faction"><option value="industrial">Industrial</option><option value="brood">Brood</option><option value="concord">Concord</option></select></label>
+      <label>View <select id="model-kind"><option value="ships">Units</option><option value="structures">Buildings</option><option value="economy">Economy</option></select></label>
+      <label><span id="model-label">Unit</span> <select id="ship-class"><option value="all">Entire fleet</option></select></label>
       <label>Detail <select id="lod"><option value="close">Close</option><option value="medium">Medium</option><option value="large">Large battle</option><option value="far">Far</option></select></label>
       <label>Hull <input id="health" type="range" min="5" max="100" value="100" /><span id="health-value">100%</span></label>
       <button id="impact">Hull impact</button><button id="shield-impact">Shield impact</button><button id="explosion">Destruction VFX</button>
+      <label id="fighter-fire-control" hidden><input id="fighter-fire" type="checkbox" />Test fighter guns</label>
       <label><input id="repeat-impacts" type="checkbox" />Repeat hits</label>
     </div>
     <div id="info"></div>

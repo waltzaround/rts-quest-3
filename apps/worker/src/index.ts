@@ -21,6 +21,7 @@ import {
   REPLAY_CHUNK_BYTES,
   parseClientMessage,
   type ClientMessage,
+  type LobbyListEntry,
   type LobbyPlayerSlot,
   type LobbySettings,
   type LobbyState,
@@ -28,9 +29,11 @@ import {
   type ServerMessage,
 } from "@space-rts/protocol";
 import { SIMULATION_HZ } from "@space-rts/shared";
+export { LobbyDirectory } from "./lobby-directory";
 
 interface Env {
   MATCH: DurableObjectNamespace;
+  LOBBY_DIRECTORY: DurableObjectNamespace;
   /** Local-only opt-in used by the sustained multiplayer load verifier. */
   VOIDFRONT_SOAK_UNITS_PER_PLAYER?: string;
 }
@@ -120,6 +123,10 @@ const MAX_CHECKPOINT_CHUNKS = 2_048;
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === "/matches") {
+      if (request.method !== "GET") return new Response("Method not allowed", { status: 405 });
+      return env.LOBBY_DIRECTORY.get(env.LOBBY_DIRECTORY.idFromName("public")).fetch("https://directory/");
+    }
     if (url.pathname === "/health") {
       return Response.json({
         ok: true,
@@ -134,7 +141,7 @@ export default {
     if (!match?.[1]) {
       return Response.json({
         service: "voidfront-authority",
-        routes: ["GET /health", "GET /matches/:id", "WS /matches/:id/connect"],
+        routes: ["GET /health", "GET /matches", "GET /matches/:id", "WS /matches/:id/connect"],
       });
     }
     const id = env.MATCH.idFromName(match[1]);
@@ -162,6 +169,7 @@ export class Match implements DurableObject {
     messages: Map<Extract<ServerMessage, { type: "lockstep_state" }>["reason"], string>;
   } | null = null;
   private persistChain: Promise<void> = Promise.resolve();
+  private directoryChain: Promise<void> = Promise.resolve();
   private checkpointManifest: PersistedCheckpointManifest | null = null;
   private relayTick = 0;
   private relayCommands: GameCommand[] = [];
@@ -191,11 +199,14 @@ export class Match implements DurableObject {
       this.lobby = this.redactLobby({
         ...restoredLobby,
         settings: { ...DEFAULT_LOBBY_SETTINGS, ...restoredLobby.settings },
-        slots: restoredLobby.slots.map((slot) => slot.isAi ? {
-          ...slot,
-          aiDifficulty: slot.aiDifficulty ?? "normal",
-          aiPersonality: slot.aiPersonality ?? "balanced",
-        } : slot),
+        slots: restoredLobby.slots.map((savedSlot) => {
+          const slot = { ...savedSlot, faction: savedSlot.faction ?? "industrial" as const };
+          return slot.isAi ? {
+            ...slot,
+            aiDifficulty: slot.aiDifficulty ?? "normal",
+            aiPersonality: slot.aiPersonality ?? "balanced",
+          } : slot;
+        }),
       });
       if (this.lobby.phase === "lobby" && !this.lobby.slots.some((slot) => slot.isHost)) {
         const fallbackHost = this.lobby.slots.find((slot) => !slot.isAi);
@@ -379,6 +390,7 @@ export class Match implements DurableObject {
         connected: true,
         isHost: becomesHost,
         isAi: false,
+        faction: "industrial",
       };
       this.lobby.slots.push(slot);
       this.reconnectTokens[playerId] = this.createReconnectToken();
@@ -556,6 +568,18 @@ export class Match implements DurableObject {
           this.sendRelayHistory(socket);
         }
         return;
+      case "set_faction": {
+        if (!this.requireLobby(socket)) return;
+        const target = message.playerId ? this.lobby.slots.find((candidate) => candidate.playerId === message.playerId) : slot;
+        if (!target || (target.playerId !== slot.playerId && !(slot.isHost && target.isAi))) {
+          this.fail(socket, "faction_owner", "Choose your own faction; the host can also choose AI factions");
+          return;
+        }
+        target.faction = message.faction;
+        for (const human of this.lobby.slots) if (!human.isAi) human.ready = false;
+        this.lobbyChanged();
+        return;
+      }
       case "set_ready":
         if (!this.requireLobby(socket)) return;
         slot.ready = message.ready;
@@ -691,6 +715,7 @@ export class Match implements DurableObject {
       connected: true,
       isHost: false,
       isAi: true,
+      faction: message.faction ?? "industrial",
       aiDifficulty: message.difficulty ?? "normal",
       aiPersonality: message.personality ?? "balanced",
     };
@@ -744,6 +769,7 @@ export class Match implements DurableObject {
       varyStartingPositions: true,
       players: this.lobby.slots.map((slot) => ({
         id: slot.playerId,
+        faction: slot.faction,
         name: slot.name,
         teamId: slot.teamId,
         color: slot.color,
@@ -1105,6 +1131,44 @@ export class Match implements DurableObject {
 
   private broadcastLobby(): void {
     this.broadcast({ type: "lobby", lobby: this.publicLobby() });
+    this.queueDirectoryUpdate();
+  }
+
+  async alarm(): Promise<void> {
+    // A heartbeat keeps idle, hibernating lobbies discoverable, including when
+    // the host's browser throttles its timers in a background tab.
+    await this.queueDirectoryUpdate();
+  }
+
+  private queueDirectoryUpdate(): Promise<void> {
+    this.directoryChain = this.directoryChain.then(async () => {
+      if (this.lobby.matchId === "pending") return;
+      const connectedPlayers = new Set(this.ctx.getWebSockets()
+        .filter((socket) => socket.readyState === WebSocket.OPEN)
+        .map((socket) => this.attachment(socket).playerId));
+      const host = this.lobby.slots.find((slot) => slot.isHost && !slot.isAi && slot.connected && connectedPlayers.has(slot.playerId));
+      const capacity = Math.min(this.lobby.maxPlayers, this.mapPlayerCapacity());
+      const joinable = this.lobby.phase === "lobby" && host && this.lobby.slots.length < capacity;
+      const directory = this.env.LOBBY_DIRECTORY.get(this.env.LOBBY_DIRECTORY.idFromName("public"));
+      const entry: LobbyListEntry | null = joinable ? {
+        matchId: this.lobby.matchId, hostName: host.name, mode: this.lobby.mode,
+        mapPreset: this.lobby.settings.mapPreset, mapSize: this.lobby.settings.mapSize,
+        playerCount: this.lobby.slots.length, aiCount: this.lobby.slots.filter((slot) => slot.isAi).length,
+        capacity, createdAt: this.lobby.createdAt,
+      } : null;
+      const response = await directory.fetch(`https://directory/${this.lobby.matchId}`, entry
+        ? { method: "PUT", body: JSON.stringify(entry) }
+        : { method: "DELETE" });
+      if (!response.ok) throw new Error(`Lobby discovery update failed: ${response.status}`);
+      if (host && this.lobby.phase === "lobby") await this.ctx.storage.setAlarm(Date.now() + 30_000);
+      else await this.ctx.storage.deleteAlarm();
+    }).catch((error: unknown) => {
+      console.error("Lobby discovery update failed", error);
+      // Retry a transient directory outage without interrupting the match.
+      return this.ctx.storage.setAlarm(Date.now() + 30_000);
+    });
+    this.ctx.waitUntil(this.directoryChain);
+    return this.directoryChain;
   }
 
   private sendSnapshot(socket: WebSocket, reason: Extract<ServerMessage, { type: "snapshot" }>["reason"]): void {

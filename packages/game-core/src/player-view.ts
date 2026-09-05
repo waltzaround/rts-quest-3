@@ -32,6 +32,9 @@ export function projectPlayerView(state: SimulationState, playerId: PlayerId): P
       const sharesPrivateState = relationship !== "hostile";
       return {
         id: ship.id,
+        faction: ship.faction ?? "industrial",
+        ...(sharesPrivateState && ship.broodNestId !== undefined ? { broodNestId: ship.broodNestId } : {}),
+        ...(sharesPrivateState && ship.lastDamageTick !== undefined ? { lastDamageTick: ship.lastDamageTick } : {}),
         ownerPlayerId: ship.ownerPlayerId,
         teamId: ship.teamId,
         relationship,
@@ -103,6 +106,9 @@ export function projectPlayerView(state: SimulationState, playerId: PlayerId): P
           : [],
         repeatProduction: sharesPrivateState && structure.repeatProduction,
         rallyPoint: sharesPrivateState ? { ...structure.rallyPoint } : null,
+        ...(sharesPrivateState && structure.warpPoint ? { warpPoint: { ...structure.warpPoint } } : {}),
+        ...(sharesPrivateState && structure.broodClass !== undefined
+          ? { broodClass: structure.broodClass, broodProgress: structure.broodProgress ?? 0 } : {}),
         ...(structure.revealedUntilTick !== undefined
           ? { revealedUntilTick: structure.revealedUntilTick }
           : {}),
@@ -111,13 +117,14 @@ export function projectPlayerView(state: SimulationState, playerId: PlayerId): P
 
   const view: PlayerViewState = {
     version: 1,
-    simulationVersion: 9,
+    simulationVersion: 11,
     tick: state.tick,
     viewerPlayerId: viewer.id,
     viewerTeamId: viewer.teamId,
     ownLastCommandSequence: viewer.lastCommandSequence,
     players: state.players.map((player) => ({
       id: player.id,
+      faction: player.faction,
       name: player.name,
       teamId: player.teamId,
       color: player.color,
@@ -132,6 +139,8 @@ export function projectPlayerView(state: SimulationState, playerId: PlayerId): P
     })),
     ships,
     structures,
+    territories: state.territories.filter((field) => areTeamsAllied(state, viewer.teamId, field.teamId)
+      || visibleEntityIds.has(field.id)).map((field) => ({ ...field })),
     resourceNodes: state.resourceNodes
       .filter((node) => discoveredResourceNodeIds.has(node.id))
       .map((node) => ({
@@ -192,10 +201,11 @@ export function calculateTeamViewChecksum(view: TeamViewState): number {
 export function projectOmniscientView(state: SimulationState): OmniscientViewState {
   const view: OmniscientViewState = {
     version: 1,
-    simulationVersion: 9,
+    simulationVersion: 11,
     tick: state.tick,
     players: state.players.map((player) => ({
       id: player.id,
+      faction: player.faction,
       name: player.name,
       teamId: player.teamId,
       color: player.color,
@@ -208,6 +218,7 @@ export function projectOmniscientView(state: SimulationState): OmniscientViewSta
       name: team.name,
       alliedTeamIds: [...team.alliedTeamIds].sort((left, right) => left - right),
     })),
+    territories: state.territories.map((field) => ({ ...field })),
     ships: state.ships.map((ship) => ({
       ...ship,
       relationship: "omniscient",
@@ -223,6 +234,7 @@ export function projectOmniscientView(state: SimulationState): OmniscientViewSta
       relationship: "omniscient",
       productionQueue: structure.productionQueue.map((item) => ({ ...item })),
       rallyPoint: { ...structure.rallyPoint },
+      ...(structure.warpPoint ? { warpPoint: { ...structure.warpPoint } } : {}),
     })),
     resourceNodes: state.resourceNodes.map((node) => ({ ...node })),
     obstacles: state.obstacles.map((obstacle) => ({ ...obstacle })),

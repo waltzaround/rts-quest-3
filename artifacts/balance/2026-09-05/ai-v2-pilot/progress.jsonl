@@ -1,0 +1,6 @@
+{"completed":1,"total":6,"id":"orbital-1729-industrial-vs-brood-1","winner":"industrial","seconds":481.65,"wallSeconds":4.186021542000001,"shipsProduced":[87,48],"coreHull":[1,0]}
+{"completed":2,"total":6,"id":"orbital-1729-industrial-vs-brood-2","winner":"timeout","seconds":600,"wallSeconds":10.891840375,"shipsProduced":[214,298],"coreHull":[0.5175594405594405,1]}
+{"completed":3,"total":6,"id":"orbital-1729-industrial-vs-concord-1","winner":"timeout","seconds":600,"wallSeconds":6.819763832999999,"shipsProduced":[165,44],"coreHull":[1,1]}
+{"completed":4,"total":6,"id":"orbital-1729-industrial-vs-concord-2","winner":"timeout","seconds":600,"wallSeconds":10.045558624999998,"shipsProduced":[50,302],"coreHull":[1,1]}
+{"completed":5,"total":6,"id":"orbital-1729-brood-vs-concord-1","winner":"timeout","seconds":600,"wallSeconds":5.562353583,"shipsProduced":[52,56],"coreHull":[1,1]}
+{"completed":6,"total":6,"id":"orbital-1729-brood-vs-concord-2","winner":"timeout","seconds":600,"wallSeconds":6.3104625830000005,"shipsProduced":[62,14],"coreHull":[1,1]}

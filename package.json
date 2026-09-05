@@ -11,7 +11,8 @@
     "deploy": "pnpm --filter @space-rts/client build && pnpm --filter @space-rts/worker run deploy",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm --filter @space-rts/client test && pnpm --filter @space-rts/game-core test && pnpm --filter @space-rts/protocol test && pnpm --filter @space-rts/box3d-wasm test",
-    "test:watch": "pnpm --filter @space-rts/game-core test:watch"
+    "test:watch": "pnpm --filter @space-rts/game-core test:watch",
+    "determinism": "node scripts/check-determinism.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",

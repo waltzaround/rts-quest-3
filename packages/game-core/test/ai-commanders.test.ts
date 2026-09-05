@@ -233,6 +233,6 @@ describe("AI commander profiles", () => {
     })).toBeGreaterThanOrEqual(5);
     expect(attackOrders.every((order) =>
       (order.destination.x - core.x) * inwardX + (order.destination.z - core.z) * inwardZ > radialLength * 0.5,
-    )).toBe(true);
+    ), JSON.stringify({ core: [core.x, core.z], orders: attackOrders.map((order) => order.destination), plan: simulation.state.aiPlans?.bot })).toBe(true);
   });
 });

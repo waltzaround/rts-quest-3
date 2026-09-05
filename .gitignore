@@ -7,3 +7,5 @@ coverage
 
 .pnpm-store/
 .pnpm-lock.yaml
+
+artifacts/determinism/

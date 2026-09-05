@@ -28,6 +28,7 @@ export function calculateChecksum(state: SimulationState): number {
   hash = hashUint(hash, state.winnerTeamId ?? 0);
   for (const player of state.players) {
     hash = hashString(hash, player.id);
+    hash = hashString(hash, player.faction);
     hash = hashUint(hash, player.teamId);
     hash = hashString(hash, player.state);
     hash = hashUint(hash, player.lastCommandSequence);
@@ -48,6 +49,9 @@ export function calculateChecksum(state: SimulationState): number {
   }
   for (const ship of state.ships) {
     hash = hashUint(hash, ship.id);
+    hash = hashString(hash, ship.faction ?? "industrial");
+    hash = hashUint(hash, ship.broodNestId ?? 0);
+    hash = hashUint(hash, ship.lastDamageTick ?? 0);
     hash = hashString(hash, ship.ownerPlayerId);
     hash = hashUint(hash, ship.teamId);
     hash = hashString(hash, ship.class);
@@ -104,6 +108,11 @@ export function calculateChecksum(state: SimulationState): number {
   }
   for (const structure of state.structures) {
     hash = hashUint(hash, structure.id);
+    hash = hashString(hash, structure.broodClass ?? "");
+    hash = hashUint(hash, quantize(structure.broodProgress ?? 0));
+    hash = hashUint(hash, structure.warpPoint ? 1 : 0);
+    hash = hashUint(hash, quantize(structure.warpPoint?.x ?? 0));
+    hash = hashUint(hash, quantize(structure.warpPoint?.z ?? 0));
     hash = hashString(hash, structure.ownerPlayerId);
     hash = hashUint(hash, structure.teamId);
     hash = hashString(hash, structure.type);
@@ -130,6 +139,16 @@ export function calculateChecksum(state: SimulationState): number {
       hash = hashString(hash, item.shipClass);
       hash = hashUint(hash, quantize(item.progress));
     }
+  }
+  for (const field of state.territories) {
+    hash = hashUint(hash, field.id);
+    hash = hashString(hash, field.ownerPlayerId);
+    hash = hashUint(hash, field.teamId);
+    hash = hashString(hash, field.kind);
+    hash = hashUint(hash, quantize(field.x));
+    hash = hashUint(hash, quantize(field.z));
+    hash = hashUint(hash, quantize(field.radius));
+    hash = hashUint(hash, quantize(field.maxRadius));
   }
   for (const node of state.resourceNodes) {
     hash = hashUint(hash, node.id);
@@ -198,7 +217,7 @@ export function calculateChecksum(state: SimulationState): number {
         hash = hashUint(hash, command.queueItemId);
       } else if (command.type === "setProductionRepeat") {
         hash = hashUint(hash, command.enabled ? 1 : 0);
-      } else if (command.type === "setRallyPoint") {
+      } else if (command.type === "setRallyPoint" || command.type === "setWarpPoint") {
         hash = hashUint(hash, quantize(command.position.x));
         hash = hashUint(hash, quantize(command.position.z));
       }
@@ -209,6 +228,32 @@ export function calculateChecksum(state: SimulationState): number {
     const commander = state.aiCommanders?.[playerId];
     hash = hashString(hash, commander?.difficulty ?? "normal");
     hash = hashString(hash, commander?.personality ?? "balanced");
+    const plan = state.aiPlans?.[playerId];
+    hash = hashUint(hash, plan ? 1 : 0);
+    if (plan) {
+      hash = hashUint(hash, plan.searchIndex);
+      hash = hashUint(hash, plan.knownStructures.length);
+      for (const contact of plan.knownStructures) {
+        hash = hashUint(hash, contact.id);
+        hash = hashString(hash, contact.type);
+        hash = hashUint(hash, quantize(contact.x));
+        hash = hashUint(hash, quantize(contact.z));
+      }
+      hash = hashUint(hash, plan.recoveringShipIds.length);
+      for (const id of plan.recoveringShipIds) hash = hashUint(hash, id);
+      hash = hashUint(hash, plan.constructionWatch ? 1 : 0);
+      if (plan.constructionWatch) {
+        hash = hashString(hash, plan.constructionWatch.key);
+        hash = hashUint(hash, quantize(plan.constructionWatch.progress));
+        hash = hashUint(hash, plan.constructionWatch.lastProgressTick);
+      }
+      hash = hashUint(hash, plan.blockedSites?.length ?? 0);
+      for (const site of plan.blockedSites ?? []) {
+        hash = hashUint(hash, quantize(site.x));
+        hash = hashUint(hash, quantize(site.z));
+        hash = hashUint(hash, site.untilTick);
+      }
+    }
   }
   return hash >>> 0;
 }

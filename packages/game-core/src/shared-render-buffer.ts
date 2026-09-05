@@ -1,4 +1,6 @@
-import { ALL_SHIP_CLASSES, SHIPS, WEAPONS } from "./data";
+import { ALL_SHIP_CLASSES, WEAPONS } from "./data";
+import { getFactionShipDefinition } from "./factions";
+import { CREEP_SPEED_MULTIPLIER } from "./territory";
 import type { ProjectileState, ShipState, SimulationState, TurretState } from "./types";
 
 const HEADER_LENGTH = 8;
@@ -138,7 +140,7 @@ export class SharedRenderWriter {
     const vitals = index * SHIP_VITALS_STRIDE;
     this.shipVitals[vitals] = ship.health;
     this.shipVitals[vitals + 1] = ship.shields;
-    this.shipVitals[vitals + 2] = Math.hypot(ship.vx, ship.vz) > SHIPS[ship.class].speed * 1.01 ? 1 : 0;
+    this.shipVitals[vitals + 2] = Math.hypot(ship.vx, ship.vz) > getFactionShipDefinition(ship.class, ship.faction).speed * (ship.faction === "brood" ? CREEP_SPEED_MULTIPLIER : 1) * 1.01 ? 1 : 0;
     this.shipVitals[vitals + 3] = ship.artilleryDeploymentTicks ?? 0;
     this.shipVitals[vitals + 4] = ship.revealedUntilTick ?? 0;
   }

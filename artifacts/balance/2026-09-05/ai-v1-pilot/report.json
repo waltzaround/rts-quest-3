@@ -1,0 +1,1722 @@
+{
+  "format": "space-rts-ai-balance-v1",
+  "createdAt": "2026-09-05T01:57:14.008Z",
+  "sourceHash": "09aad4a3d53640051e71f23a703c90bfe6f8d611c3d5645e3975da36caec7ffc",
+  "runnerHash": "7e77f51323482e70903652c0ff93da7caa357e4fbf97b2e842d424752156388d",
+  "runtime": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "node": "v22.12.0",
+    "v8": "12.4.254.21-node.21"
+  },
+  "backend": "box3d-wasm",
+  "maxTicks": 12000,
+  "simulationHz": 20,
+  "profiles": {
+    "orbital": {
+      "scenario": {
+        "mapPreset": "orbital-ring"
+      },
+      "difficulty": "normal",
+      "personality": "balanced"
+    },
+    "open": {
+      "scenario": {
+        "mapPreset": "open-expanse"
+      },
+      "difficulty": "normal",
+      "personality": "balanced"
+    },
+    "tunnel": {
+      "scenario": {
+        "mapPreset": "amazon-tunnel"
+      },
+      "difficulty": "normal",
+      "personality": "balanced"
+    },
+    "pressure": {
+      "scenario": {
+        "mapPreset": "core-rush",
+        "mapSize": "small",
+        "startingResources": "low",
+        "resourceDensity": "scarce"
+      },
+      "difficulty": "hard",
+      "personality": "aggressive"
+    },
+    "macro": {
+      "scenario": {
+        "mapPreset": "open-expanse",
+        "startingResources": "high",
+        "resourceDensity": "rich"
+      },
+      "difficulty": "hard",
+      "personality": "economic"
+    }
+  },
+  "seeds": [
+    1729
+  ],
+  "plannedMatches": 6,
+  "completedMatches": 6,
+  "methodology": "No injected units/resources/orders or changed stats. Normal game victory only; timeouts remain unresolved. Each cross-faction pairing swaps factions between fixed player IDs/positions on the same seed. 1-second state sampling, per-tick event/economy accounting; 30-second timeline. A unit is one controllable entity, not one drawn fighter craft.",
+  "sourceUnchanged": true,
+  "matches": [
+    {
+      "id": "orbital-1729-industrial-vs-brood-1",
+      "profile": "orbital",
+      "seed": 1729,
+      "leg": 1,
+      "factions": [
+        "industrial",
+        "brood"
+      ],
+      "options": {
+        "mapSize": "medium",
+        "startingResources": "standard",
+        "resourceDensity": "standard",
+        "startingBase": "full",
+        "startingFleet": false,
+        "varyStartingPositions": true,
+        "mapPreset": "orbital-ring",
+        "seed": 1729,
+        "players": [
+          {
+            "id": "slot-1",
+            "name": "Slot 1",
+            "teamId": 1,
+            "faction": "industrial",
+            "ai": true,
+            "aiDifficulty": "normal",
+            "aiPersonality": "balanced"
+          },
+          {
+            "id": "slot-2",
+            "name": "Slot 2",
+            "teamId": 2,
+            "faction": "brood",
+            "ai": true,
+            "aiDifficulty": "normal",
+            "aiPersonality": "balanced"
+          }
+        ]
+      },
+      "geometryHash": "fbed836a4fa80c837e8786cfbec47f8238c1b31e7bd0f80efef3e527d84bcc80",
+      "ticks": 10731,
+      "seconds": 536.55,
+      "outcome": "victory",
+      "winnerFaction": "industrial",
+      "winnerSlot": "slot-1",
+      "firstHitSeconds": 56.65,
+      "lastHitSeconds": 536.55,
+      "hitCount": 55203,
+      "checksum": 384161076,
+      "wallSeconds": 5.8559100829999995,
+      "metrics": [
+        {
+          "id": "slot-1",
+          "faction": "industrial",
+          "produced": {
+            "fabricator": 4,
+            "bomber": 25,
+            "fighter": 55,
+            "cruiser": 1,
+            "torpedoFrigate": 1,
+            "flakFrigate": 2,
+            "frigate": 3,
+            "destroyer": 1,
+            "artilleryFrigate": 1
+          },
+          "lost": {
+            "fabricator": 2,
+            "bomber": 15,
+            "fighter": 25
+          },
+          "structuresStarted": {
+            "extractor": 2,
+            "pointDefenseBattery": 1,
+            "solarArray": 2,
+            "fabricator": 1,
+            "storage": 2,
+            "fleetShipyard": 1,
+            "deepCoreExtractor": 3,
+            "fusionReactor": 1,
+            "alloyRefinery": 1,
+            "shipyard": 2,
+            "capitalShipyard": 1,
+            "antimatterReactor": 1
+          },
+          "structuresCompleted": {
+            "extractor": 2,
+            "pointDefenseBattery": 1,
+            "solarArray": 2,
+            "fabricator": 1,
+            "storage": 2,
+            "fleetShipyard": 1,
+            "deepCoreExtractor": 3,
+            "fusionReactor": 1,
+            "alloyRefinery": 1,
+            "shipyard": 2,
+            "capitalShipyard": 1
+          },
+          "structuresLost": {},
+          "firstUnitSeconds": 13.5,
+          "firstCombatUnitSeconds": 108.95,
+          "firstBuilderSeconds": 13.5,
+          "firstTerritoryNodeSeconds": null,
+          "firstTier2YardSeconds": 168,
+          "shipDamageTaken": 39443.21999999843,
+          "structureDamageTaken": 2162.5,
+          "coreDamageTaken": 336,
+          "shotsByShips": 53820,
+          "shotsByStructures": 3683,
+          "alloyIncomeIntegrated": 32901.449999998185,
+          "energyIncomeIntegrated": 68290.500000005,
+          "alloySpent": 33801.44999999853,
+          "energySpent": 35202.25810388489,
+          "samples": 536,
+          "efficiencySum": 180.03642662727347,
+          "starvedSamples": 503,
+          "peakCombatShips": 50,
+          "combatShipSamples": 9236,
+          "fightingShipSamples": 4835,
+          "fightingInOwnFieldSamples": 0,
+          "completedYardSamples": 1320,
+          "readyBlockedYardSamples": 0,
+          "specializedNestSamples": 0,
+          "cappedNestSamples": 0,
+          "uncoveredNestSamples": 0
+        },
+        {
+          "id": "slot-2",
+          "faction": "brood",
+          "produced": {
+            "fighter": 88,
+            "fabricator": 6
+          },
+          "lost": {
+            "fighter": 82,
+            "fabricator": 4
+          },
+          "structuresStarted": {
+            "extractor": 7,
+            "shipyard": 1,
+            "solarArray": 1,
+            "creepNode": 4,
+            "pointDefenseBattery": 1,
+            "fabricator": 1,
+            "storage": 1,
+            "fleetShipyard": 1
+          },
+          "structuresCompleted": {
+            "extractor": 7,
+            "shipyard": 1,
+            "solarArray": 1,
+            "creepNode": 2,
+            "pointDefenseBattery": 1,
+            "fabricator": 1,
+            "storage": 1
+          },
+          "structuresLost": {
+            "extractor": 8,
+            "creepNode": 4,
+            "solarArray": 2,
+            "storage": 1,
+            "commandCore": 1
+          },
+          "firstUnitSeconds": 5.6,
+          "firstCombatUnitSeconds": 5.6,
+          "firstBuilderSeconds": 79,
+          "firstTerritoryNodeSeconds": 80,
+          "firstTier2YardSeconds": null,
+          "shipDamageTaken": 57484.100000012986,
+          "structureDamageTaken": 30576.066880341823,
+          "coreDamageTaken": 7106.661111111114,
+          "shotsByShips": 35328,
+          "shotsByStructures": 6403,
+          "alloyIncomeIntegrated": 19095.632042888505,
+          "energyIncomeIntegrated": 26477.29999999486,
+          "alloySpent": 8375.634740496782,
+          "energySpent": 14244.110186406844,
+          "samples": 536,
+          "efficiencySum": 529.1046219579085,
+          "starvedSamples": 7,
+          "peakCombatShips": 12,
+          "combatShipSamples": 5520,
+          "fightingShipSamples": 3290,
+          "fightingInOwnFieldSamples": 1244,
+          "completedYardSamples": 1017,
+          "readyBlockedYardSamples": 0,
+          "specializedNestSamples": 1014,
+          "cappedNestSamples": 557,
+          "uncoveredNestSamples": 0
+        }
+      ],
+      "final": [
+        {
+          "id": "slot-1",
+          "faction": "industrial",
+          "ships": {
+            "fabricator": 2,
+            "cruiser": 1,
+            "torpedoFrigate": 1,
+            "fighter": 30,
+            "flakFrigate": 2,
+            "frigate": 3,
+            "bomber": 10,
+            "destroyer": 1,
+            "artilleryFrigate": 1
+          },
+          "combatShips": 49,
+          "industrialEquivalentArmyCost": 17540,
+          "structures": {
+            "commandCore": 1,
+            "solarArray": 3,
+            "shipyard": 3,
+            "pointDefenseBattery": 1,
+            "fabricator": 1,
+            "storage": 2,
+            "fleetShipyard": 1,
+            "deepCoreExtractor": 3,
+            "fusionReactor": 1,
+            "alloyRefinery": 1,
+            "capitalShipyard": 1
+          },
+          "constructing": {
+            "antimatterReactor": 1
+          },
+          "coreHullFraction": 1,
+          "coreShieldFraction": 0.79,
+          "economy": {
+            "alloy": 0,
+            "energy": 7692.920666390942,
+            "alloyIncome": 111,
+            "energyIncome": 188,
+            "alloySpend": 111.00000000000001,
+            "energySpend": 141.58667218116832,
+            "alloyStorage": 8650,
+            "energyStorage": 7700,
+            "efficiency": 0.2583669352107028
+          },
+          "territorySources": 0
+        },
+        {
+          "id": "slot-2",
+          "faction": "brood",
+          "ships": {
+            "fighter": 6,
+            "fabricator": 2
+          },
+          "combatShips": 6,
+          "industrialEquivalentArmyCost": 696,
+          "structures": {
+            "shipyard": 2,
+            "pointDefenseBattery": 1,
+            "fabricator": 1
+          },
+          "constructing": {
+            "fleetShipyard": 1
+          },
+          "coreHullFraction": 0,
+          "coreShieldFraction": 0,
+          "economy": {
+            "alloy": 0,
+            "energy": 88.83690015918927,
+            "alloyIncome": 3,
+            "energyIncome": 12,
+            "alloySpend": 3.0000000000000004,
+            "energySpend": 2.413926499032882,
+            "alloyStorage": 2500,
+            "energyStorage": 2500,
+            "efficiency": 0.01160541586073501
+          },
+          "territorySources": 1
+        }
+      ]
+    },
+    {
+      "id": "orbital-1729-industrial-vs-brood-2",
+      "profile": "orbital",
+      "seed": 1729,
+      "leg": 2,
+      "factions": [
+        "brood",
+        "industrial"
+      ],
+      "options": {
+        "mapSize": "medium",
+        "startingResources": "standard",
+        "resourceDensity": "standard",
+        "startingBase": "full",
+        "startingFleet": false,
+        "varyStartingPositions": true,
+        "mapPreset": "orbital-ring",
+        "seed": 1729,
+        "players": [
+          {
+            "id": "slot-1",
+            "name": "Slot 1",
+            "teamId": 1,
+            "faction": "brood",
+            "ai": true,
+            "aiDifficulty": "normal",
+            "aiPersonality": "balanced"
+          },
+          {
+            "id": "slot-2",
+            "name": "Slot 2",
+            "teamId": 2,
+            "faction": "industrial",
+            "ai": true,
+            "aiDifficulty": "normal",
+            "aiPersonality": "balanced"
+          }
+        ]
+      },
+      "geometryHash": "fbed836a4fa80c837e8786cfbec47f8238c1b31e7bd0f80efef3e527d84bcc80",
+      "ticks": 7745,
+      "seconds": 387.25,
+      "outcome": "victory",
+      "winnerFaction": "industrial",
+      "winnerSlot": "slot-2",
+      "firstHitSeconds": 56.2,
+      "lastHitSeconds": 387.25,
+      "hitCount": 62039,
+      "checksum": 1944577513,
+      "wallSeconds": 5.598406583,
+      "metrics": [
+        {
+          "id": "slot-1",
+          "faction": "brood",
+          "produced": {
+            "fighter": 74,
+            "fabricator": 6,
+            "flakFrigate": 2
+          },
+          "lost": {
+            "fighter": 70,
+            "fabricator": 5,
+            "flakFrigate": 1
+          },
+          "structuresStarted": {
+            "extractor": 8,
+            "shipyard": 1,
+            "solarArray": 6,
+            "creepNode": 5,
+            "pointDefenseBattery": 1,
+            "fabricator": 1,
+            "storage": 1,
+            "fleetShipyard": 1,
+            "fusionReactor": 1,
+            "deepCoreExtractor": 1
+          },
+          "structuresCompleted": {
+            "extractor": 8,
+            "shipyard": 1,
+            "solarArray": 6,
+            "creepNode": 5,
+            "pointDefenseBattery": 1,
+            "fabricator": 1,
+            "storage": 1,
+            "fleetShipyard": 1,
+            "fusionReactor": 1,
+            "deepCoreExtractor": 1
+          },
+          "structuresLost": {
+            "extractor": 6,
+            "creepNode": 5,
+            "solarArray": 3,
+            "fusionReactor": 1,
+            "commandCore": 1
+          },
+          "firstUnitSeconds": 5.6,
+          "firstCombatUnitSeconds": 5.6,
+          "firstBuilderSeconds": 79,
+          "firstTerritoryNodeSeconds": 80,
+          "firstTier2YardSeconds": 323.7,
+          "shipDamageTaken": 50609.3999999986,
+          "structureDamageTaken": 32906.84615384592,
+          "coreDamageTaken": 7128.450000000021,
+          "shotsByShips": 24202,
+          "shotsByStructures": 5999,
+          "alloyIncomeIntegrated": 16266.268892003456,
+          "energyIncomeIntegrated": 39172.69999999939,
+          "alloySpent": 12014.050967261544,
+          "energySpent": 14684.513169642878,
+          "samples": 387,
+          "efficiencySum": 387,
+          "starvedSamples": 0,
+          "peakCombatShips": 13,
+          "combatShipSamples": 3793,
+          "fightingShipSamples": 2365,
+          "fightingInOwnFieldSamples": 800,
+          "completedYardSamples": 783,
+          "readyBlockedYardSamples": 0,
+          "specializedNestSamples": 779,
+          "cappedNestSamples": 300,
+          "uncoveredNestSamples": 0
+        },
+        {
+          "id": "slot-2",
+          "faction": "industrial",
+          "produced": {
+            "fabricator": 3,
+            "fighter": 45,
+            "frigate": 5,
+            "bomber": 15,
+            "artilleryFrigate": 3,
+            "flakFrigate": 3,
+            "destroyer": 2,
+            "artilleryDestroyer": 1,
+            "torpedoFrigate": 1
+          },
+          "lost": {
+            "fabricator": 1,
+            "fighter": 39,
+            "bomber": 10,
+            "frigate": 1
+          },
+          "structuresStarted": {
+            "extractor": 4,
+            "pointDefenseBattery": 1,
+            "fabricator": 1,
+            "solarArray": 2,
+            "storage": 1,
+            "fleetShipyard": 1,
+            "deepCoreExtractor": 4,
+            "fusionReactor": 3
+          },
+          "structuresCompleted": {
+            "extractor": 4,
+            "pointDefenseBattery": 1,
+            "fabricator": 1,
+            "solarArray": 2,
+            "storage": 1,
+            "fleetShipyard": 1,
+            "deepCoreExtractor": 4,
+            "fusionReactor": 3
+          },
+          "structuresLost": {},
+          "firstUnitSeconds": 13.5,
+          "firstCombatUnitSeconds": 62.2,
+          "firstBuilderSeconds": 13.5,
+          "firstTerritoryNodeSeconds": null,
+          "firstTier2YardSeconds": 191.3,
+          "shipDamageTaken": 44511.19956410421,
+          "structureDamageTaken": 1507.75,
+          "coreDamageTaken": 43,
+          "shotsByShips": 69416,
+          "shotsByStructures": 1261,
+          "alloyIncomeIntegrated": 31987.950336418828,
+          "energyIncomeIntegrated": 34833.20000000258,
+          "alloySpent": 25888.236567784108,
+          "energySpent": 30045.85069962886,
+          "samples": 387,
+          "efficiencySum": 259.10693123412705,
+          "starvedSamples": 212,
+          "peakCombatShips": 55,
+          "combatShipSamples": 10547,
+          "fightingShipSamples": 6080,
+          "fightingInOwnFieldSamples": 0,
+          "completedYardSamples": 583,
+          "readyBlockedYardSamples": 0,
+          "specializedNestSamples": 0,
+          "cappedNestSamples": 0,
+          "uncoveredNestSamples": 0
+        }
+      ],
+      "final": [
+        {
+          "id": "slot-1",
+          "faction": "brood",
+          "ships": {
+            "fighter": 4,
+            "fabricator": 1,
+            "flakFrigate": 1
+          },
+          "combatShips": 5,
+          "industrialEquivalentArmyCost": 1304,
+          "structures": {
+            "shipyard": 2,
+            "pointDefenseBattery": 1,
+            "solarArray": 4,
+            "fabricator": 1,
+            "storage": 1,
+            "fleetShipyard": 1,
+            "extractor": 2,
+            "deepCoreExtractor": 1
+          },
+          "constructing": {},
+          "coreHullFraction": 0,
+          "coreShieldFraction": 0,
+          "economy": {
+            "alloy": 914.22863930062,
+            "energy": 4197.15,
+            "alloyIncome": 55,
+            "energyIncome": 100,
+            "alloySpend": 0,
+            "energySpend": 57,
+            "alloyStorage": 4550,
+            "energyStorage": 4200,
+            "efficiency": 1
+          },
+          "territorySources": 1
+        },
+        {
+          "id": "slot-2",
+          "faction": "industrial",
+          "ships": {
+            "fabricator": 2,
+            "frigate": 4,
+            "artilleryFrigate": 3,
+            "flakFrigate": 3,
+            "destroyer": 2,
+            "fighter": 6,
+            "artilleryDestroyer": 1,
+            "bomber": 5,
+            "torpedoFrigate": 1
+          },
+          "combatShips": 25,
+          "industrialEquivalentArmyCost": 15186,
+          "structures": {
+            "commandCore": 1,
+            "solarArray": 3,
+            "shipyard": 1,
+            "pointDefenseBattery": 1,
+            "fabricator": 1,
+            "extractor": 1,
+            "storage": 1,
+            "fleetShipyard": 1,
+            "deepCoreExtractor": 4,
+            "fusionReactor": 3
+          },
+          "constructing": {},
+          "coreHullFraction": 1,
+          "coreShieldFraction": 0.973125,
+          "economy": {
+            "alloy": 6096.631578947368,
+            "energy": 5521.958223206202,
+            "alloyIncome": 155.60436103045942,
+            "energyIncome": 408,
+            "alloySpend": 67.36842105263158,
+            "energySpend": 167.98947368421054,
+            "alloyStorage": 6100,
+            "energyStorage": 5900,
+            "efficiency": 1
+          },
+          "territorySources": 0
+        }
+      ]
+    },
+    {
+      "id": "orbital-1729-industrial-vs-concord-1",
+      "profile": "orbital",
+      "seed": 1729,
+      "leg": 1,
+      "factions": [
+        "industrial",
+        "concord"
+      ],
+      "options": {
+        "mapSize": "medium",
+        "startingResources": "standard",
+        "resourceDensity": "standard",
+        "startingBase": "full",
+        "startingFleet": false,
+        "varyStartingPositions": true,
+        "mapPreset": "orbital-ring",
+        "seed": 1729,
+        "players": [
+          {
+            "id": "slot-1",
+            "name": "Slot 1",
+            "teamId": 1,
+            "faction": "industrial",
+            "ai": true,
+            "aiDifficulty": "normal",
+            "aiPersonality": "balanced"
+          },
+          {
+            "id": "slot-2",
+            "name": "Slot 2",
+            "teamId": 2,
+            "faction": "concord",
+            "ai": true,
+            "aiDifficulty": "normal",
+            "aiPersonality": "balanced"
+          }
+        ]
+      },
+      "geometryHash": "fbed836a4fa80c837e8786cfbec47f8238c1b31e7bd0f80efef3e527d84bcc80",
+      "ticks": 12000,
+      "seconds": 600,
+      "outcome": "timeout",
+      "winnerFaction": null,
+      "winnerSlot": null,
+      "firstHitSeconds": 83.9,
+      "lastHitSeconds": 587.95,
+      "hitCount": 32179,
+      "checksum": 1936931372,
+      "wallSeconds": 6.059944125000002,
+      "metrics": [
+        {
+          "id": "slot-1",
+          "faction": "industrial",
+          "produced": {
+            "fabricator": 3,
+            "bomber": 45,
+            "fighter": 85,
+            "frigate": 6,
+            "destroyer": 4,
+            "artilleryFrigate": 1,
+            "cruiser": 1,
+            "flakFrigate": 1,
+            "carrier": 1
+          },
+          "lost": {
+            "bomber": 35,
+            "fighter": 63,
+            "frigate": 5,
+            "destroyer": 3,
+            "artilleryFrigate": 1,
+            "cruiser": 1,
+            "flakFrigate": 1
+          },
+          "structuresStarted": {
+            "extractor": 4,
+            "pointDefenseBattery": 1,
+            "solarArray": 2,
+            "fabricator": 1,
+            "storage": 2,
+            "fleetShipyard": 1,
+            "deepCoreExtractor": 4,
+            "fusionReactor": 1,
+            "alloyRefinery": 1,
+            "shipyard": 3,
+            "capitalShipyard": 1,
+            "antimatterReactor": 1,
+            "matterForge": 1
+          },
+          "structuresCompleted": {
+            "extractor": 4,
+            "pointDefenseBattery": 1,
+            "solarArray": 2,
+            "fabricator": 1,
+            "storage": 2,
+            "fleetShipyard": 1,
+            "deepCoreExtractor": 4,
+            "fusionReactor": 1,
+            "alloyRefinery": 1,
+            "shipyard": 3,
+            "capitalShipyard": 1,
+            "antimatterReactor": 1
+          },
+          "structuresLost": {},
+          "firstUnitSeconds": 13.5,
+          "firstCombatUnitSeconds": 99.6,
+          "firstBuilderSeconds": 13.5,
+          "firstTerritoryNodeSeconds": null,
+          "firstTier2YardSeconds": 199.3,
+          "shipDamageTaken": 106303.42431802562,
+          "structureDamageTaken": 229,
+          "coreDamageTaken": 42,
+          "shotsByShips": 14086,
+          "shotsByStructures": 298,
+          "alloyIncomeIntegrated": 49277.51914948283,
+          "energyIncomeIntegrated": 97163.59999999698,
+          "alloySpent": 50177.51914948297,
+          "energySpent": 52412.099846713456,
+          "samples": 600,
+          "efficiencySum": 241.02666367996375,
+          "starvedSamples": 547,
+          "peakCombatShips": 35,
+          "combatShipSamples": 8077,
+          "fightingShipSamples": 1582,
+          "fightingInOwnFieldSamples": 0,
+          "completedYardSamples": 1918,
+          "readyBlockedYardSamples": 0,
+          "specializedNestSamples": 0,
+          "cappedNestSamples": 0,
+          "uncoveredNestSamples": 0
+        },
+        {
+          "id": "slot-2",
+          "faction": "concord",
+          "produced": {
+            "fabricator": 3,
+            "fighter": 16,
+            "frigate": 17,
+            "artilleryFrigate": 7,
+            "destroyer": 7,
+            "torpedoFrigate": 3
+          },
+          "lost": {},
+          "structuresStarted": {
+            "extractor": 2,
+            "pointDefenseBattery": 1,
+            "pylon": 9,
+            "fabricator": 1,
+            "storage": 1,
+            "fleetShipyard": 1,
+            "deepCoreExtractor": 3,
+            "fusionReactor": 2,
+            "alloyRefinery": 1,
+            "shipyard": 2
+          },
+          "structuresCompleted": {
+            "extractor": 2,
+            "pointDefenseBattery": 1,
+            "pylon": 6,
+            "fabricator": 1,
+            "storage": 1,
+            "fleetShipyard": 1,
+            "deepCoreExtractor": 2,
+            "fusionReactor": 2,
+            "alloyRefinery": 1,
+            "shipyard": 2
+          },
+          "structuresLost": {
+            "pylon": 4
+          },
+          "firstUnitSeconds": 18.1,
+          "firstCombatUnitSeconds": 20.65,
+          "firstBuilderSeconds": 18.1,
+          "firstTerritoryNodeSeconds": 66.45,
+          "firstTier2YardSeconds": 186.95,
+          "shipDamageTaken": 23944.160769229264,
+          "structureDamageTaken": 4301.176923076923,
+          "coreDamageTaken": 68,
+          "shotsByShips": 31272,
+          "shotsByStructures": 1267,
+          "alloyIncomeIntegrated": 33375.29999999867,
+          "energyIncomeIntegrated": 81928.49999999053,
+          "alloySpent": 34275.30000000147,
+          "energySpent": 45410.89540620784,
+          "samples": 600,
+          "efficiencySum": 351.767244624831,
+          "starvedSamples": 415,
+          "peakCombatShips": 50,
+          "combatShipSamples": 11160,
+          "fightingShipSamples": 3459,
+          "fightingInOwnFieldSamples": 3417,
+          "completedYardSamples": 1190,
+          "readyBlockedYardSamples": 0,
+          "specializedNestSamples": 0,
+          "cappedNestSamples": 0,
+          "uncoveredNestSamples": 0
+        }
+      ],
+      "final": [
+        {
+          "id": "slot-1",
+          "faction": "industrial",
+          "ships": {
+            "fabricator": 3,
+            "fighter": 22,
+            "destroyer": 1,
+            "bomber": 10,
+            "carrier": 1,
+            "frigate": 1
+          },
+          "combatShips": 35,
+          "industrialEquivalentArmyCost": 16042,
+          "structures": {
+            "commandCore": 1,
+            "solarArray": 3,
+            "shipyard": 4,
+            "pointDefenseBattery": 1,
+            "fabricator": 1,
+            "storage": 2,
+            "extractor": 1,
+            "fleetShipyard": 1,
+            "deepCoreExtractor": 4,
+            "fusionReactor": 1,
+            "alloyRefinery": 1,
+            "capitalShipyard": 1,
+            "antimatterReactor": 1
+          },
+          "constructing": {
+            "matterForge": 1
+          },
+          "coreHullFraction": 1,
+          "coreShieldFraction": 0.97375,
+          "economy": {
+            "alloy": 0,
+            "energy": 10439.323486146917,
+            "alloyIncome": 164.464546966441,
+            "energyIncome": 508,
+            "alloySpend": 164.464546966441,
+            "energySpend": 213.53027706163707,
+            "alloyStorage": 9850,
+            "energyStorage": 10450,
+            "efficiency": 0.3981857506931615
+          },
+          "territorySources": 0
+        },
+        {
+          "id": "slot-2",
+          "faction": "concord",
+          "ships": {
+            "fabricator": 3,
+            "fighter": 16,
+            "frigate": 17,
+            "artilleryFrigate": 7,
+            "destroyer": 7,
+            "torpedoFrigate": 3
+          },
+          "combatShips": 50,
+          "industrialEquivalentArmyCost": 25746,
+          "structures": {
+            "commandCore": 1,
+            "solarArray": 1,
+            "shipyard": 3,
+            "pointDefenseBattery": 1,
+            "pylon": 5,
+            "fabricator": 1,
+            "storage": 1,
+            "fleetShipyard": 1,
+            "deepCoreExtractor": 2,
+            "fusionReactor": 2,
+            "alloyRefinery": 1
+          },
+          "constructing": {
+            "deepCoreExtractor": 1
+          },
+          "coreHullFraction": 1,
+          "coreShieldFraction": 0.9575,
+          "economy": {
+            "alloy": 0,
+            "energy": 5745.337335634945,
+            "alloyIncome": 81,
+            "energyIncome": 254,
+            "alloySpend": 80.99999999999999,
+            "energySpend": 93.25328730111077,
+            "alloyStorage": 6150,
+            "energyStorage": 5750,
+            "efficiency": 0.3190033023116181
+          },
+          "territorySources": 6
+        }
+      ]
+    },
+    {
+      "id": "orbital-1729-industrial-vs-concord-2",
+      "profile": "orbital",
+      "seed": 1729,
+      "leg": 2,
+      "factions": [
+        "concord",
+        "industrial"
+      ],
+      "options": {
+        "mapSize": "medium",
+        "startingResources": "standard",
+        "resourceDensity": "standard",
+        "startingBase": "full",
+        "startingFleet": false,
+        "varyStartingPositions": true,
+        "mapPreset": "orbital-ring",
+        "seed": 1729,
+        "players": [
+          {
+            "id": "slot-1",
+            "name": "Slot 1",
+            "teamId": 1,
+            "faction": "concord",
+            "ai": true,
+            "aiDifficulty": "normal",
+            "aiPersonality": "balanced"
+          },
+          {
+            "id": "slot-2",
+            "name": "Slot 2",
+            "teamId": 2,
+            "faction": "industrial",
+            "ai": true,
+            "aiDifficulty": "normal",
+            "aiPersonality": "balanced"
+          }
+        ]
+      },
+      "geometryHash": "fbed836a4fa80c837e8786cfbec47f8238c1b31e7bd0f80efef3e527d84bcc80",
+      "ticks": 12000,
+      "seconds": 600,
+      "outcome": "timeout",
+      "winnerFaction": null,
+      "winnerSlot": null,
+      "firstHitSeconds": 75.5,
+      "lastHitSeconds": 595.8,
+      "hitCount": 72630,
+      "checksum": 708212960,
+      "wallSeconds": 7.532808708,
+      "metrics": [
+        {
+          "id": "slot-1",
+          "faction": "concord",
+          "produced": {
+            "fabricator": 2,
+            "fighter": 10,
+            "frigate": 8,
+            "artilleryFrigate": 7,
+            "destroyer": 3,
+            "torpedoFrigate": 2
+          },
+          "lost": {
+            "fighter": 5,
+            "artilleryFrigate": 4,
+            "fabricator": 1
+          },
+          "structuresStarted": {
+            "extractor": 9,
+            "pointDefenseBattery": 1,
+            "pylon": 6,
+            "fabricator": 1,
+            "storage": 2,
+            "fleetShipyard": 1,
+            "solarArray": 3,
+            "deepCoreExtractor": 2
+          },
+          "structuresCompleted": {
+            "extractor": 9,
+            "pointDefenseBattery": 1,
+            "pylon": 4,
+            "fabricator": 1,
+            "storage": 2,
+            "fleetShipyard": 1,
+            "solarArray": 3,
+            "deepCoreExtractor": 1
+          },
+          "structuresLost": {
+            "extractor": 7,
+            "pylon": 5,
+            "solarArray": 2,
+            "storage": 1,
+            "deepCoreExtractor": 1
+          },
+          "firstUnitSeconds": 18.1,
+          "firstCombatUnitSeconds": 20.65,
+          "firstBuilderSeconds": 18.1,
+          "firstTerritoryNodeSeconds": 65.05,
+          "firstTier2YardSeconds": 232.75,
+          "shipDamageTaken": 53403.44559615212,
+          "structureDamageTaken": 28603.52450142447,
+          "coreDamageTaken": 4660.712962962954,
+          "shotsByShips": 37985,
+          "shotsByStructures": 4732,
+          "alloyIncomeIntegrated": 21788.9095482895,
+          "energyIncomeIntegrated": 33045.60000000124,
+          "alloySpent": 22688.90954829052,
+          "energySpent": 22479.75122027061,
+          "samples": 600,
+          "efficiencySum": 297.69057502442246,
+          "starvedSamples": 456,
+          "peakCombatShips": 22,
+          "combatShipSamples": 8120,
+          "fightingShipSamples": 3851,
+          "fightingInOwnFieldSamples": 3516,
+          "completedYardSamples": 968,
+          "readyBlockedYardSamples": 0,
+          "specializedNestSamples": 0,
+          "cappedNestSamples": 0,
+          "uncoveredNestSamples": 0
+        },
+        {
+          "id": "slot-2",
+          "faction": "industrial",
+          "produced": {
+            "fabricator": 3,
+            "fighter": 130,
+            "bomber": 35,
+            "destroyer": 1,
+            "artilleryFrigate": 6,
+            "frigate": 14,
+            "cruiser": 3,
+            "flakFrigate": 2,
+            "battleship": 1
+          },
+          "lost": {
+            "fighter": 105,
+            "bomber": 30,
+            "destroyer": 1,
+            "artilleryFrigate": 3,
+            "frigate": 7,
+            "flakFrigate": 2,
+            "cruiser": 2
+          },
+          "structuresStarted": {
+            "extractor": 4,
+            "pointDefenseBattery": 1,
+            "fabricator": 1,
+            "solarArray": 2,
+            "storage": 2,
+            "fleetShipyard": 2,
+            "fusionReactor": 1,
+            "alloyRefinery": 1,
+            "shipyard": 4,
+            "deepCoreExtractor": 4,
+            "capitalShipyard": 1,
+            "antimatterReactor": 1,
+            "matterForge": 1
+          },
+          "structuresCompleted": {
+            "extractor": 4,
+            "pointDefenseBattery": 1,
+            "fabricator": 1,
+            "solarArray": 2,
+            "storage": 2,
+            "fleetShipyard": 2,
+            "fusionReactor": 1,
+            "alloyRefinery": 1,
+            "shipyard": 4,
+            "deepCoreExtractor": 4,
+            "capitalShipyard": 1,
+            "antimatterReactor": 1,
+            "matterForge": 1
+          },
+          "structuresLost": {},
+          "firstUnitSeconds": 13.5,
+          "firstCombatUnitSeconds": 62.15,
+          "firstBuilderSeconds": 13.5,
+          "firstTerritoryNodeSeconds": null,
+          "firstTier2YardSeconds": 193.2,
+          "shipDamageTaken": 151102.7192760123,
+          "structureDamageTaken": 12,
+          "coreDamageTaken": 0,
+          "shotsByShips": 46652,
+          "shotsByStructures": 0,
+          "alloyIncomeIntegrated": 62210.28291978893,
+          "energyIncomeIntegrated": 110126.8999999963,
+          "alloySpent": 63110.282919788384,
+          "energySpent": 72359.06572289842,
+          "samples": 600,
+          "efficiencySum": 293.18045785814246,
+          "starvedSamples": 537,
+          "peakCombatShips": 54,
+          "combatShipSamples": 14521,
+          "fightingShipSamples": 4253,
+          "fightingInOwnFieldSamples": 0,
+          "completedYardSamples": 2035,
+          "readyBlockedYardSamples": 0,
+          "specializedNestSamples": 0,
+          "cappedNestSamples": 0,
+          "uncoveredNestSamples": 0
+        }
+      ],
+      "final": [
+        {
+          "id": "slot-1",
+          "faction": "concord",
+          "ships": {
+            "frigate": 8,
+            "artilleryFrigate": 3,
+            "fighter": 5,
+            "destroyer": 3,
+            "torpedoFrigate": 2,
+            "fabricator": 1
+          },
+          "combatShips": 21,
+          "industrialEquivalentArmyCost": 11840,
+          "structures": {
+            "commandCore": 1,
+            "shipyard": 1,
+            "pointDefenseBattery": 1,
+            "fabricator": 1,
+            "fleetShipyard": 1,
+            "solarArray": 2,
+            "deepCoreExtractor": 1,
+            "pylon": 1,
+            "storage": 1,
+            "extractor": 1
+          },
+          "constructing": {},
+          "coreHullFraction": 0.44350673400673607,
+          "coreShieldFraction": 0,
+          "economy": {
+            "alloy": 0,
+            "energy": 2526.0292497458886,
+            "alloyIncome": 44,
+            "energyIncome": 56,
+            "alloySpend": 44,
+            "energySpend": 59.36220858895706,
+            "alloyStorage": 4300,
+            "energyStorage": 3950,
+            "efficiency": 0.5587730061349694
+          },
+          "territorySources": 2
+        },
+        {
+          "id": "slot-2",
+          "faction": "industrial",
+          "ships": {
+            "fabricator": 3,
+            "frigate": 7,
+            "bomber": 5,
+            "cruiser": 1,
+            "battleship": 1,
+            "fighter": 25,
+            "artilleryFrigate": 3
+          },
+          "combatShips": 42,
+          "industrialEquivalentArmyCost": 22470,
+          "structures": {
+            "commandCore": 1,
+            "solarArray": 3,
+            "shipyard": 5,
+            "pointDefenseBattery": 1,
+            "fabricator": 1,
+            "storage": 2,
+            "extractor": 1,
+            "fleetShipyard": 2,
+            "fusionReactor": 1,
+            "alloyRefinery": 1,
+            "deepCoreExtractor": 4,
+            "capitalShipyard": 1,
+            "antimatterReactor": 1,
+            "matterForge": 1
+          },
+          "constructing": {},
+          "coreHullFraction": 1,
+          "coreShieldFraction": 1,
+          "economy": {
+            "alloy": 0,
+            "energy": 10696.184524028995,
+            "alloyIncome": 218.60436103045942,
+            "energyIncome": 508,
+            "alloySpend": 218.60436103045942,
+            "energySpend": 307.28862277272907,
+            "alloyStorage": 12100,
+            "energyStorage": 11200,
+            "efficiency": 0.4840831558225378
+          },
+          "territorySources": 0
+        }
+      ]
+    },
+    {
+      "id": "orbital-1729-brood-vs-concord-1",
+      "profile": "orbital",
+      "seed": 1729,
+      "leg": 1,
+      "factions": [
+        "brood",
+        "concord"
+      ],
+      "options": {
+        "mapSize": "medium",
+        "startingResources": "standard",
+        "resourceDensity": "standard",
+        "startingBase": "full",
+        "startingFleet": false,
+        "varyStartingPositions": true,
+        "mapPreset": "orbital-ring",
+        "seed": 1729,
+        "players": [
+          {
+            "id": "slot-1",
+            "name": "Slot 1",
+            "teamId": 1,
+            "faction": "brood",
+            "ai": true,
+            "aiDifficulty": "normal",
+            "aiPersonality": "balanced"
+          },
+          {
+            "id": "slot-2",
+            "name": "Slot 2",
+            "teamId": 2,
+            "faction": "concord",
+            "ai": true,
+            "aiDifficulty": "normal",
+            "aiPersonality": "balanced"
+          }
+        ]
+      },
+      "geometryHash": "fbed836a4fa80c837e8786cfbec47f8238c1b31e7bd0f80efef3e527d84bcc80",
+      "ticks": 12000,
+      "seconds": 600,
+      "outcome": "timeout",
+      "winnerFaction": null,
+      "winnerSlot": null,
+      "firstHitSeconds": 52.2,
+      "lastHitSeconds": 600,
+      "hitCount": 35018,
+      "checksum": 2620814052,
+      "wallSeconds": 6.09618275,
+      "metrics": [
+        {
+          "id": "slot-1",
+          "faction": "brood",
+          "produced": {
+            "fighter": 137,
+            "fabricator": 5,
+            "flakFrigate": 7,
+            "bomber": 15,
+            "frigate": 6
+          },
+          "lost": {
+            "fighter": 126,
+            "fabricator": 3,
+            "flakFrigate": 5,
+            "bomber": 10,
+            "frigate": 3
+          },
+          "structuresStarted": {
+            "extractor": 5,
+            "shipyard": 3,
+            "solarArray": 1,
+            "creepNode": 6,
+            "pointDefenseBattery": 1,
+            "fabricator": 1,
+            "storage": 1,
+            "fleetShipyard": 1,
+            "fusionReactor": 2,
+            "alloyRefinery": 1,
+            "capitalShipyard": 1,
+            "antimatterReactor": 1,
+            "matterForge": 1
+          },
+          "structuresCompleted": {
+            "extractor": 5,
+            "shipyard": 3,
+            "solarArray": 1,
+            "creepNode": 6,
+            "pointDefenseBattery": 1,
+            "fabricator": 1,
+            "storage": 1,
+            "fleetShipyard": 1,
+            "fusionReactor": 2,
+            "alloyRefinery": 1,
+            "capitalShipyard": 1,
+            "antimatterReactor": 1,
+            "matterForge": 1
+          },
+          "structuresLost": {},
+          "firstUnitSeconds": 5.6,
+          "firstCombatUnitSeconds": 5.6,
+          "firstBuilderSeconds": 79,
+          "firstTerritoryNodeSeconds": 80,
+          "firstTier2YardSeconds": 422.95,
+          "shipDamageTaken": 92880.59999999359,
+          "structureDamageTaken": 390.55882352941177,
+          "coreDamageTaken": 0,
+          "shotsByShips": 16621,
+          "shotsByStructures": 0,
+          "alloyIncomeIntegrated": 45925.23043963929,
+          "energyIncomeIntegrated": 64796.000000001855,
+          "alloySpent": 26381.443766508528,
+          "energySpent": 44308.093178558905,
+          "samples": 600,
+          "efficiencySum": 586.0698706507465,
+          "starvedSamples": 26,
+          "peakCombatShips": 21,
+          "combatShipSamples": 7007,
+          "fightingShipSamples": 1639,
+          "fightingInOwnFieldSamples": 189,
+          "completedYardSamples": 1629,
+          "readyBlockedYardSamples": 0,
+          "specializedNestSamples": 1620,
+          "cappedNestSamples": 542,
+          "uncoveredNestSamples": 0
+        },
+        {
+          "id": "slot-2",
+          "faction": "concord",
+          "produced": {
+            "fabricator": 1,
+            "fighter": 13,
+            "frigate": 11,
+            "artilleryFrigate": 6,
+            "destroyer": 3,
+            "torpedoFrigate": 2
+          },
+          "lost": {
+            "fighter": 2
+          },
+          "structuresStarted": {
+            "extractor": 2,
+            "pointDefenseBattery": 1,
+            "pylon": 7,
+            "fabricator": 1,
+            "storage": 1,
+            "fleetShipyard": 1,
+            "solarArray": 2,
+            "fusionReactor": 1,
+            "deepCoreExtractor": 2
+          },
+          "structuresCompleted": {
+            "extractor": 2,
+            "pointDefenseBattery": 1,
+            "pylon": 7,
+            "fabricator": 1,
+            "storage": 1,
+            "fleetShipyard": 1,
+            "solarArray": 2,
+            "fusionReactor": 1,
+            "deepCoreExtractor": 1
+          },
+          "structuresLost": {},
+          "firstUnitSeconds": 18.1,
+          "firstCombatUnitSeconds": 20.65,
+          "firstBuilderSeconds": 18.1,
+          "firstTerritoryNodeSeconds": 66.95,
+          "firstTier2YardSeconds": 263.4,
+          "shipDamageTaken": 15001.94444444494,
+          "structureDamageTaken": 3105.150000000002,
+          "coreDamageTaken": 49,
+          "shotsByShips": 58509,
+          "shotsByStructures": 1231,
+          "alloyIncomeIntegrated": 21955.49999999884,
+          "energyIncomeIntegrated": 64874.10000000679,
+          "alloySpent": 22855.499999998487,
+          "energySpent": 24303.37486123734,
+          "samples": 600,
+          "efficiencySum": 314.85685359871866,
+          "starvedSamples": 464,
+          "peakCombatShips": 34,
+          "combatShipSamples": 10327,
+          "fightingShipSamples": 5911,
+          "fightingInOwnFieldSamples": 5627,
+          "completedYardSamples": 937,
+          "readyBlockedYardSamples": 0,
+          "specializedNestSamples": 0,
+          "cappedNestSamples": 0,
+          "uncoveredNestSamples": 0
+        }
+      ],
+      "final": [
+        {
+          "id": "slot-1",
+          "faction": "brood",
+          "ships": {
+            "fabricator": 2,
+            "frigate": 3,
+            "fighter": 11,
+            "bomber": 5,
+            "flakFrigate": 2
+          },
+          "combatShips": 21,
+          "industrialEquivalentArmyCost": 6736,
+          "structures": {
+            "commandCore": 1,
+            "extractor": 6,
+            "solarArray": 2,
+            "shipyard": 4,
+            "creepNode": 6,
+            "pointDefenseBattery": 1,
+            "fabricator": 1,
+            "storage": 1,
+            "fleetShipyard": 1,
+            "fusionReactor": 2,
+            "alloyRefinery": 1,
+            "capitalShipyard": 1,
+            "antimatterReactor": 1,
+            "matterForge": 1
+          },
+          "constructing": {},
+          "coreHullFraction": 1,
+          "coreShieldFraction": 1,
+          "economy": {
+            "alloy": 1139.19236306606,
+            "energy": 9888.15,
+            "alloyIncome": 148.49815351769328,
+            "energyIncome": 596,
+            "alloySpend": 0,
+            "energySpend": 237.00000000000003,
+            "alloyStorage": 9000,
+            "energyStorage": 9900,
+            "efficiency": 1
+          },
+          "territorySources": 7
+        },
+        {
+          "id": "slot-2",
+          "faction": "concord",
+          "ships": {
+            "fabricator": 1,
+            "frigate": 11,
+            "fighter": 11,
+            "artilleryFrigate": 6,
+            "destroyer": 3,
+            "torpedoFrigate": 2
+          },
+          "combatShips": 33,
+          "industrialEquivalentArmyCost": 15866,
+          "structures": {
+            "commandCore": 1,
+            "extractor": 1,
+            "solarArray": 3,
+            "shipyard": 1,
+            "pointDefenseBattery": 1,
+            "pylon": 7,
+            "fabricator": 1,
+            "storage": 1,
+            "fleetShipyard": 1,
+            "fusionReactor": 1,
+            "deepCoreExtractor": 1
+          },
+          "constructing": {
+            "deepCoreExtractor": 1
+          },
+          "coreHullFraction": 1,
+          "coreShieldFraction": 0.969375,
+          "economy": {
+            "alloy": 0,
+            "energy": 4597.7210512373995,
+            "alloyIncome": 44,
+            "energyIncome": 188,
+            "alloySpend": 44,
+            "energySpend": 45.578975252017365,
+            "alloyStorage": 4550,
+            "energyStorage": 4600,
+            "efficiency": 0.2583601089009345
+          },
+          "territorySources": 8
+        }
+      ]
+    },
+    {
+      "id": "orbital-1729-brood-vs-concord-2",
+      "profile": "orbital",
+      "seed": 1729,
+      "leg": 2,
+      "factions": [
+        "concord",
+        "brood"
+      ],
+      "options": {
+        "mapSize": "medium",
+        "startingResources": "standard",
+        "resourceDensity": "standard",
+        "startingBase": "full",
+        "startingFleet": false,
+        "varyStartingPositions": true,
+        "mapPreset": "orbital-ring",
+        "seed": 1729,
+        "players": [
+          {
+            "id": "slot-1",
+            "name": "Slot 1",
+            "teamId": 1,
+            "faction": "concord",
+            "ai": true,
+            "aiDifficulty": "normal",
+            "aiPersonality": "balanced"
+          },
+          {
+            "id": "slot-2",
+            "name": "Slot 2",
+            "teamId": 2,
+            "faction": "brood",
+            "ai": true,
+            "aiDifficulty": "normal",
+            "aiPersonality": "balanced"
+          }
+        ]
+      },
+      "geometryHash": "fbed836a4fa80c837e8786cfbec47f8238c1b31e7bd0f80efef3e527d84bcc80",
+      "ticks": 12000,
+      "seconds": 600,
+      "outcome": "timeout",
+      "winnerFaction": null,
+      "winnerSlot": null,
+      "firstHitSeconds": 44.25,
+      "lastHitSeconds": 600,
+      "hitCount": 52598,
+      "checksum": 1568371174,
+      "wallSeconds": 8.411699249999998,
+      "metrics": [
+        {
+          "id": "slot-1",
+          "faction": "concord",
+          "produced": {
+            "fabricator": 1,
+            "fighter": 24,
+            "frigate": 22,
+            "artilleryFrigate": 11
+          },
+          "lost": {
+            "fighter": 1
+          },
+          "structuresStarted": {
+            "extractor": 6,
+            "pointDefenseBattery": 1,
+            "pylon": 17,
+            "fabricator": 1,
+            "storage": 1,
+            "solarArray": 3,
+            "fleetShipyard": 1
+          },
+          "structuresCompleted": {
+            "extractor": 6,
+            "pointDefenseBattery": 1,
+            "pylon": 17,
+            "fabricator": 1,
+            "storage": 1,
+            "solarArray": 3,
+            "fleetShipyard": 1
+          },
+          "structuresLost": {},
+          "firstUnitSeconds": 18.1,
+          "firstCombatUnitSeconds": 20.65,
+          "firstBuilderSeconds": 18.1,
+          "firstTerritoryNodeSeconds": 65.05,
+          "firstTier2YardSeconds": 597,
+          "shipDamageTaken": 16143.858000000666,
+          "structureDamageTaken": 3089.5500000000006,
+          "coreDamageTaken": 60,
+          "shotsByShips": 91708,
+          "shotsByStructures": 1874,
+          "alloyIncomeIntegrated": 34285.63428142844,
+          "energyIncomeIntegrated": 39604.900000001166,
+          "alloySpent": 27384.00225548677,
+          "energySpent": 28818.32021763116,
+          "samples": 600,
+          "efficiencySum": 563.8571715272586,
+          "starvedSamples": 59,
+          "peakCombatShips": 56,
+          "combatShipSamples": 15340,
+          "fightingShipSamples": 8745,
+          "fightingInOwnFieldSamples": 8107,
+          "completedYardSamples": 604,
+          "readyBlockedYardSamples": 0,
+          "specializedNestSamples": 0,
+          "cappedNestSamples": 0,
+          "uncoveredNestSamples": 0
+        },
+        {
+          "id": "slot-2",
+          "faction": "brood",
+          "produced": {
+            "fighter": 143,
+            "fabricator": 4
+          },
+          "lost": {
+            "fighter": 140,
+            "fabricator": 3
+          },
+          "structuresStarted": {
+            "extractor": 5,
+            "shipyard": 1,
+            "solarArray": 1,
+            "creepNode": 1,
+            "pointDefenseBattery": 1,
+            "fabricator": 1
+          },
+          "structuresCompleted": {
+            "extractor": 3,
+            "shipyard": 1,
+            "solarArray": 1,
+            "creepNode": 1,
+            "pointDefenseBattery": 1,
+            "fabricator": 1
+          },
+          "structuresLost": {
+            "extractor": 5,
+            "creepNode": 1,
+            "solarArray": 1
+          },
+          "firstUnitSeconds": 5.6,
+          "firstCombatUnitSeconds": 5.6,
+          "firstBuilderSeconds": 79,
+          "firstTerritoryNodeSeconds": 80,
+          "firstTier2YardSeconds": null,
+          "shipDamageTaken": 91802.90000001303,
+          "structureDamageTaken": 11568.5499999999,
+          "coreDamageTaken": 1667.100000000001,
+          "shotsByShips": 18399,
+          "shotsByStructures": 1470,
+          "alloyIncomeIntegrated": 26501.637202543927,
+          "energyIncomeIntegrated": 31986.299999994335,
+          "alloySpent": 4030.1172331871007,
+          "energySpent": 12729.764464547898,
+          "samples": 600,
+          "efficiencySum": 600,
+          "starvedSamples": 0,
+          "peakCombatShips": 12,
+          "combatShipSamples": 4629,
+          "fightingShipSamples": 1736,
+          "fightingInOwnFieldSamples": 273,
+          "completedYardSamples": 1145,
+          "readyBlockedYardSamples": 0,
+          "specializedNestSamples": 1142,
+          "cappedNestSamples": 516,
+          "uncoveredNestSamples": 0
+        }
+      ],
+      "final": [
+        {
+          "id": "slot-1",
+          "faction": "concord",
+          "ships": {
+            "fabricator": 1,
+            "frigate": 22,
+            "fighter": 23,
+            "artilleryFrigate": 11
+          },
+          "combatShips": 56,
+          "industrialEquivalentArmyCost": 19388,
+          "structures": {
+            "commandCore": 1,
+            "extractor": 7,
+            "solarArray": 4,
+            "shipyard": 1,
+            "pointDefenseBattery": 1,
+            "pylon": 17,
+            "fabricator": 1,
+            "storage": 1,
+            "fleetShipyard": 1
+          },
+          "constructing": {},
+          "coreHullFraction": 1,
+          "coreShieldFraction": 0.9625,
+          "economy": {
+            "alloy": 3580.784462364954,
+            "energy": 3517.1476608187136,
+            "alloyIncome": 100.78975256219506,
+            "energyIncome": 100,
+            "alloySpend": 69.59064327485379,
+            "energySpend": 85.67836257309942,
+            "alloyStorage": 3950,
+            "energyStorage": 3950,
+            "efficiency": 1
+          },
+          "territorySources": 18
+        },
+        {
+          "id": "slot-2",
+          "faction": "brood",
+          "ships": {
+            "fabricator": 1,
+            "fighter": 3
+          },
+          "combatShips": 3,
+          "industrialEquivalentArmyCost": 348,
+          "structures": {
+            "commandCore": 1,
+            "solarArray": 1,
+            "shipyard": 2,
+            "pointDefenseBattery": 1,
+            "fabricator": 1
+          },
+          "constructing": {
+            "extractor": 1
+          },
+          "coreHullFraction": 0.9877999999999999,
+          "coreShieldFraction": 0,
+          "economy": {
+            "alloy": 2267.0833333333185,
+            "energy": 2498.5555555555557,
+            "alloyIncome": 3,
+            "energyIncome": 34,
+            "alloySpend": 30.555555555555554,
+            "energySpend": 28.888888888888886,
+            "alloyStorage": 2500,
+            "energyStorage": 2500,
+            "efficiency": 1
+          },
+          "territorySources": 1
+        }
+      ]
+    }
+  ]
+}

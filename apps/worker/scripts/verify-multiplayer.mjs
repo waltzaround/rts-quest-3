@@ -1,5 +1,5 @@
 const authority = process.env.VOIDFRONT_AUTHORITY ?? "ws://127.0.0.1:8787";
-const lockstepVersion = 3;
+const lockstepVersion = 5;
 const authorityBase = new URL(authority);
 const authorityBasePath = authorityBase.pathname.replace(/\/+$/, "");
 const matchId = `verify-${Date.now()}`;
@@ -13,7 +13,7 @@ function authorityEndpoint(path, protocol = authorityBase.protocol) {
 }
 
 function assertProjectedView(view, label) {
-  if (view.version !== 1 || view.simulationVersion !== 9) {
+  if (view.version !== 1 || view.simulationVersion !== 11) {
     throw new Error(`${label} did not use ProjectedViewState v1 over SimulationState v7`);
   }
   if ("seed" in view || "nextEntityId" in view || "nextTurretId" in view || "nextQueueItemId" in view

@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { SHIPS, type ShipClass } from "@space-rts/game-core";
+import { SHIPS, type FactionId, type ShipClass } from "@space-rts/game-core";
 import { getShipHullGeometries } from "./ship-hulls";
 
 export interface DamageSite {
@@ -7,32 +7,34 @@ export interface DamageSite {
   orientation: THREE.Quaternion;
 }
 
-const sitesByClass = new Map<ShipClass, readonly DamageSite[]>();
+const sitesByClass = new Map<string, readonly DamageSite[]>();
 
 /** Sample the actual armor once per class. Breaches remain attached when the
  * ship turns or banks, with no raycasts or allocations in the frame loop.
  */
-export function getShipDamageSites(shipClass: ShipClass): readonly DamageSite[] {
-  const cached = sitesByClass.get(shipClass);
+export function getShipDamageSites(shipClass: ShipClass, faction: FactionId = "industrial"): readonly DamageSite[] {
+  const key = `${faction}:${shipClass}`;
+  const cached = sitesByClass.get(key);
   if (cached) return cached;
-  const hull = getShipHullGeometries(shipClass);
+  const hull = getShipHullGeometries(shipClass, faction);
   const surfaces = [new THREE.Mesh(hull.hull), new THREE.Mesh(hull.armor)];
   const ray = new THREE.Raycaster();
   const down = new THREE.Vector3(0, -1, 0);
   const up = new THREE.Vector3(0, 1, 0);
   const radius = SHIPS[shipClass].radius;
   const sites: DamageSite[] = [];
-  for (const [x, z] of [[-0.2, 0.4], [0.24, -0.36], [0.12, 0.04], [-0.25, -0.2], [0.22, 0.5], [-0.12, -0.5]]) {
+  for (const [x, z] of [[-0.2, 0.4], [0.24, -0.36], [0.12, 0.04], [-0.25, -0.2], [0.22, 0.5], [-0.12, -0.5], [-0.42, 0.2], [0.42, -0.2], [-0.4, -0.4], [0.4, 0.4], [0, 0.25], [0, -0.3]]) {
     ray.set(new THREE.Vector3(x! * radius, radius * 2, z! * radius), down);
     const hit = ray.intersectObjects(surfaces, false)[0];
-    if (!hit?.face) continue;
+    if (!hit?.face || hit.face.normal.y < 0.6) continue;
     sites.push({
       position: hit.point.clone().addScaledVector(hit.face.normal, 0.06),
       orientation: new THREE.Quaternion().setFromUnitVectors(up, hit.face.normal),
     });
+    if (sites.length === 6) break;
   }
   for (const surface of surfaces) (surface.material as THREE.Material).dispose();
-  sitesByClass.set(shipClass, sites);
+  sitesByClass.set(key, sites);
   return sites;
 }
 
@@ -56,7 +58,11 @@ export function createBreachMaterial(time: { value: number }): THREE.MeshBasicMa
         varying vec3 vBreachData;`)
       .replace("#include <begin_vertex>", `#include <begin_vertex>
         vBreachUv = position.xz;
-        vBreachData = instanceColor;`);
+        #ifdef USE_INSTANCING_COLOR
+          vBreachData = instanceColor;
+        #else
+          vBreachData = vec3(0.0);
+        #endif`);
     shader.fragmentShader = shader.fragmentShader
       .replace("#include <common>", `#include <common>
         uniform float breachTime;

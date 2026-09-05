@@ -1,0 +1,7 @@
+profile,pair,games,first_faction_wins,second_faction_wins,timeouts,mutual_core_loss,median_decisive_seconds
+all,brood vs concord,4,0,4,0,0,653.225
+all,brood vs industrial,4,0,4,0,0,1010.275
+all,concord vs industrial,4,1,3,0,0,989.65
+orbital,brood vs concord,4,0,4,0,0,653.225
+orbital,brood vs industrial,4,0,4,0,0,1010.275
+orbital,concord vs industrial,4,1,3,0,0,989.65

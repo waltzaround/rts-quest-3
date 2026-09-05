@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { createCombatScenario, restoreSimulation } from "../src";
 
-describe("cross-runtime deterministic simulation", () => {
-  it("produces the same checksum from browser- and Worker-compatible harnesses", () => {
+describe("same-runtime deterministic simulation", () => {
+  it("produces the same checksum in two instances of the same runtime", () => {
     const browserHarness = createCombatScenario({ seed: 0x1234abcd });
     const workerHarness = restoreSimulation(browserHarness.snapshot());
     const browserChecksums: number[] = [];

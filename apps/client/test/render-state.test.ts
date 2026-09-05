@@ -1,12 +1,88 @@
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
-import { createCombatScenario } from "@space-rts/game-core";
+import { createCombatScenario, FACTION_IDS, type ShipState } from "@space-rts/game-core";
 import {
   RenderStateBuilder,
+  VisualLod,
   type PreviousShipTransform,
   type RenderSource,
   type RenderVisibilityTransition,
 } from "../src/render-state";
+
+function lodFixture() {
+  const simulation = createCombatScenario({ enemyCommander: false, startingFleet: true });
+  const template = simulation.state.ships[0]!;
+  const ship = (id: number): ShipState => ({ ...template, id, class: "frigate", x: 0, y: 0, z: 0, turrets: [] });
+  const camera = new THREE.PerspectiveCamera(48, 16 / 9, 1, 80_000);
+  const aim = (zoomDistance: number, target = new THREE.Vector3(), azimuth = 0) => {
+    camera.position.set(target.x + Math.sin(azimuth) * zoomDistance * 0.68,
+      zoomDistance * 0.72, target.z + Math.cos(azimuth) * zoomDistance * 0.68);
+    camera.lookAt(target);
+    camera.updateProjectionMatrix();
+  };
+  return { ship, camera, aim, players: simulation.state.players, builder: new RenderStateBuilder() };
+}
+
+describe("zoom-based ship detail", () => {
+  it.each([
+    ["low", 500], ["medium", 660], ["high", 900],
+  ] as const)("keeps near and far ships consistent on %s quality through pans and orbits", (quality, zoomDistance) => {
+    const { ship, camera, aim, players, builder } = lodFixture();
+    const ships = FACTION_IDS.flatMap((faction, index) => [0.4, -0.6].map((depth, side) => ({
+      ...ship(index * 2 + side + 1), faction,
+      x: (index - 1) * zoomDistance * 0.15, z: depth * zoomDistance, y: side * 30,
+    })));
+    const assertDetail = () => {
+      const state = builder.update({ players, ships }, new Map(), 1, camera, 1_080,
+        zoomDistance, new Set(), quality, 0);
+      expect(state.shipCount).toBe(ships.length);
+      expect(Array.from(state.shipLod.slice(0, state.shipCount))).toEqual(ships.map(() => VisualLod.Close));
+    };
+    aim(zoomDistance);
+    assertDetail();
+    const target = new THREE.Vector3(4_000, 0, -3_000);
+    for (const unit of ships) { unit.x += target.x; unit.z += target.z; }
+    aim(zoomDistance, target);
+    assertDetail();
+    aim(zoomDistance, target, Math.PI / 2);
+    assertDetail();
+  });
+
+  it("shares transition history with newly visible ships and keeps off-screen culling", () => {
+    const { ship, camera, aim, players, builder } = lodFixture();
+    const ships = [ship(1), { ...ship(2), x: 100_000 }];
+    const update = (zoomDistance: number) => {
+      aim(zoomDistance);
+      return builder.update({ players, ships }, new Map(), 1, camera, 1_080,
+        zoomDistance, new Set(), "high", 0);
+    };
+    expect(update(850).shipCount).toBe(1);
+    expect(builder.state.shipLod[0]).toBe(VisualLod.Close);
+    // Between the enter/exit thresholds, retain the existing model tier.
+    expect(update(1_000).shipLod[0]).toBe(VisualLod.Close);
+    ships[1]!.x = 50;
+    const revealed = update(1_000);
+    expect(revealed.shipCount).toBe(2);
+    expect(Array.from(revealed.shipLod.slice(0, 2))).toEqual([VisualLod.Close, VisualLod.Close]);
+    builder.clearHistory();
+    expect(update(1_000).shipLod[0]).toBe(VisualLod.Medium);
+  });
+
+  it("reduces detail when zooming out and restores models after tactical mode", () => {
+    const { ship, camera, aim, players, builder } = lodFixture();
+    const update = (zoomDistance: number, tactical = false) => {
+      aim(zoomDistance);
+      return builder.update({ players, ships: [ship(1)] }, new Map(), 1, camera, 1_080,
+        zoomDistance, new Set(), "high", 0, tactical).shipLod[0];
+    };
+    expect(update(220)).toBe(VisualLod.Close);
+    expect(update(1_400)).toBe(VisualLod.Medium);
+    expect(update(4_000)).toBe(VisualLod.Far);
+    expect(update(8_000)).toBe(VisualLod.Tactical);
+    expect(update(220, true)).toBe(VisualLod.Tactical);
+    expect(update(220)).toBe(VisualLod.Close);
+  });
+});
 
 describe("fog-of-war render transitions", () => {
   it("uses the authoritative pose on the first frame after a contact reappears", () => {
@@ -24,7 +100,7 @@ describe("fog-of-war render transitions", () => {
       alpha: number,
       now: number,
       transition: RenderVisibilityTransition,
-    ) => builder.update(renderSource, previous, alpha, camera, 1_080, selectedIds, "high", now, false, transition);
+    ) => builder.update(renderSource, previous, alpha, camera, 1_080, camera.position.length(), selectedIds, "high", now, false, transition);
 
     ship.x = 0;
     ship.y = 0;

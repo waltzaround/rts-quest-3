@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { MAX_FLEET_COMMAND_UNITS, parseClientMessage, parseServerMessage } from "../dist/index.js";
+import { LOCKSTEP_PROTOCOL_VERSION, MAX_FLEET_COMMAND_UNITS, parseClientMessage, parseServerMessage } from "../dist/index.js";
 
 const buildCommand = (structureType) => JSON.stringify({
   type: "commands",
@@ -16,7 +16,7 @@ const buildCommand = (structureType) => JSON.stringify({
   }],
 });
 
-for (const structureType of ["storage", "fabricator", "fusionReactor"]) {
+for (const structureType of ["storage", "fabricator", "fusionReactor", "creepNode", "pylon"]) {
   const message = parseClientMessage(buildCommand(structureType));
   assert.equal(message?.type, "commands", `${structureType} should pass protocol validation`);
   assert.equal(message.commands[0]?.structureType, structureType);
@@ -52,6 +52,7 @@ assert.equal(
 );
 
 for (const command of [
+  { type: "setWarpPoint", structureId: 12, position: { x: 100, z: 200 } },
   { type: "setProductionRepeat", structureId: 12, enabled: true },
   { type: "clearProductionQueue", structureId: 12 },
   { type: "cancelConstruction", structureId: 12 },
@@ -72,12 +73,13 @@ for (const structureType of ["commandCore", "advancedShipyard", "unknown"]) {
 
 const playerView = {
   version: 1,
-  simulationVersion: 9,
+  simulationVersion: 11,
   tick: 12,
   viewerPlayerId: "pilot-blue",
   viewerTeamId: 1,
   ownLastCommandSequence: 3,
   players: [],
+  territories: [],
   teams: [],
   ships: [],
   structures: [],
@@ -104,7 +106,7 @@ assert.equal(
   "team views must not expose a player's command sequence",
 );
 
-for (const leakedField of ["seed", "nextEntityId", "nextTurretId", "nextQueueItemId", "commandQueue", "aiPlayerIds", "visibility"]) {
+for (const leakedField of ["seed", "nextEntityId", "nextTurretId", "nextQueueItemId", "commandQueue", "aiPlayerIds", "aiCommanders", "aiPlans", "visibility"]) {
   assert.equal(
     parseServerMessage(JSON.stringify({ ...frame, view: { ...playerView, [leakedField]: leakedField === "seed" ? 123 : [] } })),
     null,
@@ -117,8 +119,9 @@ assert.equal(parseServerMessage(JSON.stringify({ type: "events", tick: 12, event
 assert.equal(parseServerMessage(JSON.stringify({ ...frame, checksum: playerView.checksum + 1 })), null, "frame checksum must match its view");
 
 const lockstepState = {
-  version: 9, seed: 0x7233, tick: 12, nextEntityId: 1, nextTurretId: 1, nextQueueItemId: 1,
-  players: [], teams: [], ships: [], structures: [], resourceNodes: [], obstacles: [], visibility: [],
+  version: 11, seed: 0x7233, tick: 12, nextEntityId: 1, nextTurretId: 1, nextQueueItemId: 1,
+  players: [],
+  territories: [], teams: [], ships: [], structures: [], resourceNodes: [], obstacles: [], visibility: [],
   projectiles: [], commandQueue: [], aiPlayerIds: [], aiCommanders: {},
   status: "playing", winnerTeamId: null, checksum: 91234,
 };
@@ -160,13 +163,13 @@ const lobby = {
   createdAt: Date.now(),
 };
 assert.equal(parseClientMessage(JSON.stringify({
-  type: "hello", name: "Commander", lockstepVersion: 3,
+  type: "hello", name: "Commander", lockstepVersion: LOCKSTEP_PROTOCOL_VERSION,
 }))?.type, "hello", "lockstep clients should identify their deterministic rules version");
 assert.equal(parseClientMessage(JSON.stringify({
   type: "hello", name: "Commander", lockstepVersion: "old",
 })), null, "invalid lockstep versions must fail validation");
 assert.equal(parseServerMessage(JSON.stringify({
-  type: "hello_required", matchId: lobby.matchId, lobby, lockstepVersion: 3,
+  type: "hello_required", matchId: lobby.matchId, lobby, lockstepVersion: LOCKSTEP_PROTOCOL_VERSION,
 }))?.type, "hello_required", "authorities should advertise their deterministic rules version");
 assert.equal(parseServerMessage(JSON.stringify({ type: "lobby", lobby }))?.type, "lobby");
 assert.equal(parseServerMessage(JSON.stringify({ type: "lobby", lobby: { ...lobby, seed: 123 } })), null, "lobby seed must be private");
@@ -251,3 +254,24 @@ assert.equal(parseServerMessage(JSON.stringify({
 })), null, "out-of-range replay chunks must fail validation");
 
 console.log("Protocol command, lockstep, projected-view, spectator, and replay validation passed");
+
+for (const faction of ["industrial", "brood", "concord"]) {
+  assert.equal(parseClientMessage(JSON.stringify({ type: "set_faction", faction }))?.type, "set_faction");
+  assert.equal(parseClientMessage(JSON.stringify({ type: "add_ai", faction }))?.type, "add_ai");
+}
+for (const faction of ["unknown", "__proto__", 3, null, {}]) {
+  assert.equal(parseClientMessage(JSON.stringify({ type: "set_faction", faction })), null);
+  assert.equal(parseClientMessage(JSON.stringify({ type: "add_ai", faction })), null);
+}
+assert.equal(parseServerMessage(JSON.stringify({ ...frame, view: { ...playerView, simulationVersion: 9 } })), null);
+
+const validPlan = { knownStructures: [{ id: 4, type: "commandCore", x: 100, z: 200 }],
+  searchIndex: 0, recoveringShipIds: [9], constructionWatch: { key: "order:5", progress: -400, lastProgressTick: 10 },
+  blockedSites: [{ x: 20, z: 30, untilTick: 100 }] };
+for (const plan of [validPlan, { ...validPlan, knownStructures: null }, { ...validPlan, searchIndex: -1 },
+  { ...validPlan, constructionWatch: { key: "x", progress: null, lastProgressTick: 1 } },
+  { ...validPlan, blockedSites: [{ x: 0, z: 0, untilTick: -1 }] }]) {
+  const result = parseServerMessage(JSON.stringify({ type: "lockstep_state", tick: 12, checksum: 91234,
+    state: { ...lockstepState, aiPlans: { bot: plan } }, reason: "start" }));
+  assert.equal(Boolean(result), plan === validPlan, "AI plans must be complete deterministic state");
+}

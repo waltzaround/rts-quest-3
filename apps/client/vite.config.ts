@@ -28,6 +28,7 @@ export default defineConfig({
   }],
   build: {
     sourcemap: false,
+    rollupOptions: { input: { main: "index.html", viewer: "viewer.html" } },
   },
   server: {
     port: 5173,

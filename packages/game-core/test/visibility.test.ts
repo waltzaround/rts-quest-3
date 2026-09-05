@@ -379,7 +379,7 @@ describe("secure player view projection", () => {
 
     const view = projectTeamView(simulation.state, 1)!;
     expect(view).toMatchObject({
-      simulationVersion: 9,
+      simulationVersion: 11,
       viewerPlayerId: null,
       viewerTeamId: 1,
       ownLastCommandSequence: null,
@@ -399,7 +399,7 @@ describe("secure player view projection", () => {
     enemy.focusTargetEntityId = simulation.state.ships.find((ship) => ship.teamId === 1)!.id;
     const view = projectOmniscientView(simulation.state);
 
-    expect(view.simulationVersion).toBe(9);
+    expect(view.simulationVersion).toBe(11);
     expect(view.ships).toHaveLength(simulation.state.ships.length);
     expect(view.structures).toHaveLength(simulation.state.structures.length);
     expect(view.resourceNodes).toHaveLength(simulation.state.resourceNodes.length);
@@ -450,7 +450,7 @@ describe("visibility serialization", () => {
     legacy.version = 4;
     delete legacy.visibility;
     const restored = restoreSimulation(legacy as unknown as SimulationState);
-    expect(restored.state.version).toBe(9);
+    expect(restored.state.version).toBe(11);
     expect(restored.state.visibility.map((visibility) => visibility.teamId)).toEqual([1, 2]);
     expect(restored.state.visibility.every((visibility) => visibility.visibleEntityIds.length > 0)).toBe(true);
   });

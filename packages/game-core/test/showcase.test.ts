@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SHIPYARD_TYPES, createMenuBattleScenario, createShowcaseScenario, type ShipyardType } from "../src";
+import { FACTIONS, FACTION_IDS, SHIPYARD_TYPES, createMenuBattleScenario, createShowcaseScenario, type ShipyardType } from "../src";
 
 describe("battle showcase scenario", () => {
   it("starts a deterministic automated battle with hundreds of mixed ships and active factories", () => {
@@ -44,6 +44,55 @@ describe("battle showcase scenario", () => {
 });
 
 describe("title-screen battle scenario", () => {
+  it.each(FACTION_IDS.flatMap(first => FACTION_IDS.map(second => [first, second] as const)))(
+    "keeps %s versus %s in the arena and firing", (firstFaction, secondFaction) => {
+      const simulation = createMenuBattleScenario([firstFaction, secondFaction]);
+      const activeWindows = new Map<number, Set<number>>([[1, new Set()], [2, new Set()]]);
+      // Low shields must not send Concord all the way back to its home field.
+      for (const ship of simulation.state.ships) if (ship.faction === "concord") ship.shields = 0;
+      for (let tick = 0; tick < 900; tick++) {
+        const owners = new Map(simulation.state.ships.map(ship => [ship.id, ship.teamId]));
+        const debug = simulation.stepMenuBattle();
+        for (const event of debug.events) if (event.type === "weaponFired") {
+          const team = owners.get(event.shipId);
+          if (team !== undefined) activeWindows.get(team)!.add(Math.floor(tick / 100));
+        }
+        if (tick >= 300 && tick % 100 === 99) for (const team of [1, 2]) {
+          const fleet = simulation.state.ships.filter(ship => ship.teamId === team);
+          const averageRadius = fleet.reduce((sum, ship) => sum + Math.hypot(ship.x, ship.z), 0) / Math.max(1, fleet.length);
+          expect(averageRadius, `${firstFaction}/${secondFaction} team ${team} tick ${tick}`).toBeLessThan(650);
+          expect(fleet.length).toBeLessThanOrEqual(28);
+          expect(fleet.some(ship => ship.orders[0]?.type === "patrol")).toBe(false);
+        }
+      }
+      for (const team of [1, 2]) {
+        expect(activeWindows.get(team)!.size, `${firstFaction}/${secondFaction} team ${team} firing windows`).toBeGreaterThanOrEqual(7);
+      }
+  });
+
+  it("uses the chosen factions' playable rosters for the opening fleet and every reinforcement wave", () => {
+    const simulation = createMenuBattleScenario(["brood", "concord"]);
+    expect(simulation.snapshot()).toEqual(createMenuBattleScenario(["brood", "concord"]).snapshot());
+    expect(simulation.state.players.map(player => player.faction)).toEqual(["brood", "concord"]);
+    expect(simulation.state.ships).toHaveLength(44);
+    const checkRoster = () => {
+      for (const ship of simulation.state.ships) {
+        const owner = simulation.state.players.find(player => player.id === ship.ownerPlayerId)!;
+        expect(ship.faction).toBe(owner.faction);
+        expect(FACTIONS[owner.faction].ships).toContain(ship.class);
+      }
+    };
+    checkRoster();
+    // Vacate the fleet slots to exercise the complete twelve-wave cycle.
+    for (let wave = 0; wave < 12; wave++) {
+      simulation.state.ships = [];
+      simulation.state.tick = wave * 90;
+      simulation.maintainMenuBattleReinforcements(28, 90);
+      expect(simulation.state.ships).toHaveLength(2);
+      checkRoster();
+    }
+  });
+
   it("uses mirrored reinforcement waves and helps the trailing fleet recover", () => {
     const simulation = createMenuBattleScenario();
     const trailingId = "menu-crimson";
@@ -80,7 +129,7 @@ describe("title-screen battle scenario", () => {
     expect(first.state.ships.filter((ship) => ship.class === "fighter")).toHaveLength(32);
     expect(first.state.ships.filter((ship) => ship.class === "bomber")).toHaveLength(8);
     expect(first.state.ships.filter((ship) => ship.class === "cruiser" || ship.class === "battleship")).toHaveLength(4);
-    expect(first.state.ships.every((ship) => ship.orders[0]?.type === "patrol")).toBe(true);
+    expect(first.state.ships.every((ship) => ship.orders[0]?.type === "attackMove")).toBe(true);
     const averageStartRadius = first.state.ships.reduce((sum, ship) => sum + Math.hypot(ship.x, ship.z), 0) / first.state.ships.length;
     const averageDestinationRadius = first.state.ships.reduce((sum, ship) => {
       const destination = ship.orders[0]!.destination;
@@ -94,8 +143,7 @@ describe("title-screen battle scenario", () => {
       .map((ship) => [ship.id, { x: ship.x, z: ship.z }]));
     const maximumFleetByPlayer = new Map<string, number>();
     for (let tick = 0; tick < 600 && first.state.status === "playing"; tick += 1) {
-      first.maintainMenuBattleReinforcements(28, 90);
-      first.step();
+      first.stepMenuBattle();
       for (const player of first.state.players) {
         const count = first.state.ships.filter((ship) => ship.ownerPlayerId === player.id).length;
         maximumFleetByPlayer.set(player.id, Math.max(maximumFleetByPlayer.get(player.id) ?? 0, count));

@@ -8,6 +8,7 @@ import type {
   TeamViewState,
   AiDifficulty,
   AiPersonality,
+  FactionId,
 } from "@space-rts/game-core";
 
 // Wire allowlists intentionally live at the protocol boundary. The exhaustive
@@ -19,6 +20,7 @@ const PROTOCOL_SHIP_CLASSES = {
   artilleryCruiser: true, carrier: true, battleship: true,
 } satisfies Record<ShipClass, true>;
 const PROTOCOL_BUILDABLE_STRUCTURE_TYPES = {
+  creepNode: true, pylon: true,
   extractor: true, deepCoreExtractor: true, singularityHarvester: true,
   alloyRefinery: true, matterForge: true,
   solarArray: true, storage: true, quantumStorage: true, fabricator: true, shipyard: true,
@@ -35,7 +37,7 @@ const hasOwn = (record: object, key: unknown): key is string =>
 
 export const MAX_PLAYERS = 8;
 /** Bump whenever deterministic rules, unit data, or the lockstep bootstrap contract changes. */
-export const LOCKSTEP_PROTOCOL_VERSION = 3;
+export const LOCKSTEP_PROTOCOL_VERSION = 5;
 export const MAX_COMMAND_BATCH = 32;
 export const MAX_FLEET_COMMAND_UNITS = 2_048;
 export const MAX_MESSAGE_BYTES = 64 * 1024;
@@ -82,6 +84,7 @@ export const DEFAULT_LOBBY_SETTINGS: Readonly<LobbySettings> = {
 };
 
 export interface LobbyPlayerSlot {
+  faction: FactionId;
   playerId: string;
   name: string;
   slotIndex: number;
@@ -105,16 +108,30 @@ export interface LobbyState {
   createdAt: number;
 }
 
+/** Public discovery data; no player identities, reconnect tokens, or match seed. */
+export interface LobbyListEntry {
+  matchId: string;
+  hostName: string;
+  mode: MatchMode;
+  mapPreset: MapPreset;
+  mapSize: MapSize;
+  playerCount: number;
+  aiCount: number;
+  capacity: number;
+  createdAt: number;
+}
+
 export type ClientMessage =
   | { type: "hello"; playerId?: string; name: string; reconnectToken?: string; lockstepVersion: number }
   | { type: "spectate"; name: string; mode: SpectatorMode; token?: string; spectatorId?: string; reconnectToken?: string; lockstepVersion: number }
   | { type: "ping"; clientTime: number }
   | { type: "request_snapshot"; reason: "join" | "reconnect" | "checksum" | "manual" }
+  | { type: "set_faction"; faction: FactionId; playerId?: string }
   | { type: "set_ready"; ready: boolean }
   | { type: "set_team"; teamId: number; playerId?: string }
   | { type: "set_mode"; mode: MatchMode }
   | { type: "set_settings"; settings: LobbySettings }
-  | { type: "add_ai"; name?: string; teamId?: number; difficulty?: AiDifficulty; personality?: AiPersonality }
+  | { type: "add_ai"; faction?: FactionId; name?: string; teamId?: number; difficulty?: AiDifficulty; personality?: AiPersonality }
   | { type: "set_ai_settings"; playerId: string; difficulty: AiDifficulty; personality: AiPersonality }
   | { type: "remove_slot"; playerId: string }
   | { type: "authorize_spectator"; teamId: number }
@@ -182,6 +199,7 @@ function isLobbyPlayerSlot(value: unknown): value is LobbyPlayerSlot {
     && isString(value.playerId, 80)
     && typeof value.name === "string" && value.name.length <= 32
     && isInteger(value.slotIndex) && value.slotIndex >= 0 && value.slotIndex < MAX_PLAYERS
+    && ["industrial", "brood", "concord"].includes(String(value.faction))
     && isInteger(value.teamId) && value.teamId >= 1 && value.teamId <= MAX_PLAYERS
     && isInteger(value.color) && value.color >= 0
     && typeof value.ready === "boolean"
@@ -217,12 +235,28 @@ function isLobbyState(value: unknown): value is LobbyState {
     && !("seed" in value);
 }
 
+function isAiPlans(value: unknown): boolean {
+  const nonnegative = (entry: unknown) => isInteger(entry) && Number(entry) >= 0;
+  return value === undefined || (isRecord(value) && Object.values(value).every((plan) => isRecord(plan)
+    && nonnegative(plan.searchIndex)
+    && Array.isArray(plan.knownStructures) && plan.knownStructures.every((contact) => isRecord(contact)
+      && nonnegative(contact.id)
+      && (contact.type === "commandCore" || hasOwn(PROTOCOL_BUILDABLE_STRUCTURE_TYPES, contact.type)) && isVec2(contact))
+    && Array.isArray(plan.recoveringShipIds) && plan.recoveringShipIds.every(nonnegative)
+    && (plan.constructionWatch === undefined || (isRecord(plan.constructionWatch)
+      && isString(plan.constructionWatch.key, 64) && isFiniteNumber(plan.constructionWatch.progress)
+      && nonnegative(plan.constructionWatch.lastProgressTick)))
+    && (plan.blockedSites === undefined || (Array.isArray(plan.blockedSites) && plan.blockedSites.every((site) =>
+      isRecord(site) && nonnegative(site.untilTick) && isVec2(site))))));
+}
+
 function isProjectedViewState(value: unknown): value is ProjectedViewState {
   if (!isRecord(value)
     || value.version !== 1
-    || value.simulationVersion !== 9
+    || value.simulationVersion !== 11
     || !isInteger(value.tick) || value.tick < 0
     || !isInteger(value.viewerTeamId) || value.viewerTeamId < 1
+    || !Array.isArray(value.territories)
     || !Array.isArray(value.players)
     || !Array.isArray(value.teams)
     || !Array.isArray(value.ships)
@@ -248,6 +282,7 @@ function isProjectedViewState(value: unknown): value is ProjectedViewState {
     && !("commandQueue" in value)
     && !("aiPlayerIds" in value)
     && !("aiCommanders" in value)
+    && !("aiPlans" in value)
     && !("visibility" in value);
 }
 
@@ -324,7 +359,7 @@ function isGameCommand(value: unknown): value is GameCommand {
   if (value.type === "clearProductionQueue") {
     return isInteger(value.structureId) && value.structureId > 0;
   }
-  if (value.type === "setRallyPoint") {
+  if ((value.type === "setRallyPoint" || value.type === "setWarpPoint")) {
     return isInteger(value.structureId) && value.structureId > 0 && isVec2(value.position);
   }
   return false;
@@ -363,6 +398,9 @@ export function parseClientMessage(raw: string): ClientMessage | null {
       return isFiniteNumber(value.clientTime) ? value as ClientMessage : null;
     case "request_snapshot":
       return ["join", "reconnect", "checksum", "manual"].includes(String(value.reason)) ? value as ClientMessage : null;
+    case "set_faction":
+      return ["industrial", "brood", "concord"].includes(String(value.faction))
+        && (value.playerId === undefined || isString(value.playerId, 80)) ? value as ClientMessage : null;
     case "set_ready":
       return typeof value.ready === "boolean" ? value as ClientMessage : null;
     case "set_team":
@@ -373,7 +411,8 @@ export function parseClientMessage(raw: string): ClientMessage | null {
     case "set_settings":
       return isLobbySettings(value.settings) ? value as ClientMessage : null;
     case "add_ai":
-      return (value.name === undefined || isString(value.name, 32))
+      return (value.faction === undefined || ["industrial", "brood", "concord"].includes(String(value.faction)))
+        && (value.name === undefined || isString(value.name, 32))
         && (value.teamId === undefined || (isInteger(value.teamId) && value.teamId >= 1 && value.teamId <= MAX_PLAYERS))
         && (value.difficulty === undefined || ["easy", "normal", "hard"].includes(String(value.difficulty)))
         && (value.personality === undefined || ["balanced", "aggressive", "turtle", "economic"].includes(String(value.personality)))
@@ -423,14 +462,15 @@ export function parseServerMessage(raw: string): ServerMessage | null {
     const state = value.state;
     return isInteger(value.tick) && value.tick >= 0
       && isInteger(value.checksum)
-      && isRecord(state) && state.version === 9
+      && isRecord(state) && state.version === 11
       && state.tick === value.tick && state.checksum === value.checksum
       && isInteger(state.seed)
+      && Array.isArray(state.territories)
       && Array.isArray(state.players) && Array.isArray(state.teams)
       && Array.isArray(state.ships) && Array.isArray(state.structures)
       && Array.isArray(state.resourceNodes) && Array.isArray(state.obstacles)
       && Array.isArray(state.projectiles) && Array.isArray(state.commandQueue)
-      && Array.isArray(state.aiPlayerIds) && isRecord(state.aiCommanders)
+      && Array.isArray(state.aiPlayerIds) && isRecord(state.aiCommanders) && isAiPlans(state.aiPlans)
       && Array.isArray(state.visibility)
       && ["start", "join", "reconnect", "checksum", "manual"].includes(String(value.reason))
       ? value as ServerMessage : null;

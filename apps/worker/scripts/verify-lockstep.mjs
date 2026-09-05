@@ -1,5 +1,5 @@
 const authority = process.env.VOIDFRONT_AUTHORITY ?? "ws://127.0.0.1:8787";
-const lockstepVersion = 3;
+const lockstepVersion = 5;
 const base = new URL(authority);
 const basePath = base.pathname.replace(/\/+$/, "");
 const matchId = `lockstep-${Date.now()}`;
@@ -62,7 +62,7 @@ class Peer {
 
 function assertLockstepState(message, label) {
   const state = message.state;
-  if (message.type !== "lockstep_state" || state?.version !== 9 || state.tick !== message.tick
+  if (message.type !== "lockstep_state" || state?.version !== 11 || state.tick !== message.tick
     || state.checksum !== message.checksum || !Number.isInteger(state.seed)
     || !Array.isArray(state.commandQueue) || !Array.isArray(state.visibility)) {
     throw new Error(`${label} was not a complete deterministic bootstrap state`);
@@ -80,6 +80,23 @@ try {
   const hostWelcome = await host.connect();
   const wingWelcome = await wing.connect();
   await host.waitFor((message) => message.type === "lobby" && message.lobby.slots.length === 2);
+  host.send({ type: "set_faction", faction: "brood" });
+  wing.send({ type: "set_faction", faction: "concord" });
+  await host.waitFor((message) => message.type === "lobby"
+    && message.lobby.slots.find((slot) => slot.playerId === hostWelcome.playerId)?.faction === "brood"
+    && message.lobby.slots.find((slot) => slot.playerId === wingWelcome.playerId)?.faction === "concord");
+  wing.send({ type: "set_faction", faction: "industrial", playerId: hostWelcome.playerId });
+  await wing.waitFor((message) => message.type === "error" && message.code === "faction_owner");
+  host.send({ type: "set_ready", ready: true });
+  await host.waitFor((message) => message.type === "lobby"
+    && message.lobby.slots.find((slot) => slot.playerId === hostWelcome.playerId)?.ready);
+  wing.send({ type: "set_faction", faction: "industrial" });
+  await host.waitFor((message) => message.type === "lobby"
+    && message.lobby.slots.every((slot) => !slot.ready)
+    && message.lobby.slots.find((slot) => slot.playerId === wingWelcome.playerId)?.faction === "industrial");
+  wing.send({ type: "set_faction", faction: "concord" });
+  await host.waitFor((message) => message.type === "lobby"
+    && message.lobby.slots.find((slot) => slot.playerId === wingWelcome.playerId)?.faction === "concord");
   host.send({ type: "set_ready", ready: true });
   wing.send({ type: "set_ready", ready: true });
   await host.waitFor((message) => message.type === "lobby" && message.lobby.slots.every((slot) => slot.ready));
@@ -89,6 +106,14 @@ try {
   const wingStart = await wing.waitFor((message) => message.type === "lockstep_state" && message.reason === "start");
   assertLockstepState(hostStart, "Host start");
   assertLockstepState(wingStart, "Wing start");
+  if (hostStart.state.players.find((player) => player.id === hostWelcome.playerId)?.faction !== "brood"
+    || hostStart.state.players.find((player) => player.id === wingWelcome.playerId)?.faction !== "concord"
+    || !hostStart.state.territories.some((field) => field.kind === "creep")
+    || !hostStart.state.territories.some((field) => field.kind === "pylon")) {
+    throw new Error("Selected factions or initial territory missing from bootstrap");
+  }
+  host.send({ type: "set_faction", faction: "industrial" });
+  await host.waitFor((message) => message.type === "error" && message.code === "lobby_locked");
   if (JSON.stringify(hostStart.state) !== JSON.stringify(wingStart.state)) {
     throw new Error("Peers did not receive the same bootstrap state");
   }
@@ -190,6 +215,8 @@ try {
     verifiedTick: verifiedFrame.tick,
     checksum: verifiedFrame.checksum,
     commandBroadcast: "passed",
+    factionSelectionAndOwnership: "passed",
+    factionReadyResetAndMatchLock: "passed",
     automaticDesyncRecovery: "passed",
     recovery: "bootstrap-plus-command-journal passed",
     reconnect: "passed",

@@ -1,6 +1,8 @@
 import * as THREE from "three";
 import {
   ALL_SHIP_CLASSES,
+  FACTION_IDS,
+  getFactionShipDefinition, CREEP_SPEED_MULTIPLIER,
   SHIPS,
   WEAPONS,
   type PlayerId,
@@ -12,6 +14,7 @@ import {
 } from "@space-rts/game-core";
 import { FIXED_DT, wrapAngle } from "@space-rts/shared";
 import { turretDeckHeight } from "./ship-layout";
+import { SmallCraftFlight } from "./small-craft-flight";
 
 export const MAX_RENDER_SHIPS = 4_096;
 export const MAX_RENDER_TURRETS = 16_384;
@@ -93,71 +96,9 @@ const PROJECTILE_WEAPON_TYPES: readonly WeaponTypeId[] = [
 ];
 
 // A fighter state represents a five-craft squad. LOD selection follows the
-// size of an individual craft so distant squads collapse before their full
+// size of an individual craft so zoomed-out squads collapse before their full
 // formation becomes more expensive than the pixels it occupies.
 const LOD_RADIUS_SCALE: Readonly<Partial<Record<ShipClass, number>>> = { fighter: 0.38 };
-const CAPITAL_SHIP_CLASSES: ReadonlySet<ShipClass> = new Set(["cruiser", "artilleryCruiser", "carrier", "battleship"]);
-const DOGFIGHT_GRID_SIZE = 40;
-
-function dogfightGridKey(cellX: number, cellZ: number): string {
-  return `${cellX}:${cellZ}`;
-}
-
-function smallCraftCapitalPassOffset(
-  ship: ShipState,
-  x: number,
-  z: number,
-  capitalShips: readonly ShipState[],
-): number {
-  if (ship.class !== "fighter" && ship.class !== "bomber") return 0;
-  let strongestOffset = 0;
-  for (const capital of capitalShips) {
-    if (capital.id === ship.id) continue;
-    const passRadius = SHIPS[capital.class].radius + SHIPS[ship.class].radius * 0.72;
-    const distance = Math.hypot(x - capital.x, z - capital.z);
-    if (distance >= passRadius) continue;
-    const overlap = 1 - distance / passRadius;
-    const eased = overlap * overlap * (3 - 2 * overlap);
-    const direction = (ship.id + capital.id) % 2 === 0 ? 1 : -1;
-    const clearance = SHIPS[capital.class].radius * 0.72 + (ship.class === "bomber" ? 10 : 7);
-    const offset = direction * eased * clearance;
-    if (Math.abs(offset) > Math.abs(strongestOffset)) strongestOffset = offset;
-  }
-  return strongestOffset;
-}
-
-function smallCraftDogfightPose(
-  ship: ShipState,
-  x: number,
-  z: number,
-  smallCraftGrid: ReadonlyMap<string, readonly ShipState[]>,
-): { altitude: number; bank: number } {
-  if (ship.class !== "fighter" && ship.class !== "bomber") return { altitude: 0, bank: 0 };
-  let strongest = 0;
-  const cellX = Math.floor(x / DOGFIGHT_GRID_SIZE);
-  const cellZ = Math.floor(z / DOGFIGHT_GRID_SIZE);
-  for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
-    for (let offsetZ = -1; offsetZ <= 1; offsetZ += 1) {
-      const nearby = smallCraftGrid.get(dogfightGridKey(cellX + offsetX, cellZ + offsetZ)) ?? [];
-      for (const opponent of nearby) {
-        if (opponent.id === ship.id || opponent.teamId === ship.teamId) continue;
-        const passRadius = (SHIPS[ship.class].radius + SHIPS[opponent.class].radius) * 1.35;
-        const distance = Math.hypot(x - opponent.x, z - opponent.z);
-        if (distance >= passRadius) continue;
-        const overlap = 1 - distance / passRadius;
-        const eased = overlap * overlap * (3 - 2 * overlap);
-        const direction = ship.id < opponent.id ? 1 : -1;
-        const clearance = ship.class === "bomber" ? 16 : 12;
-        const offset = direction * eased * clearance;
-        if (Math.abs(offset) > Math.abs(strongest)) strongest = offset;
-      }
-    }
-  }
-  return {
-    altitude: strongest,
-    bank: Math.sign(strongest) * Math.min(0.24, Math.abs(strongest) * 0.02),
-  };
-}
 
 /**
  * Returns the top of the deck beneath a hardpoint. Capital hulls have several
@@ -178,10 +119,14 @@ export class InterpolatedRenderState {
   turretCount = 0;
   readonly shipIds = new Int32Array(MAX_RENDER_SHIPS);
   readonly shipClass = new Uint8Array(MAX_RENDER_SHIPS);
+  readonly shipFaction = new Uint8Array(MAX_RENDER_SHIPS);
   readonly shipColor = new Uint32Array(MAX_RENDER_SHIPS);
   readonly shipPosition = new Float32Array(MAX_RENDER_SHIPS * 3);
   readonly shipYaw = new Float32Array(MAX_RENDER_SHIPS);
   readonly shipBank = new Float32Array(MAX_RENDER_SHIPS);
+  readonly shipPitch = new Float32Array(MAX_RENDER_SHIPS);
+  readonly shipSpeed = new Float32Array(MAX_RENDER_SHIPS);
+  readonly shipEngagement = new Float32Array(MAX_RENDER_SHIPS);
   readonly shipHealth = new Float32Array(MAX_RENDER_SHIPS);
   readonly shipShield = new Float32Array(MAX_RENDER_SHIPS);
   readonly shipEngine = new Float32Array(MAX_RENDER_SHIPS);
@@ -237,7 +182,8 @@ const LOD_THRESHOLDS: Readonly<Record<RenderQuality, LodThresholds>> = {
 
 export class RenderStateBuilder {
   readonly state = new InterpolatedRenderState();
-  private readonly lodByEntity = new Map<number, VisualLod>();
+  private readonly smallCraftFlight = new SmallCraftFlight();
+  private readonly lodByClass = new Map<ShipClass, VisualLod>();
   private readonly playerColors = new Map<PlayerId, number>();
   private readonly projected = new THREE.Vector3();
   private readonly visualTurretYaw = new Float32Array(65_536);
@@ -254,11 +200,13 @@ export class RenderStateBuilder {
     alpha: number,
     camera: THREE.PerspectiveCamera,
     viewportHeight: number,
+    zoomDistance: number,
     selectedIds: ReadonlySet<number>,
     quality: RenderQuality,
     now: number,
     forceTactical = false,
     visibilityTransition?: RenderVisibilityTransition,
+    visualTick = now * 0.02,
   ): InterpolatedRenderState {
     this.playerColors.clear();
     for (const player of source.players) this.playerColors.set(player.id, player.color);
@@ -268,19 +216,16 @@ export class RenderStateBuilder {
     this.currentVisibleEntityIds.clear();
     for (const ship of source.ships) this.currentVisibleEntityIds.add(ship.id);
     camera.updateMatrixWorld();
-    const focalPixels = viewportHeight / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
-    const capitalShips = source.ships.filter((ship) => CAPITAL_SHIP_CLASSES.has(ship.class));
-    const smallCraftShips = source.ships.filter((ship) => ship.class === "fighter" || ship.class === "bomber");
-    const smallCraftGrid = new Map<string, ShipState[]>();
-    for (const ship of smallCraftShips) {
-      const key = dogfightGridKey(
-        Math.floor(ship.x / DOGFIGHT_GRID_SIZE),
-        Math.floor(ship.z / DOGFIGHT_GRID_SIZE),
-      );
-      const cell = smallCraftGrid.get(key);
-      if (cell) cell.push(ship);
-      else smallCraftGrid.set(key, [ship]);
+    const focalPixels = viewportHeight * camera.zoom / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
+    // Use the RTS camera's zoom setting as one reference depth for the whole
+    // fleet. Position, orbit, flight altitude and fog reveals must not cause
+    // ships of the same class to switch models at different times.
+    const pixelsPerWorldUnit = focalPixels / Math.max(1, zoomDistance);
+    for (const shipClass of SHIP_CLASSES) {
+      const zoomedRadius = SHIPS[shipClass].radius * (LOD_RADIUS_SCALE[shipClass] ?? 1) * pixelsPerWorldUnit;
+      this.resolveLod(shipClass, zoomedRadius, quality);
     }
+    this.smallCraftFlight.beginFrame(forceTactical ? [] : source.ships);
 
     const hasNewVisibilityTransition = visibilityTransition !== undefined
       && visibilityTransition.generation !== this.lastVisibilityGeneration;
@@ -298,42 +243,40 @@ export class RenderStateBuilder {
       const previous = newlyVisible ? undefined : previousTransforms.get(ship.id);
       const x = THREE.MathUtils.lerp(previous?.x ?? ship.x, ship.x, alpha);
       const z = THREE.MathUtils.lerp(previous?.z ?? ship.z, ship.z, alpha);
-      const dogfight = smallCraftDogfightPose(ship, x, z, smallCraftGrid);
-      const y = THREE.MathUtils.lerp(previous?.y ?? ship.y, ship.y, alpha)
-        + smallCraftCapitalPassOffset(ship, x, z, capitalShips)
-        + dogfight.altitude;
+      const baseY = THREE.MathUtils.lerp(previous?.y ?? ship.y, ship.y, alpha);
+      const turnVelocity = previous ? wrapAngle(ship.yaw - previous.yaw) / FIXED_DT : 0;
+      // Reject off-screen squadrons before proximity queries and animation.
+      this.projected.set(x, baseY, z).project(camera);
+      if (Math.abs(this.projected.x) > 1.4 || Math.abs(this.projected.y) > 1.4) continue;
+      const flight = !forceTactical && (ship.class === "fighter" || ship.class === "bomber")
+        ? this.smallCraftFlight.sample(ship, x, baseY, z, turnVelocity,
+          visualTick * FIXED_DT, newlyVisible) : undefined;
+      const y = baseY + (flight?.altitude ?? 0);
       this.projected.set(x, y, z).project(camera);
       if (this.projected.z < -1.15 || this.projected.z > 1.15 || Math.abs(this.projected.x) > 1.25 || Math.abs(this.projected.y) > 1.25) {
-        this.lodByEntity.set(ship.id, VisualLod.Culled);
         continue;
       }
-      const dx = camera.position.x - x;
-      const dy = camera.position.y - y;
-      const dz = camera.position.z - z;
-      const distance = Math.max(1, Math.hypot(dx, dy, dz));
-      const projectedRadius = SHIPS[ship.class].radius * (LOD_RADIUS_SCALE[ship.class] ?? 1) * focalPixels / distance;
-      const lod = forceTactical ? VisualLod.Tactical : this.resolveLod(ship.id, projectedRadius, quality);
+      const lod = forceTactical ? VisualLod.Tactical : this.lodByClass.get(ship.class)!;
       const index = this.state.shipCount++;
       const positionIndex = index * 3;
       const interpolatedYaw = previous ? previous.yaw + wrapAngle(ship.yaw - previous.yaw) * alpha : ship.yaw;
-      const turnVelocity = previous ? wrapAngle(ship.yaw - previous.yaw) / FIXED_DT : 0;
-      const speedRatio = Math.min(1.35, Math.hypot(ship.vx, ship.vz) / Math.max(1, SHIPS[ship.class].speed));
+      const speedRatio = Math.min(1.35, Math.hypot(ship.vx, ship.vz) / Math.max(1, getFactionShipDefinition(ship.class, ship.faction).speed));
       this.state.shipIds[index] = ship.id;
       this.state.shipClass[index] = CLASS_TO_ID[ship.class];
+      this.state.shipFaction[index] = Math.max(0, FACTION_IDS.indexOf(ship.faction ?? "industrial"));
       this.state.shipColor[index] = this.playerColors.get(ship.ownerPlayerId) ?? (ship.teamId === 1 ? 0x59a7ff : 0xff5576);
       this.state.shipPosition[positionIndex] = x;
       this.state.shipPosition[positionIndex + 1] = y;
       this.state.shipPosition[positionIndex + 2] = z;
       this.state.shipYaw[index] = interpolatedYaw;
-      this.state.shipBank[index] = ship.class === "fighter"
-        ? THREE.MathUtils.clamp(-turnVelocity * 0.1 + dogfight.bank, -0.72, 0.72)
-        : ship.class === "bomber"
-          ? THREE.MathUtils.clamp(-turnVelocity * 0.055 + dogfight.bank * 0.72, -0.42, 0.42)
-          : THREE.MathUtils.clamp(-turnVelocity * 0.025, -0.14, 0.14);
-      this.state.shipHealth[index] = Math.max(0, ship.health / SHIPS[ship.class].maxHealth);
-      this.state.shipShield[index] = SHIPS[ship.class].maxShield > 0 ? Math.max(0, ship.shields / SHIPS[ship.class].maxShield) : 0;
+      this.state.shipBank[index] = flight?.bank ?? THREE.MathUtils.clamp(-turnVelocity * 0.025, -0.14, 0.14);
+      this.state.shipPitch[index] = flight?.pitch ?? 0;
+      this.state.shipSpeed[index] = Math.hypot(ship.vx, ship.vz);
+      this.state.shipEngagement[index] = flight?.engagement ?? 0;
+      this.state.shipHealth[index] = Math.max(0, ship.health / getFactionShipDefinition(ship.class, ship.faction).maxHealth);
+      this.state.shipShield[index] = getFactionShipDefinition(ship.class, ship.faction).maxShield > 0 ? Math.max(0, ship.shields / getFactionShipDefinition(ship.class, ship.faction).maxShield) : 0;
       this.state.shipEngine[index] = 0.35 + speedRatio * 0.65;
-      this.state.shipCruising[index] = Math.hypot(ship.vx, ship.vz) > SHIPS[ship.class].speed * 1.01 ? 1 : 0;
+      this.state.shipCruising[index] = Math.hypot(ship.vx, ship.vz) > getFactionShipDefinition(ship.class, ship.faction).speed * (ship.faction === "brood" ? CREEP_SPEED_MULTIPLIER : 1) * 1.01 ? 1 : 0;
       this.state.shipRevealed[index] = (ship.revealedUntilTick ?? 0) > 0 ? 1 : 0;
       this.state.shipNewlyVisible[index] = newlyVisible ? 1 : 0;
       this.state.shipSelected[index] = selectedIds.has(ship.id) ? 1 : 0;
@@ -348,9 +291,7 @@ export class RenderStateBuilder {
       }
     }
 
-    for (const entityId of this.lodByEntity.keys()) {
-      if (!this.currentVisibleEntityIds.has(entityId)) this.lodByEntity.delete(entityId);
-    }
+    this.smallCraftFlight.endFrame();
     const previousVisibleEntityIds = this.visibleEntityIds;
     this.visibleEntityIds = this.currentVisibleEntityIds;
     this.currentVisibleEntityIds = previousVisibleEntityIds;
@@ -364,7 +305,8 @@ export class RenderStateBuilder {
   }
 
   clearHistory(): void {
-    this.lodByEntity.clear();
+    this.smallCraftFlight.clear();
+    this.lodByClass.clear();
     this.visualTurretYaw.fill(0);
     this.targetTurretYaw.fill(0);
     this.nextTurretUpdateAt.fill(0);
@@ -382,9 +324,9 @@ export class RenderStateBuilder {
     }
   }
 
-  private resolveLod(entityId: number, projectedRadius: number, quality: RenderQuality): VisualLod {
+  private resolveLod(shipClass: ShipClass, projectedRadius: number, quality: RenderQuality): VisualLod {
     const threshold = LOD_THRESHOLDS[quality];
-    const previous = this.lodByEntity.get(entityId);
+    const previous = this.lodByClass.get(shipClass);
     let lod: VisualLod;
     if (previous === VisualLod.Close && projectedRadius >= threshold.closeExit) lod = VisualLod.Close;
     else if (previous === VisualLod.Medium && projectedRadius < threshold.closeEnter && projectedRadius >= threshold.mediumExit) lod = VisualLod.Medium;
@@ -394,7 +336,7 @@ export class RenderStateBuilder {
     else if (projectedRadius >= threshold.mediumEnter) lod = VisualLod.Medium;
     else if (projectedRadius >= threshold.farEnter) lod = VisualLod.Far;
     else lod = VisualLod.Tactical;
-    this.lodByEntity.set(entityId, lod);
+    this.lodByClass.set(shipClass, lod);
     return lod;
   }
 
@@ -408,6 +350,9 @@ export class RenderStateBuilder {
     delta: number,
     newlyVisible: boolean,
   ): void {
+    // Fighter weapons are fixed guns baked into each member's hull. Appending
+    // squad hardpoints here would leave floating turrets at the old offsets.
+    if (ship.class === "fighter") return;
     const updateInterval = lod === VisualLod.Close ? 0 : lod === VisualLod.Medium ? 42 : 70;
     for (const turret of ship.turrets) {
       if (this.state.turretCount >= MAX_RENDER_TURRETS) return;

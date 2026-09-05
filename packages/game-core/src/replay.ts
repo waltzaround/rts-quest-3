@@ -523,7 +523,7 @@ export function validateReplay(input: unknown): ReplayValidationResult {
   if (input.format !== REPLAY_FORMAT || input.version !== REPLAY_FORMAT_VERSION) {
     return { valid: false, reason: "Unsupported replay format or version" };
   }
-  if (input.simulationVersion !== 9
+  if (input.simulationVersion !== 11
     || (input.physicsBackend !== "box3d-wasm" && input.physicsBackend !== "deterministic-fallback")
     || typeof input.finalized !== "boolean") {
     return { valid: false, reason: "Unsupported simulation version" };
@@ -667,7 +667,7 @@ function isReplayResult(value: unknown): value is ReplayResult {
 
 function isSimulationStateShape(value: unknown): value is SimulationState {
   return isRecord(value)
-    && value.version === 9
+    && value.version === 11
     && isNonNegativeInteger(value.tick)
     && Array.isArray(value.players)
     && Array.isArray(value.teams)
@@ -675,9 +675,28 @@ function isSimulationStateShape(value: unknown): value is SimulationState {
     && Array.isArray(value.structures)
     && Array.isArray(value.resourceNodes)
     && Array.isArray(value.obstacles)
+    && Array.isArray(value.territories)
     && Array.isArray(value.visibility)
     && Array.isArray(value.projectiles)
-    && Array.isArray(value.commandQueue);
+    && Array.isArray(value.commandQueue)
+    && isAiPlans(value.aiPlans);
+}
+
+function isAiPlans(value: unknown): boolean {
+  const point = (entry: Record<string, unknown>) => typeof entry.x === "number" && Number.isFinite(entry.x)
+    && typeof entry.z === "number" && Number.isFinite(entry.z);
+  return value === undefined || (isRecord(value) && Object.values(value).every((plan) => isRecord(plan)
+    && isNonNegativeInteger(plan.searchIndex)
+    && Array.isArray(plan.knownStructures) && plan.knownStructures.every((contact) => isRecord(contact)
+      && isNonNegativeInteger(contact.id) && point(contact)
+      && (contact.type === "commandCore" || (BUILDABLE_STRUCTURE_TYPES as readonly unknown[]).includes(contact.type)))
+    && Array.isArray(plan.recoveringShipIds) && plan.recoveringShipIds.every(isNonNegativeInteger)
+    && (plan.constructionWatch === undefined || (isRecord(plan.constructionWatch)
+      && typeof plan.constructionWatch.key === "string" && plan.constructionWatch.key.length <= 64
+      && typeof plan.constructionWatch.progress === "number" && Number.isFinite(plan.constructionWatch.progress)
+      && isNonNegativeInteger(plan.constructionWatch.lastProgressTick)))
+    && (plan.blockedSites === undefined || (Array.isArray(plan.blockedSites) && plan.blockedSites.every((site) =>
+      isRecord(site) && point(site) && isNonNegativeInteger(site.untilTick))))));
 }
 
 function safeChecksum(state: SimulationState): number | null {

@@ -1,0 +1,12 @@
+{"completed":1,"total":12,"id":"orbital-1729-industrial-vs-brood-1","winner":"industrial","seconds":1116.7,"wallSeconds":55.532575458,"shipsProduced":[886,747],"coreHull":[1,0]}
+{"completed":2,"total":12,"id":"orbital-1729-industrial-vs-brood-2","winner":"industrial","seconds":986.5,"wallSeconds":39.678671208,"shipsProduced":[727,569],"coreHull":[0,1]}
+{"completed":3,"total":12,"id":"orbital-1729-industrial-vs-concord-1","winner":"industrial","seconds":830.05,"wallSeconds":10.952650458000004,"shipsProduced":[289,48],"coreHull":[1,0]}
+{"completed":4,"total":12,"id":"orbital-1729-industrial-vs-concord-2","winner":"concord","seconds":1149.25,"wallSeconds":24.78177329200001,"shipsProduced":[277,419],"coreHull":[1,0]}
+{"completed":5,"total":12,"id":"orbital-1729-brood-vs-concord-1","winner":"concord","seconds":665.1,"wallSeconds":9.382210334000003,"shipsProduced":[251,83],"coreHull":[0,1]}
+{"completed":6,"total":12,"id":"orbital-1729-brood-vs-concord-2","winner":"concord","seconds":1061.4,"wallSeconds":25.70992837500002,"shipsProduced":[189,560],"coreHull":[1,0]}
+{"completed":7,"total":12,"id":"orbital-7384-industrial-vs-brood-1","winner":"industrial","seconds":1034.05,"wallSeconds":33.47749720799999,"shipsProduced":[472,592],"coreHull":[1,0]}
+{"completed":8,"total":12,"id":"orbital-7384-industrial-vs-brood-2","winner":"industrial","seconds":813.75,"wallSeconds":20.17788333400001,"shipsProduced":[398,326],"coreHull":[0,1]}
+{"completed":9,"total":12,"id":"orbital-7384-industrial-vs-concord-1","winner":"industrial","seconds":1155.95,"wallSeconds":35.466643125000004,"shipsProduced":[792,218],"coreHull":[1,0]}
+{"completed":10,"total":12,"id":"orbital-7384-industrial-vs-concord-2","winner":"industrial","seconds":602.65,"wallSeconds":9.645097416000004,"shipsProduced":[42,272],"coreHull":[0,1]}
+{"completed":11,"total":12,"id":"orbital-7384-brood-vs-concord-1","winner":"concord","seconds":641.35,"wallSeconds":7.135381333000026,"shipsProduced":[129,67],"coreHull":[0,1]}
+{"completed":12,"total":12,"id":"orbital-7384-brood-vs-concord-2","winner":"concord","seconds":574.65,"wallSeconds":5.891524458999978,"shipsProduced":[50,110],"coreHull":[1,0]}
