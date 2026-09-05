@@ -37,7 +37,7 @@ const hasOwn = (record: object, key: unknown): key is string =>
 
 export const MAX_PLAYERS = 8;
 /** Bump whenever deterministic rules, unit data, or the lockstep bootstrap contract changes. */
-export const LOCKSTEP_PROTOCOL_VERSION = 5;
+export const LOCKSTEP_PROTOCOL_VERSION = 6;
 export const MAX_COMMAND_BATCH = 32;
 export const MAX_FLEET_COMMAND_UNITS = 2_048;
 export const MAX_MESSAGE_BYTES = 64 * 1024;

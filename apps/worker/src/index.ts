@@ -1058,7 +1058,11 @@ export class Match implements DurableObject {
       // Starting it at the bootstrap tick makes the relay naturally slow down
       // while a joining or recovering browser catches up.
       const reported = this.peerReportedTicks.get(slot.playerId) ?? this.simulation?.state.tick ?? 0;
-      return Math.max(largest, this.relayTick - reported);
+      // Reports arrive only once per simulation second. One healthy peer may
+      // already have reported tick 40 while another's latest report is tick 20.
+      // Discount that sampling window before treating the difference as lag.
+      const lagBeyondReportWindow = this.relayTick - reported - RELAY_SYNC_INTERVAL_TICKS;
+      return Math.max(largest, lagBeyondReportWindow);
     }, 0);
     const intervalMs = worstLag > SIMULATION_HZ ? 100
       : worstLag > 8 ? 1000 / 15

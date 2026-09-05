@@ -10,6 +10,7 @@ import {
 } from "@space-rts/box3d-wasm";
 import {
   BUILDABLE_STRUCTURE_TYPES,
+  LockstepInputs,
   BROOD_CAPACITY, CREEP_SPEED_MULTIPLIER, FACTIONS, FACTION_IDS, factionAllowsStructure, factionShipName, factionStructureName, factionStructureDescription,
   getFactionShipDefinition, getFactionShipEconomy, getFactionStructureDefinition, isInTerritory,
   type FactionId, type TerritoryFieldState,
@@ -65,6 +66,7 @@ import {
   type ServerMessage,
 } from "@space-rts/protocol";
 import { FIXED_DT } from "@space-rts/shared";
+import { advanceLockstep } from "./lockstep-clock";
 import { ScalableBattleAudio } from "./audio-system";
 import { ProjectileVfx, getBatchedTurretGeometry, getTorpedoImpactPoint, type ProjectileVisualTarget } from "./combat-visuals";
 import { getWeaponStyle, ProjectileAppearanceRegistry } from "./weapon-appearance";
@@ -1254,6 +1256,7 @@ function createPlayableScenario(): ReturnType<typeof createCombatScenario> {
 }
 
 let simulation = createPlayableScenario();
+let lockstepInputs = new LockstepInputs(simulation);
 let physicsWorld: PlanarCirclePhysicsWorld | null = null;
 let physicsRuntime: PhysicsRuntime | null = null;
 let pendingLockstepState: { state: SimulationState; notice?: string; focusStartingBase: boolean } | null = null;
@@ -1356,14 +1359,10 @@ loadPhysicsRuntime()
       pendingLockstepPlayerStates = [];
       pendingLockstepTargetTick = 0;
       installLockstepState(pending.state, pending.notice, pending.focusStartingBase);
-      for (const command of pendingCommands) {
-        simulation.submitCommand(command);
-      }
+      lockstepInputs.queueCommands(pendingCommands);
       sharedSimulationWorker?.postMessage({ type: "commands", commands: pendingCommands });
       for (const transition of pendingPlayerStates) {
-        while (simulation.state.tick < transition.tick) simulation.step();
-        const player = simulation.state.players.find((candidate) => candidate.id === transition.playerId);
-        if (player && player.state !== "defeated") player.state = transition.state;
+        lockstepInputs.queuePlayerState(transition);
         sharedSimulationWorker?.postMessage({ type: "player_state", ...transition });
       }
       simulation.refreshChecksum();
@@ -2575,7 +2574,7 @@ function handleServerMessage(message: ServerMessage): void {
         pendingLockstepCommands.push(...message.commands);
         return;
       }
-      for (const command of message.commands) simulation.submitCommand(command);
+      if (!lockstepInputs.queueCommands(message.commands)) requestLockstepRecovery();
       sharedSimulationWorker?.postMessage({ type: "commands", commands: message.commands });
       return;
     case "lockstep_player_state": {
@@ -2588,9 +2587,8 @@ function handleServerMessage(message: ServerMessage): void {
         return;
       }
       if (networkView) return;
-      while (simulation.state.tick < message.tick) tickSimulation();
-      const player = simulation.state.players.find((candidate) => candidate.id === message.playerId);
-      if (player && player.state !== "defeated") player.state = message.state;
+      if (!lockstepInputs.queuePlayerState(message)) requestLockstepRecovery();
+      lockstepTargetTick = Math.max(lockstepTargetTick, message.tick);
       sharedSimulationWorker?.postMessage({
         type: "player_state", playerId: message.playerId, state: message.state, tick: message.tick,
       });
@@ -2681,6 +2679,7 @@ function focusCameraOnLocalBase(): boolean {
 
 function installLockstepState(state: SimulationState, notice?: string, focusStartingBase = false): void {
   simulation = restoreSimulation(state, replacePhysicsWorld());
+  lockstepInputs = new LockstepInputs(simulation);
   initializeSharedSimulationTrial(state);
   const localPlayer = state.players.find((player) => player.id === localPlayerId);
   if (localPlayer) commandSequence = Math.max(commandSequence, localPlayer.lastCommandSequence);
@@ -2718,6 +2717,10 @@ function verifyLockstepFrame(): void {
   if (lockstepTargetChecksum === 0) return;
   if (simulation.state.tick !== lockstepTargetTick || simulation.state.tick < lockstepChecksumGraceTick) return;
   if (simulation.state.checksum === lockstepTargetChecksum) return;
+  requestLockstepRecovery();
+}
+
+function requestLockstepRecovery(): void {
   const now = performance.now();
   if (lockstepResyncPending || now < lockstepResyncCooldownUntil) return;
   lockstepResyncPending = true;
@@ -4422,7 +4425,8 @@ function tickSimulation(): void {
   battleAudio.captureWorld(before.ships, before.structures);
   previousTransforms.clear();
   for (const ship of before.ships) previousTransforms.set(ship.id, captureTransform(ship));
-  lastDebug = menuBattleMode ? simulation.stepMenuBattle() : simulation.step();
+  lastDebug = networkMode && !networkView ? lockstepInputs.step()
+    : menuBattleMode ? simulation.stepMenuBattle() : simulation.step();
   if (networkMode && !networkView && simulation.state.tick > 0
     && simulation.state.tick % 20 === 0 && simulation.state.tick !== lastLockstepSyncReportTick) {
     lastLockstepSyncReportTick = simulation.state.tick;
@@ -6347,9 +6351,7 @@ function animate(now: number): void {
       accumulator -= FIXED_DT;
     }
   } else if (!paused && networkMode && !networkView && !pendingLockstepState && physicsWorld) {
-    const ticksBehind = lockstepTargetTick - simulation.state.tick;
-    if (ticksBehind > 0) {
-      tickSimulation();
+    if (advanceLockstep(simulation.state, lockstepTargetTick, tickSimulation) > 0) {
       networkInterpolationStartedAt = now;
     }
     verifyLockstepFrame();

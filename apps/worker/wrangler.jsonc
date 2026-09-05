@@ -13,9 +13,16 @@
       { "name": "LOBBY_DIRECTORY", "class_name": "LobbyDirectory" }
     ]
   },
+  // This list must mirror the migration history production has already recorded
+  // (currently at v3); only tags after that are applied on deploy.
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["Match"] },
-    { "tag": "v2", "new_sqlite_classes": ["LobbyDirectory"] }
+    // Checkpoint from a since-reverted deploy that first added LobbyDirectory.
+    { "tag": "v2" },
+    // Dropped the orphaned first LobbyDirectory class after the code revert.
+    { "tag": "v3", "deleted_classes": ["LobbyDirectory"] },
+    // LobbyDirectory re-added for real.
+    { "tag": "v4", "new_sqlite_classes": ["LobbyDirectory"] }
   ],
   "observability": { "enabled": true }
 }

@@ -37,7 +37,13 @@ pnpm dev:lan
 
 The command prints this computer's LAN URL. Open that URL on each computer, click **MULTIPLAYER**, then create a lobby or follow the host's copied invite link. The host can choose teams or free-for-all, select an orbital ring, crossfire, or open-expanse layout, set the map capacity to 4, 6, or 8 commanders, and tune starting reserves plus deposit density. Any settings change clears every human pilot's ready state so the final setup must be acknowledged before launch. Up to seven other pilots can join, and the host can fill open slots with AI commanders. All browser traffic goes through port `5173`; the authority remains private behind the host's development proxy. If another computer cannot connect, allow incoming connections to port `5173` in the host firewall and confirm both devices are on the same network.
 
-Clients send commands only; the Worker validates ownership and timing, advances the canonical simulation at 20 Hz, broadcasts player-specific views and checksums, supplies correction snapshots, and issues reconnect credentials. For separate-terminal development, `pnpm dev` still runs the client and `pnpm dev:worker` runs the authority.
+Clients run the deterministic simulation while the Worker sequences commands and broadcasts a 20 Hz clock. Clients buffer network input outside the simulation and apply it at its scheduled tick, so delivery latency cannot change checksums. Recovery replays the same command journal from the bootstrap state. For separate-terminal development, `pnpm dev:client` runs the client and `pnpm dev:worker` runs the relay.
+
+## Build and deploy
+
+Use the pnpm version declared in `package.json`, then run `pnpm install --frozen-lockfile`, `pnpm build`, and `pnpm deploy`. The Worker has a development dependency on the client so recursive builds finish the client assets before packaging the Worker, including on a fresh checkout.
+
+The input scheduling fix uses lockstep protocol 6. After deploying it, reload every player's page and start a new match so all peers use the same rules.
 
 ## Verify it
 
@@ -51,6 +57,12 @@ With the Worker running, exercise the full two-client WebSocket flow with:
 
 ```bash
 pnpm --filter @space-rts/worker verify:multiplayer
+```
+
+To verify two real WASM simulations over local WebSockets, including a 15 FPS client, delayed delivery, construction, production and full recovery:
+
+```bash
+VOIDFRONT_INTEGRATION_AUTHORITY=ws://127.0.0.1:8787 pnpm --filter @space-rts/worker test
 ```
 
 The tests cover deterministic replay/checksums, replay seek/resume and tamper rejection, 2–8 player scenario generation, team victory, continuous economy and stalls, the complete three-tier technology tree, static and mobile Fabricator construction assistance, placement validation, construction, squadron and capital-ship production, fixed-rate multi-Shipyard production, rally points, production cancellation, enemy commander behavior, command ingestion, queued orders, stable formations, moving fire, independent multi-target turrets, firing arcs, point-defence priorities, staggered fire, sensor boundaries, allied vision, hidden-target rejection, secure player/team/omniscient projections, persistent discovery, real Box3D obstacle resolution, browser/Worker binding parity, restore equivalence, projectile interception, and Worker loading with runtime code generation forbidden. The multiplayer verifier additionally covers lobby launch with starting fleets, per-player views, hidden-data redaction, indistinguishable hidden target rejection, spoofed-owner correction, obstacle steering, view checksums, team-spectator authorization/read-only behavior/reconnect, live omniscient rejection, and player reconnect snapshots.

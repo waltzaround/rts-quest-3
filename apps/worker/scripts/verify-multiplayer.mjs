@@ -1,5 +1,5 @@
 const authority = process.env.VOIDFRONT_AUTHORITY ?? "ws://127.0.0.1:8787";
-const lockstepVersion = 5;
+const lockstepVersion = 6;
 const authorityBase = new URL(authority);
 const authorityBasePath = authorityBase.pathname.replace(/\/+$/, "");
 const matchId = `verify-${Date.now()}`;

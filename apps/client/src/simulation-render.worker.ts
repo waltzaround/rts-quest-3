@@ -1,6 +1,7 @@
 import { createPlanarCirclePhysicsWorld, loadPhysicsRuntime } from "@space-rts/box3d-wasm";
 import {
   SharedRenderWriter,
+  LockstepInputs,
   restoreSimulation,
   type GameCommand,
   type GameSimulation,
@@ -21,14 +22,16 @@ type WorkerResponse =
   | { type: "error"; message: string };
 
 let simulation: GameSimulation | null = null;
+let inputs: LockstepInputs | null = null;
 let writer: SharedRenderWriter | null = null;
+let messageChain = Promise.resolve();
 
 function respond(message: WorkerResponse): void {
   self.postMessage(message);
 }
 
 self.addEventListener("message", (event: MessageEvent<WorkerRequest>) => {
-  void handleMessage(event.data).catch((error: unknown) => {
+  messageChain = messageChain.then(() => handleMessage(event.data)).catch((error: unknown) => {
     respond({ type: "error", message: error instanceof Error ? error.message : "Simulation worker failed" });
   });
 });
@@ -37,28 +40,28 @@ async function handleMessage(message: WorkerRequest): Promise<void> {
   if (message.type === "initialize") {
     const runtime = await loadPhysicsRuntime();
     simulation = restoreSimulation(message.state, createPlanarCirclePhysicsWorld(runtime));
+    inputs = new LockstepInputs(simulation);
     writer = new SharedRenderWriter(message.buffers);
     writer.publish(simulation.state);
     respond({ type: "ready", tick: simulation.state.tick, checksum: simulation.state.checksum });
     return;
   }
-  if (!simulation || !writer) throw new Error("Simulation worker has not been initialized");
+  if (!simulation || !inputs || !writer) throw new Error("Simulation worker has not been initialized");
   if (message.type === "commands") {
-    for (const command of message.commands) simulation.submitCommand(command);
+    if (!inputs.queueCommands(message.commands)) throw new Error("Simulation worker received late commands");
     return;
   }
   if (message.type === "player_state") {
-    while (simulation.state.tick < message.tick) simulation.step();
-    const player = simulation.state.players.find((candidate) => candidate.id === message.playerId);
-    if (player && player.state !== "defeated") player.state = message.state;
-    writer.publish(simulation.state);
+    if (!inputs.queuePlayerState(message)) throw new Error("Simulation worker received a late player transition");
     return;
   }
   const startedAt = performance.now();
   const events: SimulationEvent[] = [];
   while (simulation.state.tick < message.targetTick) {
-    const debug = simulation.step();
+    const previousTick = simulation.state.tick;
+    const debug = inputs.step();
     events.push(...debug.events);
+    if (simulation.state.tick === previousTick) break;
   }
   writer.publish(simulation.state);
   respond({

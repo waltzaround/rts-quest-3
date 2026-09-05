@@ -1,0 +1,53 @@
+{
+  "authority": "wss://space.walt.online",
+  "matchId": "2812",
+  "stage": "passed",
+  "startedAt": "2026-09-05T07:14:14.342Z",
+  "elapsedSeconds": 135,
+  "comparisons": 10576,
+  "errors": [],
+  "peers": [
+    {
+      "fps": 60,
+      "delayMs": 0,
+      "faction": "industrial",
+      "playerId": "pilot-3a183096-f104-4d0e-a831-688f9f339f60",
+      "tick": 2371,
+      "targetTick": 2371,
+      "recoveries": 0,
+      "commands": 3,
+      "ships": 15,
+      "structures": 5,
+      "totalShips": 36,
+      "builtYard": 1
+    },
+    {
+      "fps": 30,
+      "delayMs": 80,
+      "faction": "brood",
+      "playerId": "pilot-433f600a-3dd7-489b-8d81-bdc4ecfbd4db",
+      "tick": 2370,
+      "targetTick": 2370,
+      "recoveries": 0,
+      "commands": 3,
+      "ships": 12,
+      "structures": 5,
+      "totalShips": 36,
+      "builtYard": 1
+    },
+    {
+      "fps": 15,
+      "delayMs": 160,
+      "faction": "concord",
+      "playerId": "pilot-a6649223-1852-4838-a6a8-65e35b0f6bdd",
+      "tick": 2100,
+      "targetTick": 2368,
+      "recoveries": 1,
+      "commands": 3,
+      "ships": 3,
+      "structures": 5,
+      "totalShips": 36,
+      "builtYard": 1
+    }
+  ]
+}
