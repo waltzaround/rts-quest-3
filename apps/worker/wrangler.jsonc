@@ -13,7 +13,13 @@
     ]
   },
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["Match"] }
+    { "tag": "v1", "new_sqlite_classes": ["Match"] },
+    // Production already records v2. Keep this checkpoint so Wrangler does not
+    // replay v1 and attempt to create the existing Match namespace again.
+    { "tag": "v2" },
+    // A LobbyDirectory class was deployed from since-reverted code and no longer
+    // exists. Drop its namespace so deploys without the export succeed.
+    { "tag": "v3", "deleted_classes": ["LobbyDirectory"] }
   ],
   "observability": { "enabled": true }
 }
