@@ -17,6 +17,28 @@ function constructionFixture() {
 }
 
 describe("network input scheduling", () => {
+  it("self-destructs identically when the order arrives at different times", () => {
+    const first = createCombatScenario({ seed: 7301, enemyCommander: false, startingFleet: true });
+    const second = restoreSimulation(first.snapshot());
+    const firstInputs = new LockstepInputs(first);
+    const secondInputs = new LockstepInputs(second);
+    const shipId = first.state.ships.find((ship) => ship.ownerPlayerId === "pilot-blue")!.id;
+    const command: GameCommand = {
+      type: "selfDestruct", playerId: "pilot-blue", sequence: 1, requestedTick: 80,
+      unitIds: [shipId], queued: false,
+    };
+
+    for (let tick = 1; tick <= 100; tick += 1) {
+      if (tick === 20) expect(firstInputs.queueCommands([command])).toBe(true);
+      if (tick === 70) expect(secondInputs.queueCommands([command])).toBe(true);
+      firstInputs.step();
+      secondInputs.step();
+      expect(first.state.checksum, `tick ${tick}`).toBe(second.state.checksum);
+    }
+    expect(first.state.ships.some((ship) => ship.id === shipId)).toBe(false);
+    expect(second.snapshot()).toEqual(first.snapshot());
+  });
+
   it("keeps every checksum identical when a construction order arrives at different times", () => {
     const { simulation: first, build } = constructionFixture();
     const second = restoreSimulation(first.snapshot());

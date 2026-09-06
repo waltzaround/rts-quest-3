@@ -89,8 +89,7 @@ try {
   await guest.waitFor((message) => message.type === "lobby" && message.lobby.slots.length === 2);
   guest.send({ type: "set_team", playerId: "ai-1", teamId: 1 });
   await guest.waitFor((message) => message.type === "lobby" && message.lobby.slots.find((slot) => slot.playerId === "ai-1")?.teamId === 1);
-  guest.send({ type: "set_ready", ready: true });
-  await guest.waitFor((message) => message.type === "lobby" && message.lobby.slots.every((slot) => slot.ready));
+  // The transferred host can launch against AI without marking themselves ready.
   guest.send({ type: "start_match" });
   await guest.waitFor((message) => message.type === "lobby" && message.lobby.phase === "playing");
   await eventually((matches) => matches.every((game) => game.matchId !== matchId), "hide a launched game");

@@ -79,6 +79,7 @@ describe("multiplayer scenarios", () => {
     const presets = [
       "orbital-ring", "crossfire", "open-expanse", "asteroid-belt", "spiral-arms",
       "shattered-core", "amazon-tunnel", "core-rush", "star-fortress",
+      "twin-gates", "broken-halo", "resource-islands",
     ] as const;
     const corePositions = (seed: number, mapPreset: (typeof presets)[number]) => createCombatScenario({
       seed, mapPreset, mapSize: "small", varyStartingPositions: true, players: config,

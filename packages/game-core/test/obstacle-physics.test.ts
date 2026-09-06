@@ -6,7 +6,14 @@ import {
   type PlanarCirclePhysicsWorld,
 } from "@space-rts/box3d-wasm";
 import { loadPhysicsRuntimeFromModule } from "@space-rts/box3d-wasm/worker";
-import { SHIPS, createCombatScenario as createScenario, restoreSimulation, type ScenarioOptions } from "../src";
+import {
+  SHIPS,
+  STRUCTURES,
+  createCombatScenario as createScenario,
+  restoreSimulation,
+  type ScenarioOptions,
+  type StructureType,
+} from "../src";
 
 const createCombatScenario = (options: ScenarioOptions = {}) => createScenario({ ...options, startingFleet: true });
 
@@ -17,22 +24,40 @@ afterAll(() => {
 });
 
 describe("authoritative asteroid physics", () => {
-  it("lets ships phase through production structures", () => {
-    const simulation = createCombatScenario({ seed: 0x51a7, enemyCommander: false });
-    const ship = simulation.state.ships.find((candidate) => candidate.ownerPlayerId === "pilot-blue")!;
-    const yard = simulation.state.structures.find(
-      (structure) => structure.ownerPlayerId === "pilot-blue" && structure.type === "shipyard",
-    )!;
-    simulation.state.ships = [ship];
-    simulation.state.obstacles = [];
-    ship.x = yard.x;
-    ship.z = yard.z;
-    ship.vx = 0;
-    ship.vz = 0;
-    ship.orders = [];
-    simulation.step();
-    expect(ship.x).toBe(yard.x);
-    expect(ship.z).toBe(yard.z);
+  it("lets ships phase through every structure with fallback and Box3D physics", async () => {
+    const runtime = await loadPhysicsRuntime();
+    const world = createPlanarCirclePhysicsWorld(runtime);
+    worlds.push(world);
+    const simulations = [
+      createCombatScenario({ seed: 0x51a7, enemyCommander: false }),
+      createCombatScenario({ seed: 0x51a7, enemyCommander: false }),
+    ];
+    simulations[1]!.attachPhysicsWorld(world);
+
+    for (const simulation of simulations) {
+      const ship = simulation.state.ships.find((candidate) => candidate.ownerPlayerId === "pilot-blue")!;
+      const structure = simulation.state.structures.find(
+        (candidate) => candidate.ownerPlayerId === "pilot-blue" && candidate.type === "commandCore",
+      )!;
+      simulation.state.ships = [ship];
+      simulation.state.structures = [structure];
+      simulation.state.obstacles = [];
+      simulation.state.projectiles = [];
+      ship.turrets = [];
+      ship.orders = [];
+
+      for (const type of Object.keys(STRUCTURES) as StructureType[]) {
+        structure.type = type;
+        structure.x = 0;
+        structure.z = 0;
+        ship.x = 0;
+        ship.z = 0;
+        ship.vx = 0;
+        ship.vz = 0;
+        simulation.step();
+        expect(Math.hypot(ship.x - structure.x, ship.z - structure.z), type).toBeLessThan(0.02);
+      }
+    }
   });
 
   it("keeps obstacle state deterministic and blocks construction overlap", () => {

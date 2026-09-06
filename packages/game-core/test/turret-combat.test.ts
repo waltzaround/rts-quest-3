@@ -197,6 +197,54 @@ describe("moving multi-turret combat", () => {
     expect(isPointInTurretArc(destroyer, rightPlasma, destroyer.x - 100, destroyer.z)).toBe(true);
   });
 
+  it("waits out the idle retarget cadence before scanning again", () => {
+    const simulation = createCombatScenario({ enemyCommander: false });
+    const fighter = simulation.state.ships.find((ship) => ship.ownerPlayerId === "pilot-blue" && ship.class === "fighter")!;
+    const target = simulation.state.ships.find((ship) => ship.ownerPlayerId === "pilot-red" && ship.class === "fighter")!;
+    simulation.state.obstacles = [];
+    simulation.state.ships = [fighter, target];
+    fighter.x = 0;
+    fighter.z = 0;
+    fighter.yaw = 0;
+    fighter.orders = [{ type: "hold", destination: { x: 0, z: 0 }, facing: 0 }];
+    fighter.focusTargetEntityId = null;
+    target.x = 4_000;
+    target.z = 4_000;
+    target.orders = [{ type: "hold", destination: { x: target.x, z: target.z }, facing: 0 }];
+    simulation.stepMany(3);
+    const idleUntil = fighter.turrets[0]!.idleRetargetTick;
+    expect(idleUntil).toBeGreaterThan(simulation.state.tick);
+    target.x = 0;
+    target.z = 80;
+    simulation.step();
+    expect(fighter.turrets.every((turret) => turret.targetEntityId === null)).toBe(true);
+    while (simulation.state.tick < idleUntil!) simulation.step();
+    expect(fighter.turrets.some((turret) => turret.targetEntityId === target.id)).toBe(true);
+  });
+
+  it("lets focus fire bypass idle retarget backoff", () => {
+    const simulation = createCombatScenario({ enemyCommander: false });
+    const fighter = simulation.state.ships.find((ship) => ship.ownerPlayerId === "pilot-blue" && ship.class === "fighter")!;
+    const target = simulation.state.ships.find((ship) => ship.ownerPlayerId === "pilot-red" && ship.class === "fighter")!;
+    simulation.state.obstacles = [];
+    simulation.state.ships = [fighter, target];
+    fighter.x = 0;
+    fighter.z = 0;
+    fighter.yaw = 0;
+    fighter.orders = [{ type: "hold", destination: { x: 0, z: 0 }, facing: 0 }];
+    fighter.focusTargetEntityId = null;
+    target.x = 4_000;
+    target.z = 4_000;
+    target.orders = [{ type: "hold", destination: { x: target.x, z: target.z }, facing: 0 }];
+    simulation.stepMany(3);
+    expect(fighter.turrets[0]!.idleRetargetTick).toBeGreaterThan(simulation.state.tick);
+    target.x = 0;
+    target.z = 80;
+    fighter.focusTargetEntityId = target.id;
+    simulation.step();
+    expect(fighter.turrets.some((turret) => turret.targetEntityId === target.id)).toBe(true);
+  });
+
   it("staggers deterministic turret fire sequences", () => {
     const simulation = createCombatScenario();
     const firstFireTickByTurret = new Map<number, number>();

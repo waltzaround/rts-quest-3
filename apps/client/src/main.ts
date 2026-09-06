@@ -24,6 +24,7 @@ import {
   ReplayPlayer,
   computeFormationAssignments,
   createCombatScenario,
+  createMapVariantLayout,
   createMenuBattleScenario,
   createShowcaseScenario,
   getTurretMuzzleWorldPosition,
@@ -67,6 +68,7 @@ import {
 } from "@space-rts/protocol";
 import { FIXED_DT } from "@space-rts/shared";
 import { advanceLockstep } from "./lockstep-clock";
+import { MatchStartView } from "./match-start-view";
 import { ScalableBattleAudio } from "./audio-system";
 import { ProjectileVfx, getBatchedTurretGeometry, getTorpedoImpactPoint, type ProjectileVisualTarget } from "./combat-visuals";
 import { getWeaponStyle, ProjectileAppearanceRegistry } from "./weapon-appearance";
@@ -76,6 +78,7 @@ import { BatchedShipRenderer, CombatEffectRenderer } from "./batched-renderer";
 import { RenderStateBuilder, SHIP_CLASSES, VisualStressScenario, turretVisualHeight, type RenderQuality } from "./render-state";
 import { TerritoryRenderer } from "./territory-renderer";
 import { LOCAL_PLAYER_ID, MAP_PLAYER_CAPACITY, createSingleplayerLobby, createSingleplayerScenario, lobbyLaunchIssue, updateSingleplayerLobby } from "./lobby-setup";
+import { getMatchResult } from "./match-result";
 import "./styles.css";
 
 const element = <T extends HTMLElement>(id: string): T => {
@@ -85,6 +88,9 @@ const element = <T extends HTMLElement>(id: string): T => {
 };
 
 const canvas = element<HTMLCanvasElement>("battlefield");
+const matchStart = new MatchStartView();
+let lastCountdownStartsAt = 0;
+let awaitingMatchBootstrap = false;
 const telemetryPanel = element<HTMLElement>("sim-telemetry");
 if (import.meta.env.PROD) telemetryPanel.classList.add("hidden");
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
@@ -913,6 +919,9 @@ const MAP_CATALOG: Readonly<Record<LobbySettings["mapPreset"], {
   "amazon-tunnel": { label: "AMAZON TUNNEL", family: "ONE CHOKE", description: "A broad central passage opens into a resource-rich contested basin between two blocked asteroid fields." },
   "core-rush": { label: "CORE RUSH", family: "CENTRAL WEALTH", description: "Outer sectors are lean while unusually rich deposits pull expansion and early fleets toward the exposed center." },
   "star-fortress": { label: "STAR FORTRESS", family: "DEFENDED START", description: "Each commander begins behind a broken asteroid rampart with one inward-facing gate and room to establish an economy." },
+  "twin-gates": { label: "TWIN GATES", family: "TWO FRONTS", description: "Two resource-lined crossings split an asteroid wall. Divide your fleet between gates or take the longer outer flank." },
+  "broken-halo": { label: "BROKEN HALO", family: "RING SIEGE", description: "Four wide gaps break an asteroid ring. Secure its richer inner deposits or raid the exposed outer resource lanes." },
+  "resource-islands": { label: "RESOURCE ISLANDS", family: "POCKET EXPANSION", description: "Separate resource pockets sit behind asteroid crescents. An empty center and open outer approaches reward mobile fleets and multi-front expansion." },
 };
 const MAP_PRESET_ORDER = Object.keys(MAP_CATALOG) as LobbySettings["mapPreset"][];
 
@@ -939,17 +948,27 @@ function renderMapPreview(settings: LobbySettings, playerCount: number, canvasId
   context.fillRect(0, 0, width, height);
 
   const commanders = Math.max(2, playerCount);
-  const obstacleCount = settings.mapPreset === "open-expanse" ? 4
+  const previewRadius = { small: 1_600, medium: 2_400, large: 4_000, huge: 6_000, colossal: 8_500 }[settings.mapSize];
+  const density = { scarce: { count: 0.67, richness: 0.78 }, standard: { count: 1, richness: 1 }, rich: { count: 1.5, richness: 1.3 } }[settings.resourceDensity];
+  const variantLayout = createMapVariantLayout(settings.mapPreset, {
+    seed: hash, playerCount: commanders, baseRadius: previewRadius,
+    resourceCount: Math.max(4, Math.round(commanders * 3 * density.count)), richness: density.richness,
+  });
+  const obstacleCount = variantLayout?.obstacles.length ?? (settings.mapPreset === "open-expanse" ? 4
     : settings.mapPreset === "asteroid-belt" ? 18
       : settings.mapPreset === "shattered-core" ? 15
         : settings.mapPreset === "crossfire" ? 12
           : settings.mapPreset === "amazon-tunnel" ? 56
             : settings.mapPreset === "star-fortress" ? commanders * 6
-              : settings.mapPreset === "core-rush" ? 6 : 8;
+              : settings.mapPreset === "core-rush" ? 6 : 8);
   for (let index = 0; index < obstacleCount; index += 1) {
     let x = Number.NaN;
     let y = Number.NaN;
-    if (settings.mapPreset === "amazon-tunnel") {
+    const variantObstacle = variantLayout?.obstacles[index];
+    if (variantObstacle) {
+      x = variantObstacle.x / previewRadius * 0.88;
+      y = variantObstacle.z / previewRadius * 0.88;
+    } else if (settings.mapPreset === "amazon-tunnel") {
       const obstaclesPerBlock = obstacleCount / 2;
       const blockIndex = index % obstaclesPerBlock;
       const sign = index < obstaclesPerBlock ? 1 : -1;
@@ -1002,25 +1021,34 @@ function renderMapPreview(settings: LobbySettings, playerCount: number, canvasId
       x = Math.sin(angle) * radius;
       y = Math.cos(angle) * radius;
     }
-    const size = 4 + random() * 6;
+    const size = variantObstacle ? Math.max(2, variantObstacle.radius / previewRadius * 0.88 * Math.min(width, height) * 0.43) : 4 + random() * 6;
     context.fillStyle = "rgba(98,111,119,.72)";
     context.strokeStyle = "rgba(157,181,190,.42)";
     context.lineWidth = 1;
     context.beginPath();
-    context.arc(toX(x), toY(y), size, 0, Math.PI * 2);
+    if (variantObstacle?.type === "barrier") {
+      const w = variantObstacle.width! / previewRadius * 0.88 * width * 0.43;
+      const h = variantObstacle.depth! / previewRadius * 0.88 * height * 0.43;
+      context.rect(toX(x) - w / 2, toY(y) - h / 2, w, h);
+    } else {
+      context.arc(toX(x), toY(y), size, 0, Math.PI * 2);
+    }
     context.fill();
     context.stroke();
   }
 
   const densityScale = settings.resourceDensity === "scarce" ? 0.7 : settings.resourceDensity === "rich" ? 1.35 : 1;
-  const resourceCount = Math.round(13 * densityScale);
+  const resourceCount = variantLayout?.resources.length ?? Math.round(13 * densityScale);
   for (let index = 0; index < resourceCount; index += 1) {
     const progress = index / resourceCount;
     let angle = rotation + progress * Math.PI * 2;
     let radius = 0.48 + (random() - 0.5) * 0.1;
     let x = Number.NaN;
     let y = Number.NaN;
-    if (settings.mapPreset === "open-expanse") {
+    if (variantLayout) {
+      x = variantLayout.resources[index]!.x / previewRadius * 0.88;
+      y = variantLayout.resources[index]!.z / previewRadius * 0.88;
+    } else if (settings.mapPreset === "open-expanse") {
       angle = random() * Math.PI * 2;
       radius = 0.22 + random() * 0.52;
     } else if (settings.mapPreset === "amazon-tunnel") {
@@ -1367,7 +1395,7 @@ loadPhysicsRuntime()
       }
       simulation.refreshChecksum();
       lockstepTargetTick = Math.max(lockstepTargetTick, pendingTargetTick, simulation.state.tick);
-      sharedSimulationWorker?.postMessage({ type: "advance", targetTick: lockstepTargetTick });
+      if (!matchStart.blocksGameplay) sharedSimulationWorker?.postMessage({ type: "advance", targetTick: lockstepTargetTick });
       lastDebug = simulation.debugSnapshot();
       installClientView(buildClientVisibilityView(), false);
     }
@@ -1382,7 +1410,7 @@ window.addEventListener("pagehide", () => {
   physicsWorld = null;
 }, { once: true });
 
-type ClientCommandResult = CommandResult | { accepted: false; reason: "offline" | "physics" | "spectator" | "replay" };
+type ClientCommandResult = CommandResult | { accepted: false; reason: "offline" | "physics" | "spectator" | "replay" | "starting" };
 
 function canIssuePlayerCommands(): boolean {
   return clientViewMode === "player" && !demoMode;
@@ -1430,6 +1458,7 @@ function nextCommandTick(): number {
 }
 
 function submitPlayerCommand(command: GameCommand): ClientCommandResult {
+  if (matchStart.blocksGameplay) return { accepted: false, reason: "starting" };
   if (!canIssuePlayerCommands()) {
     showToast(demoMode
       ? "SHOWCASE // AUTONOMOUS CONTROL"
@@ -2546,6 +2575,12 @@ function handleServerMessage(message: ServerMessage): void {
     case "lobby":
       updateNetworkLobby(message.lobby);
       return;
+    case "match_countdown":
+      if (message.startsAt !== lastCountdownStartsAt) {
+        lastCountdownStartsAt = message.startsAt;
+        beginMatchIntro(message.startsAt - message.serverTime, true);
+      }
+      return;
     case "lockstep_state":
       serverTick = Math.max(serverTick, message.tick);
       if (!physicsWorld) {
@@ -2604,12 +2639,13 @@ function handleServerMessage(message: ServerMessage): void {
       if (message.tick >= lockstepTargetTick) {
         lockstepTargetTick = message.tick;
         lockstepTargetChecksum = message.checksum;
-        sharedSimulationWorker?.postMessage({ type: "advance", targetTick: message.tick });
+        if (!matchStart.blocksGameplay) sharedSimulationWorker?.postMessage({ type: "advance", targetTick: message.tick });
       }
       return;
     case "match_started":
       serverTick = message.tick;
       adoptAuthoritativeView(message.view, "MATCH SYNCHRONIZED");
+      awaitingMatchBootstrap = false;
       networkLobby = networkLobby ? { ...networkLobby, phase: "playing" } : null;
       element("network-overlay").classList.remove("visible");
       element("directive").textContent = canIssuePlayerCommands()
@@ -2679,6 +2715,7 @@ function focusCameraOnLocalBase(): boolean {
 
 function installLockstepState(state: SimulationState, notice?: string, focusStartingBase = false): void {
   simulation = restoreSimulation(state, replacePhysicsWorld());
+  awaitingMatchBootstrap = false;
   lockstepInputs = new LockstepInputs(simulation);
   initializeSharedSimulationTrial(state);
   const localPlayer = state.players.find((player) => player.id === localPlayerId);
@@ -2816,7 +2853,7 @@ function adoptAuthoritativeView(view: ProjectedViewState, notice?: string): void
     eventLines = [`<b>NET</b> ${escapeHtml(notice.toLowerCase())}`];
     showToast(notice);
   }
-  if (view.status === "finished" && view.winnerTeamId !== null) showVictory(view.winnerTeamId);
+  syncMatchResult();
   updateSelectionHud();
 }
 
@@ -3048,9 +3085,11 @@ function renderLobby(): void {
   const launchIssue = lobbyLaunchIssue(lobby, singleplayer);
   startMatch.disabled = !localSlot?.isHost || launchIssue !== null;
   startMatch.textContent = singleplayer ? "START GAME" : "LAUNCH MATCH";
-  element("lobby-launch-status").textContent = launchIssue ?? (singleplayer ? "Your battlefield is ready." : "All commanders ready. Launch when you are.");
+  element("lobby-launch-status").textContent = launchIssue ?? (singleplayer ? "Your battlefield is ready." : "Ready to launch. The host can start the match.");
   startMatch.classList.toggle("hidden", !localSlot?.isHost);
-  document.querySelector(".lobby-final-actions")?.classList.toggle("hidden", observing);
+  const launchActions = document.querySelector(".lobby-final-actions");
+  launchActions?.classList.toggle("hidden", observing);
+  launchActions?.classList.toggle("single-action", singleplayer || !localSlot?.isHost);
   const ready = element<HTMLButtonElement>("ready-toggle");
   ready.classList.toggle("hidden", singleplayer);
   ready.textContent = localSlot?.ready ? "STAND DOWN" : "MARK READY";
@@ -3224,6 +3263,12 @@ function readSpectatorCredentials(matchId: string): { spectatorId: string; recon
 }
 
 function showNetworkError(message: string): void {
+  const inLobby = !element("network-lobby-view").classList.contains("hidden");
+  const container = element(inLobby ? "lobby-notices" : "network-notices");
+  const notice = element("network-notice");
+  if (notice.parentElement !== container) container.append(notice);
+  element("network-notice-title").textContent = inLobby ? "LOBBY NOTICE" : "CONNECTION NOTICE";
+  notice.classList.toggle("hidden", !message);
   element("network-error").textContent = message;
 }
 
@@ -3264,6 +3309,9 @@ function leaveNetworkMatch(destination: "menu" | "browser" = "menu"): void {
 }
 
 function showStartScreen(resetBattle = false): void {
+  matchStart.cancel();
+  lastCountdownStartsAt = 0;
+  awaitingMatchBootstrap = false;
   stopLobbyBrowser();
   singleplayerSetupActive = false;
   stressTestMode = false;
@@ -3393,6 +3441,19 @@ function renderJoinableGames(): void {
     : "No open games yet. Host a game and invite other commanders to join you.";
 }
 
+function beginMatchIntro(remainingMs?: number, synchronized = false): void {
+  awaitingMatchBootstrap = synchronized;
+  keys.clear();
+  selectionDrag = null;
+  commandDrag = null;
+  middleDrag = false;
+  accumulator = 0;
+  element("selection-box").style.display = "none";
+  element("toast").classList.remove("visible");
+  const settings = synchronized ? networkLobby?.settings : singleplayerLobby.settings;
+  matchStart.begin(settings ? MAP_CATALOG[settings.mapPreset].label : "UNEXPLORED SECTOR", performance.now(), remainingMs, synchronized);
+}
+
 function startLocalSkirmish(): void {
   const issue = lobbyLaunchIssue(singleplayerLobby, true);
   if (issue) { showNetworkError(issue); return; }
@@ -3417,10 +3478,10 @@ function startLocalSkirmish(): void {
   lastTime = performance.now();
   accumulator = 0;
   setConnectionState("MULTIPLAYER", "OPEN LOBBY", "online");
-  showToast("LOCAL SKIRMISH STARTED");
 }
 
 function startStressTest(): void {
+  matchStart.cancel();
   stressTestMode = true;
   singleplayerSetupActive = false;
   resetReplaySession();
@@ -4387,7 +4448,7 @@ function updateCamera(delta: number): void {
   if (keys.has("ArrowLeft") || pointerX < edge) cameraDirection.addScaledVector(cameraRight, -1);
   if (keys.has("ArrowRight") || pointerX > innerWidth - edge) cameraDirection.add(cameraRight);
   const panLimit = minimapHalfExtent();
-  if (cameraDirection.lengthSq() > 0) {
+  if (!matchStart.blocksGameplay && cameraDirection.lengthSq() > 0) {
     const fastPan = keys.has("ShiftLeft") || keys.has("ShiftRight") ? 2.25 : 1;
     const panSpeed = Math.max(cameraRig.distance * 0.78, panLimit * 0.2) * fastPan;
     cameraRig.target.add(cameraDirection.normalize().multiplyScalar(delta * panSpeed));
@@ -4408,6 +4469,7 @@ function clampCameraTarget(panLimit = minimapHalfExtent()): void {
 }
 
 function tickSimulation(): void {
+  if (matchStart.blocksGameplay) return;
   if (demoMode && simulation.state.status === "finished") {
     resetSimulation();
     return;
@@ -4697,7 +4759,6 @@ function processEvents(events: SimulationEvent[]): void {
       }
     } else if (event.type === "victory") {
       eventLines.unshift(`<b>END</b> team ${event.winnerTeamId} controls the battlespace`);
-      showVictory(event.winnerTeamId);
     }
   }
   eventLines = eventLines.slice(0, 4);
@@ -6192,7 +6253,7 @@ function issueNavigationCommand(
   setCommandMode(null);
 }
 
-function issueSimpleCommand(type: "stop" | "hold"): void {
+function issueSimpleCommand(type: "stop" | "hold" | "selfDestruct"): void {
   const ships = getSelectedShips();
   if (ships.length === 0 || currentState().status !== "playing") { showToast("SELECT YOUR UNITS FIRST"); return; }
   commandSequence += 1;
@@ -6203,8 +6264,10 @@ function issueSimpleCommand(type: "stop" | "hold"): void {
   };
   const result = submitPlayerCommand(command);
   if (result.accepted) {
-    element("directive").textContent = type === "hold" ? "HOLD POSITION // WEAPONS FREE" : "FLEET STOPPING";
-    showToast(type === "hold" ? "HOLD POSITION" : "STOP ORDER");
+    element("directive").textContent = type === "selfDestruct"
+      ? `${ships.length} UNIT${ships.length === 1 ? "" : "S"} // SELF DESTRUCT`
+      : type === "hold" ? "HOLD POSITION // WEAPONS FREE" : "FLEET STOPPING";
+    showToast(type === "selfDestruct" ? "SELF DESTRUCT" : type === "hold" ? "HOLD POSITION" : "STOP ORDER");
   }
 }
 
@@ -6240,13 +6303,14 @@ function ensureFormationSlotCount(count: number): void {
 
 function updateFormationPreview(assignments: readonly FormationAssignment[], start: THREE.Vector3, end?: THREE.Vector3): void {
   ensureFormationSlotCount(assignments.length);
+  const shipsById = new Map(clientView.ships.map((ship) => [ship.id, ship]));
   for (let index = 0; index < formationSlotMeshes.length; index += 1) {
     const mesh = formationSlotMeshes[index]!;
     const assignment = assignments[index];
     mesh.visible = assignment !== undefined;
     if (assignment) {
       mesh.position.set(assignment.destination.x, 2, assignment.destination.z);
-      const ship = clientView.ships.find((candidate) => candidate.id === assignment.shipId);
+      const ship = shipsById.get(assignment.shipId);
       mesh.scale.setScalar(ship ? Math.max(0.8, SHIPS[ship.class].radius / 8) : 1);
     }
   }
@@ -6315,30 +6379,52 @@ function recallControlGroup(group: number): void {
   showToast(`CONTROL GROUP ${group} // ${ids.length} UNITS`);
 }
 
-function showVictory(winnerTeamId: number): void {
+function syncMatchResult(): void {
   const overlay = element("victory-overlay");
-  if (clientViewMode === "post-match-omniscient") {
-    overlay.classList.remove("visible", "defeat");
-    element("directive").textContent = `MATCH COMPLETE // TEAM ${winnerTeamId} VICTORIOUS`;
+  const result = getMatchResult(currentState(), {
+    mode: clientViewMode, localPlayerId, spectatorTeamId,
+    showingMenu: landingLobbyActive,
+    showingDemo: demoMode || stressTestMode,
+    waitingForMatch: awaitingMatchBootstrap || pendingLockstepState !== null
+      || (networkMode && networkLobby?.phase === "lobby"),
+  });
+  if (!result) {
+    if (overlay.classList.contains("visible")) overlay.classList.remove("visible", "defeat");
     return;
   }
-  const viewingTeamId = clientViewMode === "team-spectator"
-    ? spectatorTeamId
-    : currentState().players.find((player) => player.id === localPlayerId)?.teamId;
-  const won = winnerTeamId === viewingTeamId;
-  overlay.classList.toggle("defeat", !won);
+  const firstPresentation = !overlay.classList.contains("visible");
+  if (firstPresentation) {
+    // End-of-match UI must not remain underneath an open lobby or match intro.
+    matchStart.cancel();
+    closeMapSettings();
+    closeLobbyUtilityModals();
+    setGameMenuOpen(false);
+    element("network-overlay").classList.remove("visible");
+    element("app").classList.remove("start-screen-active");
+  }
+  overlay.classList.toggle("defeat", result.defeated);
   overlay.classList.add("visible");
-  element("victory-title").textContent = clientViewMode === "team-spectator" ? "MATCH COMPLETE" : won ? "VICTORY" : "DEFEAT";
-  element("victory-copy").textContent = clientViewMode === "team-spectator"
-    ? `Team ${winnerTeamId} controls the battlespace.`
-    : won ? "All hostile command cores neutralized." : "Your team was eliminated.";
+  if (element("victory-title").textContent !== result.title) element("victory-title").textContent = result.title;
+  if (element("victory-copy").textContent !== result.copy) element("victory-copy").textContent = result.copy;
+  const playAgain = element<HTMLButtonElement>("play-again");
+  const actionLabel = networkMode ? "RETURN TO MAIN MENU" : "RESTART ENGAGEMENT";
+  if (playAgain.textContent !== actionLabel) playAgain.textContent = actionLabel;
+  if (firstPresentation) playAgain.focus({ preventScroll: true });
 }
 
 function animate(now: number): void {
   const frameStartedAt = performance.now();
-  const delta = Math.min((now - lastTime) / 1000, 0.1);
+  const wasStarting = matchStart.blocksGameplay;
+  matchStart.render(now, physicsWorld !== null && pendingLockstepState === null && !awaitingMatchBootstrap);
+  const delta = wasStarting ? 0 : Math.min((now - lastTime) / 1000, 0.1);
   lastTime = now;
-  if (clientViewMode === "post-match-omniscient" && replayPlayer && replayPlaying) {
+  if (wasStarting && !matchStart.blocksGameplay) {
+    keys.clear();
+    if (networkMode) sharedSimulationWorker?.postMessage({ type: "advance", targetTick: lockstepTargetTick });
+  }
+  if (matchStart.blocksGameplay) {
+    accumulator = 0;
+  } else if (clientViewMode === "post-match-omniscient" && replayPlayer && replayPlaying) {
     accumulator += delta * replaySpeed;
     while (accumulator >= FIXED_DT && replayPlaying) {
       stepReplay();
@@ -6356,6 +6442,7 @@ function animate(now: number): void {
     }
     verifyLockstepFrame();
   }
+  syncMatchResult();
   updateCamera(delta);
   const preparationStartedAt = performance.now();
   const interpolationAlpha = clientViewMode === "post-match-omniscient"
@@ -6384,6 +6471,7 @@ function animate(now: number): void {
 }
 
 function togglePause(): void {
+  if (matchStart.blocksGameplay) return;
   if (clientViewMode === "post-match-omniscient") {
     if (!replayPlayer) { showToast("REPLAY STILL LOADING"); return; }
     if (!replayPlaying && replayPlayer.currentTick >= replayPlayer.endTick) seekReplay(replayPlayer.startTick);
@@ -6446,6 +6534,11 @@ function resetSimulation(): void {
   updateSelectionHud();
   if (stressTestMode) configureVisualStress(Number(element<HTMLSelectElement>("menu-stress-count").value));
   else showToast(demoMode ? menuBattleMode ? "LOCAL 1V1 RESTARTED" : "SHOWCASE RESTARTED" : "NEW BATTLEFIELD GENERATED");
+  if (!demoMode) {
+    paused = false;
+    element("pause").classList.remove("active");
+    beginMatchIntro();
+  }
 }
 
 function focusBattle(): void {
@@ -6529,6 +6622,10 @@ const unlockBattleAudio = () => {
 addEventListener("pointerdown", unlockBattleAudio);
 addEventListener("keydown", (event) => {
   unlockBattleAudio();
+  if (matchStart.blocksGameplay) {
+    if (!event.metaKey && !event.ctrlKey) event.preventDefault();
+    return;
+  }
   if (element("network-overlay").classList.contains("visible")) {
     if (event.code === "Escape" && !mapSettingsOpen
       && ["player-invite-modal", "spectator-invite-modal"].every((id) => element(id).classList.contains("hidden"))) {
@@ -6576,6 +6673,11 @@ addEventListener("keydown", (event) => {
   if (event.code === "Period" && clientViewMode === "post-match-omniscient" && !replayPlaying) stepReplay();
   else if (event.code === "Period" && paused) tickSimulation();
   if (!canIssuePlayerCommands()) return;
+  if (event.code === "Delete" || event.code === "Backspace") {
+    event.preventDefault();
+    issueSimpleCommand("selfDestruct");
+    return;
+  }
   if (constructionControlsActive() && !event.ctrlKey && !event.metaKey && !event.altKey) {
     const constructionTier = constructionHotkeyTier(event.code);
     if (constructionTier) {
@@ -6647,6 +6749,7 @@ addEventListener("pointermove", (event) => {
       getSelectedShips(),
       { x: commandDrag.destination.x, z: commandDrag.destination.z },
       hasLine ? { x: commandDrag.formationEnd.x, z: commandDrag.formationEnd.z } : undefined,
+      commandDrag.type,
     );
     updateFormationPreview(assignments, commandDrag.destination, hasLine ? commandDrag.formationEnd : undefined);
   }
@@ -6704,6 +6807,7 @@ addEventListener("pointerup", (event) => {
   }
 });
 addEventListener("wheel", (event) => {
+  if (matchStart.blocksGameplay) return;
   if (element("app").classList.contains("start-screen-active")) return;
   const anchorBeforeZoom = getWorldPoint(event.clientX, event.clientY);
   const wheelDelta = THREE.MathUtils.clamp(event.deltaY, -600, 600);
@@ -6792,6 +6896,8 @@ canvas.addEventListener("pointerdown", (event) => {
     const assignments = computeFormationAssignments(
       getSelectedShips(),
       { x: destination.x, z: destination.z },
+      undefined,
+      commandType,
     );
     updateFormationPreview(assignments, destination);
     return;
@@ -7140,6 +7246,7 @@ element("copy-lobby-invite").addEventListener("click", () => {
     window.setTimeout(() => { element("copy-lobby-invite").textContent = "COPY INVITE"; }, 1_200);
   }).catch(() => showNetworkError("Copy failed. Select the invite address manually."));
 });
+element("dismiss-network-error").addEventListener("click", () => showNetworkError(""));
 element("ready-toggle").addEventListener("click", () => {
   const slot = networkLobby?.slots.find((candidate) => candidate.playerId === localPlayerId);
   if (slot) sendNetworkMessage({ type: "set_ready", ready: !slot.ready });

@@ -37,7 +37,10 @@ const hasOwn = (record: object, key: unknown): key is string =>
 
 export const MAX_PLAYERS = 8;
 /** Bump whenever deterministic rules, unit data, or the lockstep bootstrap contract changes. */
-export const LOCKSTEP_PROTOCOL_VERSION = 6;
+export const LOCKSTEP_PROTOCOL_VERSION = 8;
+export const MATCH_LOADING_MS = 2_000;
+export const MATCH_COUNTDOWN_MS = 3_000;
+export const MATCH_START_DELAY_MS = MATCH_LOADING_MS + MATCH_COUNTDOWN_MS;
 export const MAX_COMMAND_BATCH = 32;
 export const MAX_FLEET_COMMAND_UNITS = 2_048;
 export const MAX_MESSAGE_BYTES = 64 * 1024;
@@ -58,7 +61,10 @@ export type MapPreset =
   | "shattered-core"
   | "amazon-tunnel"
   | "core-rush"
-  | "star-fortress";
+  | "star-fortress"
+  | "twin-gates"
+  | "broken-halo"
+  | "resource-islands";
 export type MapSize = "small" | "medium" | "large" | "huge" | "colossal";
 export type StartingResources = "low" | "standard" | "high";
 export type StartingBase = "full" | "fortified" | "command-core";
@@ -170,6 +176,7 @@ export type ServerMessage =
   | { type: "spectator_authorized"; token: string; mode: "team"; teamId: number }
   | { type: "spectator_welcome"; spectatorId: string; reconnectToken: string | null; mode: SpectatorMode; teamId: number | null; lobby: LobbyState; tick: number }
   | { type: "lobby"; lobby: LobbyState }
+  | { type: "match_countdown"; serverTime: number; startsAt: number }
   | { type: "match_started"; tick: number; checksum: number; view: ProjectedViewState }
   | { type: "view"; tick: number; checksum: number; view: ProjectedViewState }
   | { type: "lockstep_state"; tick: number; checksum: number; state: SimulationState; reason: "start" | "join" | "reconnect" | "checksum" | "manual" }
@@ -215,6 +222,7 @@ function isLobbySettings(value: unknown): value is LobbySettings {
     && [
       "orbital-ring", "crossfire", "open-expanse", "asteroid-belt", "spiral-arms", "shattered-core",
       "amazon-tunnel", "core-rush", "star-fortress",
+      "twin-gates", "broken-halo", "resource-islands",
     ].includes(String(value.mapPreset))
     && ["small", "medium", "large", "huge", "colossal"].includes(String(value.mapSize))
     && ["low", "standard", "high"].includes(String(value.startingResources))
@@ -317,7 +325,7 @@ function isGameCommand(value: unknown): value is GameCommand {
     || !isInteger(value.sequence) || value.sequence < 1
     || !isInteger(value.requestedTick) || value.requestedTick < 1) return false;
 
-  if (["move", "attackMove", "patrol", "stop", "hold", "focusFire"].includes(value.type)) {
+  if (["move", "attackMove", "patrol", "stop", "hold", "focusFire", "selfDestruct"].includes(value.type)) {
     if (!Array.isArray(value.unitIds) || value.unitIds.length > MAX_FLEET_COMMAND_UNITS
       || !value.unitIds.every((id) => isInteger(id) && id > 0)
       || typeof value.queued !== "boolean") return false;
@@ -458,6 +466,12 @@ export function parseServerMessage(raw: string): ServerMessage | null {
     return null;
   }
   if (!isRecord(value) || !isString(value.type, 32)) return null;
+  if (value.type === "match_countdown") {
+    return isInteger(value.serverTime) && value.serverTime >= 0
+      && isInteger(value.startsAt) && value.startsAt >= value.serverTime
+      && value.startsAt - value.serverTime <= MATCH_START_DELAY_MS
+      ? value as ServerMessage : null;
+  }
   if (value.type === "lockstep_state") {
     const state = value.state;
     return isInteger(value.tick) && value.tick >= 0

@@ -43,6 +43,36 @@ describe("authoritative RTS commands", () => {
     });
   });
 
+  it("self-destructs selected owned units on the scheduled tick", () => {
+    const simulation = createCombatScenario();
+    const blue = simulation.state.ships.find((ship) => ship.teamId === 1)!;
+    const red = simulation.state.ships.find((ship) => ship.teamId === 2)!;
+    const command = {
+      type: "selfDestruct" as const,
+      playerId: "pilot-blue",
+      sequence: 1,
+      requestedTick: simulation.state.tick + 2,
+      unitIds: [blue.id],
+      queued: false,
+    };
+
+    expect(simulation.submitCommand({ ...command, unitIds: [red.id] })).toEqual({
+      accepted: false,
+      reason: "ownership",
+    });
+    expect(simulation.submitCommand(command).accepted).toBe(true);
+    simulation.step();
+    expect(simulation.state.ships.some((ship) => ship.id === blue.id)).toBe(true);
+
+    const result = simulation.step();
+    expect(simulation.state.ships.some((ship) => ship.id === blue.id)).toBe(false);
+    expect(simulation.state.ships.some((ship) => ship.id === red.id)).toBe(true);
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: "commandAccepted", commandType: "selfDestruct", unitIds: [blue.id],
+    }));
+    expect(result.events).toContainEqual({ type: "destroyed", tick: 2, entityId: blue.id });
+  });
+
   it("ingests commands on their requested fixed tick and moves without stopping weapons", () => {
     const simulation = createCombatScenario();
     const blueDestroyer = simulation.state.ships.find((ship) => ship.teamId === 1 && ship.class === "destroyer")!;

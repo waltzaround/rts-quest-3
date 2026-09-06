@@ -15,9 +15,9 @@ Open `http://127.0.0.1:5173`. The multiplayer lobby is the default landing scree
 
 Select one or more completed Shipyards to queue reinforcements. Fighters and Bombers are produced as five-ship squadrons from one queue item; Mobile Fabricators and larger warships are produced individually. Each production click queues one batch in every selected compatible Shipyard, while Shift-click queues five batches in every selected Shipyard. Right-click the battlefield to assign that rally point to every selected Shipyard; `Y` or **Set Rally** provides the same action as an explicit targeting mode. Each Shipyard keeps its own visible queue, consumes resources continuously, and produces at a fixed per-Shipyard rate, so production capacity scales by building more Shipyards.
 
-Drag-select your fleet, right-click or right-drag to move in formation, press `A` for attack-move, `M` for move, `S` to stop, `H` to hold, and `F` then click an enemy ship or structure to focus fire. Hold Shift to queue waypoints and use Ctrl+1–9 for control groups. Screen edges or arrow keys pan, the wheel zooms, middle-drag rotates the camera, and `\` toggles fullscreen. Destroy every opposing Command Core to win while the other commanders expand and reinforce autonomously.
+Drag-select your fleet, right-click or right-drag to move in formation, press `A` for attack-move, `M` for move, `S` to stop, `H` to hold, `Delete` or `Backspace` to self-destruct selected owned units, and `F` then click an enemy ship or structure to focus fire. Hold Shift to queue waypoints and use Ctrl+1–9 for control groups. Screen edges or arrow keys pan, the wheel zooms, middle-drag rotates the camera, and `\` toggles fullscreen. Destroy every opposing Command Core to win while the other commanders expand and reinforce autonomously.
 
-Asteroids are authoritative Box3D colliders rather than scenery. Fleets steer laterally around them, blocked formation goals move to reachable positions, capital ships cannot penetrate asteroid or station bodies, and asteroids intercept projectiles. The minimap and tactical view retain their silhouettes; enable `COLLIDERS` and `AVOIDANCE` in Sim Telemetry to inspect exact shapes and steering vectors.
+Asteroids are authoritative Box3D colliders rather than scenery. Fleets steer laterally around them, blocked formation goals move to reachable positions, and asteroids intercept projectiles. Ships pass through structures so bases cannot trap fleets. The minimap and tactical view retain asteroid silhouettes; enable `COLLIDERS` and `AVOIDANCE` in Sim Telemetry to inspect exact shapes and steering vectors.
 
 Ships and completed structures provide sensor coverage. Allies share live contacts and discovered resource deposits, while hostile ships, structures, projectiles, targeting data, and effects disappear when they leave sensor coverage. The minimap shades unexplored space and shows only permitted contacts.
 
@@ -43,7 +43,7 @@ Clients run the deterministic simulation while the Worker sequences commands and
 
 Use the pnpm version declared in `package.json`, then run `pnpm install --frozen-lockfile`, `pnpm build`, and `pnpm deploy`. The Worker has a development dependency on the client so recursive builds finish the client assets before packaging the Worker, including on a fresh checkout.
 
-The input scheduling fix uses lockstep protocol 6. After deploying it, reload every player's page and start a new match so all peers use the same rules.
+The current deterministic rules use lockstep protocol 8. After deploying them, reload every player's page and start a new match so all peers use the same rules.
 
 ## Verify it
 

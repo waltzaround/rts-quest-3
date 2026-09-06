@@ -100,6 +100,9 @@ export function updateTeamVisibility(
   projectileHash.rebuild(state.projectiles);
   const resourceHash = state.resourceNodes.length > 32 ? new SpatialHash<ResourceNodeState>(160) : null;
   resourceHash?.rebuild(state.resourceNodes);
+  const targetScratch: CombatTargetState[] = [];
+  const projectileScratch: ProjectileState[] = [];
+  const resourceScratch: ResourceNodeState[] = [];
 
   const ownedEntityIds = new Map<TeamId, Set<EntityId>>();
   const ownedProjectileIds = new Map<TeamId, Set<EntityId>>();
@@ -147,13 +150,14 @@ export function updateTeamVisibility(
     const sources = sourcesByTeam.get(teamId)!;
     for (const source of sources) {
       const rangeSquared = source.range ** 2;
-      for (const target of targetHash.query(source.x, source.z, source.range)) {
+      for (const target of targetHash.query(source.x, source.z, source.range, targetScratch)) {
         if (distanceSquared(source, target) <= rangeSquared) detectedEntities.add(target.id);
       }
-      for (const projectile of projectileHash.query(source.x, source.z, source.range)) {
+      for (const projectile of projectileHash.query(source.x, source.z, source.range, projectileScratch)) {
         if (distanceSquared(source, projectile) <= rangeSquared) detectedProjectiles.add(projectile.id);
       }
-      const nearbyResources = resourceHash?.query(source.x, source.z, source.range) ?? state.resourceNodes;
+      const nearbyResources = resourceHash?.query(source.x, source.z, source.range, resourceScratch)
+        ?? state.resourceNodes;
       for (const resource of nearbyResources) {
         if (distanceSquared(source, resource) <= rangeSquared) detectedResources.add(resource.id);
       }

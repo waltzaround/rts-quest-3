@@ -16,6 +16,7 @@ import {
 import {
   DEFAULT_LOBBY_SETTINGS,
   LOCKSTEP_PROTOCOL_VERSION,
+  MATCH_START_DELAY_MS,
   MAX_REPLAY_BYTES,
   MAX_PLAYERS,
   REPLAY_CHUNK_BYTES,
@@ -55,6 +56,7 @@ interface SpectatorGrant {
 }
 
 interface PersistedMatch {
+  matchStartsAt?: number;
   lobby: LobbyState;
   seed?: number;
   simulation: SimulationState | null;
@@ -90,6 +92,7 @@ interface PersistedCheckpointManifest {
 }
 
 interface PersistedMatchMetadata {
+  matchStartsAt?: number;
   version: 2;
   lobby: LobbyState;
   seed: number;
@@ -150,6 +153,7 @@ export default {
 } satisfies ExportedHandler<Env>;
 
 export class Match implements DurableObject {
+  private matchStartsAt = 0;
   private simulation: GameSimulation | null = null;
   private timer: ReturnType<typeof setInterval> | undefined;
   private lobby: LobbyState;
@@ -193,6 +197,7 @@ export class Match implements DurableObject {
     this.ctx.blockConcurrencyWhile(async () => {
       const persisted = await this.loadPersistedMatch();
       if (!persisted) return;
+      this.matchStartsAt = persisted.matchStartsAt ?? 0;
       const legacySeed = (persisted.lobby as LobbyState & { seed?: unknown }).seed;
       this.seed = persisted.seed ?? (typeof legacySeed === "number" ? legacySeed : this.seed);
       const restoredLobby = persisted.lobby as LobbyState & { settings?: LobbySettings };
@@ -747,8 +752,8 @@ export class Match implements DurableObject {
       this.fail(socket, "not_enough_players", "Add at least one pilot or AI opponent");
       return;
     }
-    if (humans.some((slot) => !slot.connected || !slot.ready)) {
-      this.fail(socket, "players_not_ready", "Every human pilot must be connected and ready");
+    if (humans.some((slot) => !slot.connected || (!slot.isHost && !slot.ready))) {
+      this.fail(socket, "players_not_ready", "Every pilot must be connected, and guests must be ready before the host can launch");
       return;
     }
     if (new Set(this.lobby.slots.map((slot) => slot.teamId)).size < 2) {
@@ -797,6 +802,7 @@ export class Match implements DurableObject {
     this.lastRecoveryTick = -RELAY_RECOVERY_COOLDOWN_TICKS;
     this.invalidatePlayerViews();
     this.lobby.phase = "playing";
+    this.matchStartsAt = Date.now() + MATCH_START_DELAY_MS;
     this.broadcastLockstepState("start");
     this.broadcastLobby();
     this.ensureTicking();
@@ -885,6 +891,10 @@ export class Match implements DurableObject {
       this.fail(socket, "match_not_playing", "Commands are accepted only during an active match");
       return;
     }
+    if (Date.now() < this.matchStartsAt) {
+      this.fail(socket, "match_starting", "Stand by for the countdown to finish");
+      return;
+    }
     const accepted: GameCommand[] = [];
     const outcomes = message.commands.map((command) => {
       // The command must have enough lead time not only to reach the authority,
@@ -962,6 +972,11 @@ export class Match implements DurableObject {
   private tick(): void {
     if (!this.simulation || this.lobby.phase !== "playing") return;
     const now = Date.now();
+    if (now < this.matchStartsAt) {
+      this.relayClockAt = this.matchStartsAt;
+      this.relayClockAccumulatorMs = 0;
+      return;
+    }
     if (this.relayClockAt === 0) this.relayClockAt = now;
     this.relayClockAccumulatorMs += Math.min(1_000, Math.max(0, now - this.relayClockAt));
     this.relayClockAt = now;
@@ -1078,7 +1093,7 @@ export class Match implements DurableObject {
 
   private ensureTicking(): void {
     if (this.timer !== undefined || !this.simulation || this.lobby.phase !== "playing") return;
-    this.relayClockAt = Date.now();
+    this.relayClockAt = Math.max(Date.now(), this.matchStartsAt);
     this.relayClockAccumulatorMs = 0;
     this.timer = setInterval(() => this.tick(), this.relayIntervalMs);
   }
@@ -1177,6 +1192,7 @@ export class Match implements DurableObject {
 
   private sendSnapshot(socket: WebSocket, reason: Extract<ServerMessage, { type: "snapshot" }>["reason"]): void {
     if (!this.simulation) return;
+    this.sendCountdown(socket);
     const lockstepReason = reason === "periodic" ? "manual" : reason;
     this.sendRaw(socket, this.serializedLockstepState(lockstepReason));
   }
@@ -1184,7 +1200,17 @@ export class Match implements DurableObject {
   private broadcastLockstepState(reason: "start" | "manual"): void {
     if (!this.simulation) return;
     const serialized = this.serializedLockstepState(reason);
-    for (const socket of this.ctx.getWebSockets()) this.sendRaw(socket, serialized);
+    for (const socket of this.ctx.getWebSockets()) {
+      this.sendCountdown(socket);
+      this.sendRaw(socket, serialized);
+    }
+  }
+
+  private sendCountdown(socket: WebSocket): void {
+    const serverTime = Date.now();
+    if (serverTime < this.matchStartsAt) {
+      this.send(socket, { type: "match_countdown", serverTime, startsAt: this.matchStartsAt });
+    }
   }
 
   private broadcastPlayerState(
@@ -1382,6 +1408,7 @@ export class Match implements DurableObject {
     }
     return {
       lobby: metadata.lobby,
+      ...(metadata.matchStartsAt === undefined ? {} : { matchStartsAt: metadata.matchStartsAt }),
       seed: metadata.seed,
       simulation: checkpoint?.simulation ?? legacy?.simulation ?? null,
       reconnectTokens: metadata.reconnectTokens,
@@ -1448,6 +1475,7 @@ export class Match implements DurableObject {
   private currentMetadata(checkpoint = this.checkpointManifest): PersistedMatchMetadata {
     return {
       version: 2,
+      matchStartsAt: this.matchStartsAt,
       lobby: this.publicLobby(),
       seed: this.seed,
       reconnectTokens: { ...this.reconnectTokens },

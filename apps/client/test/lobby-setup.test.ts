@@ -7,7 +7,7 @@ describe("singleplayer lobby", () => {
     const lobby = createSingleplayerLobby();
     lobby.slots[0]!.ready = false;
     expect(lobbyLaunchIssue(lobby, true)).toBeNull();
-    expect(lobbyLaunchIssue(lobby, false)).toContain("get ready");
+    expect(lobbyLaunchIssue(lobby, false)).toBeNull();
     expect(createSingleplayerScenario(lobby, 42).state.ships).toHaveLength(0);
   });
 
@@ -74,5 +74,38 @@ describe("singleplayer lobby", () => {
     for (let tick = 0; tick < 5; tick++) game.step();
     expect(lobby).toEqual(saved);
     expect(createSingleplayerScenario(lobby, 22).state.tick).toBe(0);
+  });
+});
+
+describe("multiplayer launch readiness", () => {
+  it("lets an unready host launch when all guests are ready", () => {
+    const lobby = createSingleplayerLobby();
+    lobby.slots[0]!.ready = false;
+    lobby.slots[1]!.isAi = false;
+    expect(lobbyLaunchIssue(lobby, false)).toBeNull();
+    lobby.slots[1]!.ready = false;
+    expect(lobbyLaunchIssue(lobby, false)).toContain("guests to get ready");
+  });
+
+  it("still requires every human to be connected, including the host", () => {
+    const lobby = createSingleplayerLobby();
+    lobby.slots[0]!.connected = false;
+    expect(lobbyLaunchIssue(lobby, false)).toContain("rejoin");
+    lobby.slots[0]!.connected = true;
+    lobby.slots[1]!.isAi = false;
+    lobby.slots[1]!.connected = false;
+    expect(lobbyLaunchIssue(lobby, false)).toContain("rejoin");
+  });
+
+  it("moves the readiness exemption with the host role", () => {
+    const lobby = createSingleplayerLobby();
+    lobby.slots[0]!.isHost = false;
+    lobby.slots[0]!.ready = false;
+    lobby.slots[1]!.isAi = false;
+    lobby.slots[1]!.isHost = true;
+    lobby.slots[1]!.ready = false;
+    expect(lobbyLaunchIssue(lobby, false)).toContain("guests to get ready");
+    lobby.slots[0]!.ready = true;
+    expect(lobbyLaunchIssue(lobby, false)).toBeNull();
   });
 });

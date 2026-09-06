@@ -299,6 +299,7 @@ describe("strategic artillery map safety", () => {
   const presets = [
     "orbital-ring", "crossfire", "open-expanse", "asteroid-belt", "spiral-arms",
     "shattered-core", "amazon-tunnel", "core-rush", "star-fortress",
+    "twin-gates", "broken-halo", "resource-islands",
   ] as const;
   const sizes = ["small", "medium", "large", "huge", "colossal"] as const;
 

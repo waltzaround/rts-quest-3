@@ -1,5 +1,5 @@
 const authority = process.env.VOIDFRONT_AUTHORITY ?? "ws://127.0.0.1:8787";
-const lockstepVersion = 6;
+import { LOCKSTEP_PROTOCOL_VERSION as lockstepVersion } from "../../../packages/protocol/dist/index.js";
 const base = new URL(authority);
 const basePath = base.pathname.replace(/\/+$/, "");
 const matchId = `lockstep-${Date.now()}`;
@@ -97,9 +97,14 @@ try {
   wing.send({ type: "set_faction", faction: "concord" });
   await host.waitFor((message) => message.type === "lobby"
     && message.lobby.slots.find((slot) => slot.playerId === wingWelcome.playerId)?.faction === "concord");
-  host.send({ type: "set_ready", ready: true });
+  host.send({ type: "start_match" });
+  await host.waitFor((message) => message.type === "error" && message.code === "players_not_ready");
+  wing.send({ type: "start_match" });
+  await wing.waitFor((message) => message.type === "error" && message.code === "host_only");
   wing.send({ type: "set_ready", ready: true });
-  await host.waitFor((message) => message.type === "lobby" && message.lobby.slots.every((slot) => slot.ready));
+  await host.waitFor((message) => message.type === "lobby"
+    && message.lobby.slots.find((slot) => slot.playerId === wingWelcome.playerId)?.ready
+    && message.lobby.slots.find((slot) => slot.playerId === hostWelcome.playerId)?.ready === false);
   host.send({ type: "start_match" });
 
   const hostStart = await host.waitFor((message) => message.type === "lockstep_state" && message.reason === "start");
@@ -118,6 +123,20 @@ try {
     throw new Error("Peers did not receive the same bootstrap state");
   }
 
+  const hostCountdown = await host.waitFor((message) => message.type === "match_countdown");
+  const wingCountdown = await wing.waitFor((message) => message.type === "match_countdown");
+  if (hostCountdown.startsAt !== wingCountdown.startsAt
+    || hostCountdown.startsAt - hostCountdown.serverTime > 5_000) {
+    throw new Error("Peers did not receive the same bounded start deadline");
+  }
+  host.send({ type: "commands", clientTick: 0, commands: [{
+    type: "move", playerId: hostWelcome.playerId, sequence: 1, requestedTick: 8,
+    unitIds: [1], destination: { x: 0, z: 0 }, queued: false,
+  }] });
+  await host.waitFor((message) => message.type === "error" && message.code === "match_starting");
+  const firstFrame = await host.waitFor((message) => message.type === "lockstep_frame" && message.tick > 0);
+  await wing.waitFor((message) => message.type === "lockstep_frame" && message.tick > 0);
+
   const core = hostStart.state.structures.find(
     (structure) => structure.ownerPlayerId === hostWelcome.playerId && structure.type === "commandCore",
   );
@@ -125,9 +144,9 @@ try {
   const radial = Math.hypot(core.x, core.z) || 1;
   const position = { x: core.x - core.x / radial * 180, z: core.z - core.z / radial * 180 };
   host.send({
-    type: "commands", clientTick: hostStart.tick, clientChecksum: hostStart.checksum,
+    type: "commands", clientTick: firstFrame.tick, clientChecksum: hostStart.checksum,
     commands: [{
-      type: "buildStructure", playerId: "spoofed", sequence: 1, requestedTick: hostStart.tick + 8,
+      type: "buildStructure", playerId: "spoofed", sequence: 1, requestedTick: firstFrame.tick + 8,
       structureType: "storage", position, queued: false,
     }],
   });
@@ -215,6 +234,8 @@ try {
     verifiedTick: verifiedFrame.tick,
     checksum: verifiedFrame.checksum,
     commandBroadcast: "passed",
+    hostLaunchWithoutReady: "passed",
+    guestReadinessAndHostOnlyLaunch: "passed",
     factionSelectionAndOwnership: "passed",
     factionReadyResetAndMatchLock: "passed",
     automaticDesyncRecovery: "passed",

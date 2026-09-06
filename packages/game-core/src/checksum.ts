@@ -85,6 +85,7 @@ export function calculateChecksum(state: SimulationState): number {
       hash = hashUint(hash, turret.targetEntityId ?? 0);
       hash = hashUint(hash, turret.cooldownRemaining);
       hash = hashUint(hash, turret.fireSequence);
+      hash = hashUint(hash, turret.idleRetargetTick ?? 0);
     }
   }
   for (const projectile of state.projectiles) {

@@ -1,6 +1,7 @@
 import { sweptCircleHitFraction, type PlanarCirclePhysicsWorld } from "@space-rts/box3d-wasm";
 import { FIXED_DT, distanceSquared, moveTowardAngle, wrapAngle } from "@space-rts/shared";
 import { calculateChecksum } from "./checksum";
+import { createMapVariantLayout } from "./map-layouts";
 import { runAiStrategy } from "./ai-strategy";
 import {
   ALL_SHIP_CLASSES,
@@ -84,11 +85,11 @@ function strategicWeaponUpdateTicks(shipCount: number): number {
   return STRATEGIC_WEAPON_UPDATE_TICKS;
 }
 
-function shipsPhaseThroughStructure(type: StructureType): boolean {
-  return SHIPYARD_TYPES.includes(type as ShipyardType)
-    || type === "fabricator"
-    || type === "advancedFabrication"
-    || type === "capitalInfrastructure";
+function structureReservesNavigationDestination(type: StructureType): boolean {
+  return !SHIPYARD_TYPES.includes(type as ShipyardType)
+    && type !== "fabricator"
+    && type !== "advancedFabrication"
+    && type !== "capitalInfrastructure";
 }
 
 function getShipArtilleryWeapon(shipClass: ShipClass) {
@@ -112,8 +113,7 @@ export interface ScenarioOptions {
   /** Lightweight title-screen battle with two fighter-heavy AI fleets. */
   menuBattle?: boolean;
   enemyCommander?: boolean;
-  mapPreset?: "orbital-ring" | "crossfire" | "open-expanse" | "asteroid-belt" | "spiral-arms" | "shattered-core"
-    | "amazon-tunnel" | "core-rush" | "star-fortress";
+  mapPreset?: SimulationState["mapPreset"];
   mapSize?: "small" | "medium" | "large" | "huge" | "colossal";
   startingResources?: "low" | "standard" | "high";
   startingBase?: "full" | "fortified" | "command-core";
@@ -141,6 +141,12 @@ export class GameSimulation {
   private readonly navigationHash = new SpatialHash<ShipState>(160);
   private readonly obstacleHash = new SpatialHash<ObstacleState>(220);
   private readonly staticCollisionHash = new SpatialHash<{ id: number; x: number; z: number; radius: number }>(220);
+  private readonly acquisitionScratch: CombatTargetState[] = [];
+  private readonly structureQueryScratch: CombatTargetState[] = [];
+  private readonly navigationQueryScratch: ShipState[] = [];
+  private readonly obstacleQueryScratch: ObstacleState[] = [];
+  private readonly projectileTargetScratch: CombatTargetState[] = [];
+  private readonly staticOverlapScratch: Array<{ id: number; x: number; z: number; radius: number }> = [];
   private readonly targetsById = new Map<EntityId, CombatTargetState>();
   private readonly visibleEntityIdsByTeam = new Map<TeamId, Set<EntityId>>();
   private readonly alliedTeamIdsByTeam = new Map<TeamId, Set<TeamId>>();
@@ -314,7 +320,7 @@ export class GameSimulation {
     this.hits = 0;
     this.avoidance = [];
     this.state.tick += 1;
-    this.ingestCommands();
+    if (this.ingestCommands()) this.destroyDeadEntities();
     updateTerritoryFields(this.state);
     this.updateEconomyAndProduction();
     updateTerritoryFields(this.state, false);
@@ -397,7 +403,7 @@ export class GameSimulation {
     }
 
     let normalizedCommand = command;
-    if (command.type === "move" || command.type === "attackMove" || command.type === "patrol" || command.type === "stop" || command.type === "hold" || command.type === "focusFire") {
+    if (command.type === "move" || command.type === "attackMove" || command.type === "patrol" || command.type === "stop" || command.type === "hold" || command.type === "focusFire" || command.type === "selfDestruct") {
       const uniqueUnitIds = [...new Set(command.unitIds)].sort((a, b) => a - b);
       if (uniqueUnitIds.length === 0) return { accepted: false, reason: "empty" };
       const byId = new Map(this.state.ships.map((ship) => [ship.id, ship]));
@@ -833,9 +839,10 @@ export class GameSimulation {
     };
   }
 
-  private ingestCommands(): void {
+  private ingestCommands(): boolean {
     const due: GameCommand[] = [];
     const pending: GameCommand[] = [];
+    let selfDestructed = false;
     for (const command of this.state.commandQueue) {
       if (command.requestedTick <= this.state.tick) due.push(command);
       else pending.push(command);
@@ -851,7 +858,7 @@ export class GameSimulation {
           .sort((a, b) => a.id - b.id);
         if (ships.length === 0) continue;
         if (command.type === "move" || command.type === "attackMove" || command.type === "patrol") {
-          const assignments = computeFormationAssignments(ships, command.destination, command.formationEnd);
+          const assignments = computeFormationAssignments(ships, command.destination, command.formationEnd, command.type);
           for (const assignment of assignments) {
             const ship = byId.get(assignment.shipId)!;
             const order: NavigationOrder = {
@@ -880,6 +887,9 @@ export class GameSimulation {
             ship.focusTargetEntityId = command.targetEntityId;
             for (const turret of ship.turrets) turret.targetEntityId = null;
           }
+        } else if (command.type === "selfDestruct") {
+          for (const ship of ships) ship.health = 0;
+          selfDestructed = true;
         }
         this.events.push({
           type: "commandAccepted", tick: this.state.tick, playerId: command.playerId,
@@ -1021,6 +1031,7 @@ export class GameSimulation {
       a.requestedTick - b.requestedTick || compareCodeUnits(a.playerId, b.playerId) || a.sequence - b.sequence,
     );
     this.state.structures.sort((a, b) => a.id - b.id);
+    return selfDestructed;
   }
 
   private updateEconomyAndProduction(): void {
@@ -1306,7 +1317,7 @@ export class GameSimulation {
   private detectsNearbyHostile(ship: ShipState): boolean {
     const range = SHIPS[ship.class].sensorRange;
     const rangeSquared = range * range;
-    for (const target of this.navigationHash.query(ship.x, ship.z, range)) {
+    for (const target of this.navigationHash.query(ship.x, ship.z, range, this.navigationQueryScratch)) {
       if (target.id === ship.id || target.health <= 0 || !this.isHostile(ship.teamId, target.teamId)) continue;
       if (distanceSquared(ship, target) <= rangeSquared) return true;
     }
@@ -1321,10 +1332,14 @@ export class GameSimulation {
     for (const ship of this.state.ships) {
       const artillery = getShipArtilleryWeapon(ship.class)?.artillery;
       if (!artillery) continue;
+      const wasDeployed = (ship.artilleryDeploymentTicks ?? 0) >= artillery.setupTicks;
       if (this.cruisingShipIds.has(ship.id) || Math.hypot(ship.vx, ship.vz) > 0.05) {
         ship.artilleryDeploymentTicks = 0;
       } else {
         ship.artilleryDeploymentTicks = Math.min(artillery.setupTicks, (ship.artilleryDeploymentTicks ?? 0) + 1);
+      }
+      if (!wasDeployed && ship.artilleryDeploymentTicks >= artillery.setupTicks) {
+        for (const turret of ship.turrets) delete turret.idleRetargetTick;
       }
     }
   }
@@ -1374,7 +1389,7 @@ export class GameSimulation {
       let separationX = 0;
       let separationZ = 0;
       const neighborRange = (definition.radius + MAX_SHIP_RADIUS) * 2.25;
-      for (const neighbor of this.navigationHash.query(ship.x, ship.z, neighborRange)) {
+      for (const neighbor of this.navigationHash.query(ship.x, ship.z, neighborRange, this.navigationQueryScratch)) {
         if (neighbor.id === ship.id || neighbor.teamId !== ship.teamId) continue;
         if (!shipsUseFormationSeparation(ship.class, neighbor.class)) continue;
         const dx = ship.x - neighbor.x;
@@ -1411,24 +1426,14 @@ export class GameSimulation {
   }
 
   private integrateMovement(): void {
-    const overlapStatics = [
-      ...this.state.obstacles.filter((obstacle) => obstacle.type === "asteroid")
-        .map((obstacle) => ({ id: -obstacle.id, x: obstacle.x, z: obstacle.z, radius: obstacle.radius })),
-      ...this.state.structures.filter((structure) => !shipsPhaseThroughStructure(structure.type)).map((structure) => ({
-        id: structure.id, x: structure.x, z: structure.z, radius: STRUCTURES[structure.type].radius,
-      })),
-    ];
+    const overlapStatics = this.state.obstacles.filter((obstacle) => obstacle.type === "asteroid")
+      .map((obstacle) => ({ id: -obstacle.id, x: obstacle.x, z: obstacle.z, radius: obstacle.radius }));
     this.staticCollisionHash.rebuild(overlapStatics);
     this.maxStaticRadius = overlapStatics.reduce((largest, obstacle) => Math.max(largest, obstacle.radius), 0);
     if (this.physicsWorld) {
-      const staticCircles = [
-        ...this.state.obstacles.filter((obstacle) => obstacle.type === "asteroid").map((obstacle) => ({
-          id: `obstacle:${obstacle.id}`, x: obstacle.x, z: obstacle.z, radius: obstacle.radius,
-        })),
-        ...this.state.structures.filter((structure) => !shipsPhaseThroughStructure(structure.type)).map((structure) => ({
-          id: `structure:${structure.id}`, x: structure.x, z: structure.z, radius: STRUCTURES[structure.type].radius,
-        })),
-      ];
+      const staticCircles = this.state.obstacles.filter((obstacle) => obstacle.type === "asteroid").map((obstacle) => ({
+        id: `obstacle:${obstacle.id}`, x: obstacle.x, z: obstacle.z, radius: obstacle.radius,
+      }));
       this.physicsWorld.syncBodies({
         staticCircles,
         dynamicCircles: this.state.ships.map((ship) => {
@@ -1485,7 +1490,7 @@ export class GameSimulation {
       this.maxObstacleRadius * 2.1 + definition.radius + OBSTACLE_CLEARANCE,
       definition.speed * 2.4 + this.maxObstacleRadius,
     );
-    for (const obstacle of this.obstacleHash.query(ship.x, ship.z, searchRadius)) {
+    for (const obstacle of this.obstacleHash.query(ship.x, ship.z, searchRadius, this.obstacleQueryScratch)) {
       if (obstacle.type === "barrier") continue;
       const toX = obstacle.x - ship.x;
       const toZ = obstacle.z - ship.z;
@@ -1526,7 +1531,9 @@ export class GameSimulation {
     ship: ShipState,
   ): void {
     const radius = SHIPS[ship.class].radius;
-    const statics = this.staticCollisionHash.query(ship.x, ship.z, radius + this.maxStaticRadius + 1);
+    const statics = this.staticCollisionHash.query(
+      ship.x, ship.z, radius + this.maxStaticRadius + 1, this.staticOverlapScratch,
+    );
     for (let pass = 0; pass < 4; pass += 1) {
       let resolved = false;
       for (const obstacle of statics) {
@@ -1606,6 +1613,30 @@ export class GameSimulation {
       }
       const targetLoad = new Map<EntityId, number>();
       const operationalTurretCount = getOperationalTurretCount(ship);
+      // Hostility and visibility do not depend on the turret, so gather one shared
+      // candidate list per ship (at the longest operational weapon range) instead of
+      // running a spatial query for every turret. Built lazily: most ships skip
+      // acquisition entirely on any given tick.
+      let sharedCandidates: CombatTargetState[] | null = null;
+      const acquisitionCandidates = (): readonly CombatTargetState[] => {
+        if (sharedCandidates) return sharedCandidates;
+        let scanRange = 0;
+        for (let turretIndex = 0; turretIndex < operationalTurretCount; turretIndex += 1) {
+          scanRange = Math.max(scanRange, WEAPONS[ship.turrets[turretIndex]!.weaponTypeId].range);
+        }
+        const nearby = this.spatialHash.query(ship.x, ship.z, scanRange, this.acquisitionScratch);
+        let write = 0;
+        for (let index = 0; index < nearby.length; index += 1) {
+          const candidate = nearby[index]!;
+          if (candidate.health <= 0 || !this.isHostile(ship.teamId, candidate.teamId)
+            || !this.isEntityVisible(ship.teamId, candidate.id)) continue;
+          nearby[write] = candidate;
+          write += 1;
+        }
+        nearby.length = write;
+        sharedCandidates = nearby;
+        return sharedCandidates;
+      };
       for (let turretIndex = 0; turretIndex < ship.turrets.length; turretIndex += 1) {
         const turret = ship.turrets[turretIndex]!;
         if (turretIndex >= operationalTurretCount) {
@@ -1619,9 +1650,27 @@ export class GameSimulation {
           weapon.artillery?.targetReevaluationTicks ?? 0,
         );
         const mustReevaluate = (this.state.tick + turret.id) % reevaluationTicks < weaponUpdateTicks;
-        if (!target || !this.isValidTarget(ship, turret, target) || mustReevaluate) {
-          target = this.acquireTarget(ship, turret, targetLoad);
+        const hasValidTarget = target !== undefined && this.isValidTarget(ship, turret, target);
+        // A turret whose last scan found no hostiles in range waits out the
+        // reevaluation cadence instead of rescanning on every weapon update;
+        // those empty rescans dominate simulation cost in large battles.
+        // Nearby hostiles that this turret cannot take yet (wrong arc, still
+        // deploying) keep retrying. A lost target still rescans immediately,
+        // and player focus fire bypasses the wait so commands stay responsive.
+        const shouldScan = hasValidTarget
+          ? mustReevaluate
+          : turret.targetEntityId !== null
+            || ship.focusTargetEntityId !== null
+            || this.state.tick >= (turret.idleRetargetTick ?? 0);
+        if (shouldScan) {
+          const candidates = acquisitionCandidates();
+          target = this.acquireTarget(ship, turret, targetLoad, candidates);
           turret.targetEntityId = target?.id ?? null;
+          if (target) delete turret.idleRetargetTick;
+          else if (candidates.length === 0) turret.idleRetargetTick = this.state.tick + reevaluationTicks;
+          else delete turret.idleRetargetTick;
+        } else if (!hasValidTarget) {
+          target = undefined;
         }
         if (target) {
           targetLoad.set(target.id, (targetLoad.get(target.id) ?? 0) + 1);
@@ -1642,7 +1691,12 @@ export class GameSimulation {
     }
   }
 
-  private acquireTarget(ship: ShipState, turret: TurretState, targetLoad: ReadonlyMap<EntityId, number>): CombatTargetState | undefined {
+  private acquireTarget(
+    ship: ShipState,
+    turret: TurretState,
+    targetLoad: ReadonlyMap<EntityId, number>,
+    candidates: readonly CombatTargetState[],
+  ): CombatTargetState | undefined {
     const weapon = WEAPONS[turret.weaponTypeId];
     if (ship.focusTargetEntityId !== null) {
       const focused = this.findTarget(ship.focusTargetEntityId);
@@ -1650,7 +1704,7 @@ export class GameSimulation {
     }
     let best: CombatTargetState | undefined;
     let bestScore = Number.POSITIVE_INFINITY;
-    for (const candidate of this.spatialHash.query(ship.x, ship.z, weapon.range)) {
+    for (const candidate of candidates) {
       if (!this.isValidTarget(ship, turret, candidate)) continue;
       const rangeScore = distanceSquared(ship, candidate) / (weapon.range * weapon.range) * 100_000;
       const preference = isShip(candidate)
@@ -1771,6 +1825,27 @@ export class GameSimulation {
           localX: 0, localZ: 0, yawCenter: 0, yawHalfArc: Math.PI, weaponTypeId: definition.weaponTypeId,
         }] : []);
       if (mounts.length === 0 || structure.buildProgress < 1 || structure.health <= 0) continue;
+      let sharedCandidates: CombatTargetState[] | null = null;
+      const structureCandidates = (): readonly CombatTargetState[] => {
+        if (sharedCandidates) return sharedCandidates;
+        let scanRange = 0;
+        for (const mount of mounts) {
+          scanRange = Math.max(scanRange, getStructureWeaponRange(structure.type, mount.weaponTypeId));
+        }
+        const nearby = this.spatialHash.query(structure.x, structure.z, scanRange, this.structureQueryScratch);
+        let write = 0;
+        for (let index = 0; index < nearby.length; index += 1) {
+          const candidate = nearby[index]!;
+          if (candidate.id === structure.id || candidate.health <= 0
+            || !this.isHostile(structure.teamId, candidate.teamId)
+            || !this.isEntityVisible(structure.teamId, candidate.id)) continue;
+          nearby[write] = candidate;
+          write += 1;
+        }
+        nearby.length = write;
+        sharedCandidates = nearby;
+        return sharedCandidates;
+      };
       for (let mountIndex = 0; mountIndex < mounts.length; mountIndex += 1) {
         const mount = mounts[mountIndex]!;
         const weaponTypeId = mount.weaponTypeId;
@@ -1784,12 +1859,11 @@ export class GameSimulation {
 
         let target: CombatTargetState | null = null;
         let bestScore = Infinity;
-        for (const candidate of this.spatialHash.query(structure.x, structure.z, weaponRange)) {
-          if (candidate.id === structure.id || candidate.health <= 0
-            || !this.isHostile(structure.teamId, candidate.teamId)
-            || !this.isEntityVisible(structure.teamId, candidate.id)) continue;
+        const weaponRangeSquared = weaponRange ** 2;
+        const minimumRangeSquared = weapon.minimumRange ** 2;
+        for (const candidate of structureCandidates()) {
           const rangeSquared = distanceSquared(structure, candidate);
-          if (rangeSquared > weaponRange ** 2 || rangeSquared < weapon.minimumRange ** 2) continue;
+          if (rangeSquared > weaponRangeSquared || rangeSquared < minimumRangeSquared) continue;
           const preference = isShip(candidate)
             ? weapon.targetPreference[candidate.class]
             : getStructureTargetPreference(weaponTypeId, candidate.type);
@@ -1913,7 +1987,7 @@ export class GameSimulation {
       const queryX = (projectile.previousX + projectile.x) * 0.5;
       const queryZ = (projectile.previousZ + projectile.z) * 0.5;
       const obstacleQueryRadius = Math.hypot(segmentX, segmentZ) * 0.5 + projectile.radius + this.maxObstacleRadius;
-      for (const obstacle of this.obstacleHash.query(queryX, queryZ, obstacleQueryRadius)) {
+      for (const obstacle of this.obstacleHash.query(queryX, queryZ, obstacleQueryRadius, this.obstacleQueryScratch)) {
         if (obstacle.type === "barrier") continue;
         const obstacleHit = sweptCircleHitFraction({
           fromX: projectile.previousX, fromZ: projectile.previousZ,
@@ -1931,7 +2005,7 @@ export class GameSimulation {
         ), `0:${obstacle.id}`, null);
       }
       const queryRadius = Math.hypot(segmentX, segmentZ) * 0.5 + projectile.radius + MAX_COMBAT_TARGET_RADIUS;
-      for (const target of this.spatialHash.query(queryX, queryZ, queryRadius)) {
+      for (const target of this.spatialHash.query(queryX, queryZ, queryRadius, this.projectileTargetScratch)) {
         if (target.health <= 0 || !this.isHostile(projectile.ownerTeamId, target.teamId)) continue;
         const owner = projectileOwners.get(projectile.ownerShipId);
         const smallCraftEvasionScale = owner && CAPITAL_SHIP_CLASSES.has(owner.class) && isShip(target)
@@ -2472,6 +2546,11 @@ export function createCombatScenario(options: ScenarioOptions = {}): GameSimulat
     standard: { count: 1, richness: 1 },
     rich: { count: 1.5, richness: 1.3 },
   }[resourceDensity];
+  const variantLayout = createMapVariantLayout(mapPreset, {
+    seed, playerCount: configs.length, baseRadius,
+    resourceCount: Math.max(4, Math.round(configs.length * CONTESTED_RESOURCE_NODES_PER_PLAYER * density.count)),
+    richness: density.richness,
+  });
   const createEconomy = () => ({
     alloy: startingResourceAmount, energy: startingResourceAmount, alloyIncome: 0, energyIncome: 0,
     alloySpend: 0, energySpend: 0,
@@ -2488,7 +2567,7 @@ export function createCombatScenario(options: ScenarioOptions = {}): GameSimulat
   const state: SimulationState = {
     version: 11, seed, tick: 0, nextEntityId: 1, nextTurretId: 1, nextQueueItemId: 1,
     players, teams, ships: [], structures: [], resourceNodes: [],
-    obstacles: createScenarioObstacles(players.length, mapPreset, baseRadius, seed, spawnAngles),
+    obstacles: variantLayout?.obstacles ?? createScenarioObstacles(players.length, mapPreset, baseRadius, seed, spawnAngles),
     visibility: [], territories: [],
     projectiles: [], commandQueue: [],
     aiPlayerIds: configs.filter((player) => player.ai).map((player) => player.id),
@@ -2569,7 +2648,7 @@ export function createCombatScenario(options: ScenarioOptions = {}): GameSimulat
     });
   };
 
-  if (options.players === undefined) {
+  if (options.players === undefined && !variantLayout) {
     const blueSafeNode = addNode(-80, -315, 1);
     addNode(-390, -325, 1); addNode(40, -535, 1);
     addNode(-260, -220, 1.15); addNode(210, -180, 1.25); addNode(-180, 0, 1.4);
@@ -2599,7 +2678,8 @@ export function createCombatScenario(options: ScenarioOptions = {}): GameSimulat
       }
     }
   } else {
-    if (mapPreset !== "asteroid-belt" && mapPreset !== "shattered-core" && mapPreset !== "amazon-tunnel") {
+    for (const node of variantLayout?.resources ?? []) addMapNode(node.x, node.z, node.richness);
+    if (!variantLayout && mapPreset !== "asteroid-belt" && mapPreset !== "shattered-core" && mapPreset !== "amazon-tunnel") {
       addMapNode((mapRandom() - 0.5) * baseRadius * 0.06, (mapRandom() - 0.5) * baseRadius * 0.06, 1.9 * density.richness);
     }
     if (mapPreset === "amazon-tunnel") {
@@ -2610,7 +2690,7 @@ export function createCombatScenario(options: ScenarioOptions = {}): GameSimulat
       ] as const;
       for (const node of basinNodes) addMapNode(node.x, node.z, node.richness * density.richness);
     }
-    const contestedCount = Math.max(
+    const contestedCount = variantLayout ? 0 : Math.max(
       4,
       Math.round(players.length * CONTESTED_RESOURCE_NODES_PER_PLAYER * density.count),
     );
@@ -2998,6 +3078,75 @@ export function computeFormationAssignments(
   ships: readonly ShipState[],
   destination: Readonly<{ x: number; z: number }>,
   formationEnd?: Readonly<{ x: number; z: number }>,
+  orderType: NavigationOrder["type"] = "move",
+): FormationAssignment[] {
+  if (orderType !== "attackMove") return computeTightFormationAssignments(ships, destination, formationEnd);
+
+  // Attack orders describe a shared objective, not one ever-growing parade
+  // ground. Nearby, similarly sized ships approach in independent detachments.
+  // Overflow detachments share the attack area; local separation handles traffic
+  // instead of assigning reserves permanent slots far outside weapon range.
+  const attackRadius = 180;
+  const cellSize = 360;
+  const cohorts = new Map<string, ShipState[]>();
+  for (const ship of [...ships].sort((a, b) => a.id - b.id)) {
+    const sizeBand = Math.ceil(SHIPS[ship.class].radius / 12);
+    const key = `${Math.floor(ship.x / cellSize)}:${Math.floor(ship.z / cellSize)}:${sizeBand}`;
+    const cohort = cohorts.get(key);
+    if (cohort) cohort.push(ship);
+    else cohorts.set(key, [ship]);
+  }
+
+  const lineX = (formationEnd?.x ?? destination.x) - destination.x;
+  const lineZ = (formationEnd?.z ?? destination.z) - destination.z;
+  const lineLength = Math.hypot(lineX, lineZ);
+  const hasLine = lineLength >= 18;
+  const assignments: FormationAssignment[] = [];
+  for (const cohort of cohorts.values()) {
+    const spacing = Math.max(18, Math.max(...cohort.map((ship) => SHIPS[ship.class].radius)) * 2.35);
+    const frontage = Math.min(attackRadius * 2, lineLength);
+    let capacity = 1;
+    for (let count = 2; count <= 24; count += 1) {
+      const columns = hasLine
+        ? Math.min(count, Math.floor(frontage / spacing) + 1)
+        : Math.ceil(Math.sqrt(count * 1.6));
+      const depth = (Math.ceil(count / columns) - 1) * spacing;
+      const extent = hasLine ? depth : Math.hypot((columns - 1) * spacing / 2, depth);
+      if (extent > attackRadius) break;
+      capacity = count;
+    }
+
+    for (let start = 0; start < cohort.length; start += capacity) {
+      const detachment = cohort.slice(start, start + capacity);
+      let localDestination = destination;
+      let localEnd: Readonly<{ x: number; z: number }> | undefined;
+      if (hasLine) {
+        // A deliberate drag keeps its frontage. Distant detachments use the
+        // nearest section of it instead of crossing the fleet to swap slots.
+        const center = detachment.reduce((sum, ship) => ({
+          x: sum.x + ship.x / detachment.length, z: sum.z + ship.z / detachment.length,
+        }), { x: 0, z: 0 });
+        const along = ((center.x - destination.x) * lineX + (center.z - destination.z) * lineZ) / lineLength;
+        const midpoint = Math.max(frontage / 2, Math.min(lineLength - frontage / 2, along));
+        localDestination = {
+          x: destination.x + lineX / lineLength * (midpoint - frontage / 2),
+          z: destination.z + lineZ / lineLength * (midpoint - frontage / 2),
+        };
+        localEnd = {
+          x: destination.x + lineX / lineLength * (midpoint + frontage / 2),
+          z: destination.z + lineZ / lineLength * (midpoint + frontage / 2),
+        };
+      }
+      assignments.push(...computeTightFormationAssignments(detachment, localDestination, localEnd));
+    }
+  }
+  return assignments.sort((a, b) => a.shipId - b.shipId);
+}
+
+function computeTightFormationAssignments(
+  ships: readonly ShipState[],
+  destination: Readonly<{ x: number; z: number }>,
+  formationEnd?: Readonly<{ x: number; z: number }>,
 ): FormationAssignment[] {
   if (ships.length === 0) return [];
   const stableShips = [...ships].sort((a, b) => a.id - b.id);
@@ -3013,19 +3162,19 @@ export function computeFormationAssignments(
 
   if (hasLine && formationEnd) {
     const midpoint = { x: (destination.x + formationEnd.x) / 2, z: (destination.z + formationEnd.z) / 2 };
-    facing = Math.atan2(midpoint.x - centroid.x, midpoint.z - centroid.z);
     const lineX = formationEnd.x - destination.x;
     const lineZ = formationEnd.z - destination.z;
     const lineLength = Math.hypot(lineX, lineZ);
     const directionX = lineX / lineLength;
     const directionZ = lineZ / lineLength;
-    const forwardX = Math.sin(facing);
-    const forwardZ = Math.cos(facing);
+    const side = (midpoint.x - centroid.x) * -directionZ + (midpoint.z - centroid.z) * directionX >= 0 ? 1 : -1;
+    const forwardX = -directionZ * side;
+    const forwardZ = directionX * side;
+    facing = Math.atan2(forwardX, forwardZ);
     // The drag defines the available frontage, not a compulsory single rank.
     // Ships that do not fit across that frontage fill centered ranks behind it.
-    const compactColumns = Math.max(1, Math.ceil(Math.sqrt(ships.length * 1.6)));
     const draggedColumns = Math.floor(lineLength / spacing) + 1;
-    const columns = Math.min(ships.length, Math.max(compactColumns, draggedColumns));
+    const columns = Math.min(ships.length, draggedColumns);
     const columnSpacing = columns <= 1 ? 0 : Math.max(spacing, lineLength / (columns - 1));
     for (let index = 0; index < ships.length; index += 1) {
       const row = Math.floor(index / columns);
@@ -3386,7 +3535,7 @@ function buildNavigableStatics(state: SimulationState): NavigableStatic[] {
       key: `obstacle:${obstacle.id}`, x: obstacle.x, z: obstacle.z, radius: obstacle.radius,
       width: obstacle.width, depth: obstacle.depth,
     })),
-    ...state.structures.filter((structure) => !shipsPhaseThroughStructure(structure.type)).map((structure) => ({
+    ...state.structures.filter((structure) => structureReservesNavigationDestination(structure.type)).map((structure) => ({
       key: `structure:${structure.id}`, x: structure.x, z: structure.z, radius: STRUCTURES[structure.type].radius,
     })),
   ].sort((left, right) => compareCodeUnits(left.key, right.key));

@@ -18,6 +18,7 @@ describe("authoritative checksum coverage", () => {
     ["next entity id", (state: SimulationState) => { state.nextEntityId += 1; }],
     ["resource position", (state: SimulationState) => { state.resourceNodes[0]!.x += 1; }],
     ["alliance state", (state: SimulationState) => { state.teams[0]!.alliedTeamIds.push(2); }],
+    ["idle retarget tick", (state: SimulationState) => { state.ships[0]!.turrets[0]!.idleRetargetTick = 40; }],
   ] as const)("detects %s divergence", (_label, mutate) => {
     const [before, after] = changedChecksum(mutate);
     expect(after).not.toBe(before);

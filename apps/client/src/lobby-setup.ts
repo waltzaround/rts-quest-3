@@ -67,8 +67,11 @@ export function lobbyLaunchIssue(lobby: LobbyState, singleplayer: boolean): stri
   if (lobby.slots.length < 2) return "Add an AI opponent to begin.";
   if (lobby.slots.length > MAP_PLAYER_CAPACITY[lobby.settings.mapSize]) return "Choose a larger map or remove a commander.";
   if (new Set(lobby.slots.map((slot) => slot.teamId)).size < 2) return "Choose at least two opposing teams.";
-  if (!singleplayer && lobby.slots.some((slot) => !slot.isAi && (!slot.connected || !slot.ready))) {
-    return "Waiting for every commander to get ready.";
+  if (!singleplayer && lobby.slots.some((slot) => !slot.isAi && !slot.connected)) {
+    return "Waiting for disconnected commanders to rejoin.";
+  }
+  if (!singleplayer && lobby.slots.some((slot) => !slot.isAi && !slot.isHost && !slot.ready)) {
+    return "Waiting for guests to get ready.";
   }
   return null;
 }

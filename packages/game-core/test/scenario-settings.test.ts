@@ -70,6 +70,7 @@ describe("RTS scenario settings", () => {
     const presets = [
       "orbital-ring", "crossfire", "open-expanse", "asteroid-belt", "spiral-arms", "shattered-core",
       "amazon-tunnel", "core-rush", "star-fortress",
+      "twin-gates", "broken-halo", "resource-islands",
     ] as const;
     const signatures = presets.map((mapPreset) => {
       const scenario = createCombatScenario({ seed: 4_242, players: PLAYERS, mapPreset });
@@ -146,7 +147,7 @@ describe("RTS scenario settings", () => {
       "amazon-tunnel", "core-rush", "star-fortress",
     ] as const;
     const spawnModes = ["together", "interleaved", "random"] as const;
-    for (const mapPreset of presets) {
+    for (const mapPreset of [...presets, "twin-gates", "broken-halo", "resource-islands"] as const) {
       for (const teamSpawnMode of spawnModes) {
         const scenario = createCombatScenario({ seed: 7_233, players, mapPreset, teamSpawnMode });
         for (const player of scenario.state.players) {

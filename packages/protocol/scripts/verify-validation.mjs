@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import { LOCKSTEP_PROTOCOL_VERSION, MAX_FLEET_COMMAND_UNITS, parseClientMessage, parseServerMessage } from "../dist/index.js";
 
+for (const remaining of [0, 1_500, 5_000]) {
+  assert.equal(parseServerMessage(JSON.stringify({
+    type: "match_countdown", serverTime: 10_000, startsAt: 10_000 + remaining,
+  }))?.type, "match_countdown");
+}
+for (const [serverTime, startsAt] of [[10_000, 9_999], [10_000, 15_001], [-1, 0], [0, 1.5], [0, "5000"]]) {
+  assert.equal(parseServerMessage(JSON.stringify({ type: "match_countdown", serverTime, startsAt })), null);
+}
+
 const buildCommand = (structureType) => JSON.stringify({
   type: "commands",
   clientTick: 0,
@@ -50,6 +59,14 @@ assert.equal(
   null,
   "Fleet orders must remain bounded above the supported large-battle limit",
 );
+assert.equal(parseClientMessage(JSON.stringify({
+  type: "commands",
+  clientTick: 0,
+  commands: [{
+    type: "selfDestruct", playerId: "pilot-blue", sequence: 1, requestedTick: 1,
+    unitIds: [7], queued: false,
+  }],
+}))?.type, "commands", "Self-destruct orders should pass protocol validation");
 
 for (const command of [
   { type: "setWarpPoint", structureId: 12, position: { x: 100, z: 200 } },
@@ -174,11 +191,17 @@ assert.equal(parseServerMessage(JSON.stringify({
 assert.equal(parseServerMessage(JSON.stringify({ type: "lobby", lobby }))?.type, "lobby");
 assert.equal(parseServerMessage(JSON.stringify({ type: "lobby", lobby: { ...lobby, seed: 123 } })), null, "lobby seed must be private");
 assert.equal(parseClientMessage(JSON.stringify({ type: "set_settings", settings: lobby.settings }))?.type, "set_settings");
-for (const mapPreset of ["amazon-tunnel", "core-rush", "star-fortress"]) {
+for (const mapPreset of ["amazon-tunnel", "core-rush", "star-fortress", "twin-gates", "broken-halo", "resource-islands"]) {
   assert.equal(parseClientMessage(JSON.stringify({
     type: "set_settings", settings: { ...lobby.settings, mapPreset },
   }))?.type, "set_settings", `${mapPreset} should pass lobby validation`);
+  assert.equal(parseServerMessage(JSON.stringify({
+    type: "lobby", lobby: { ...lobby, settings: { ...lobby.settings, mapPreset } },
+  }))?.type, "lobby", `${mapPreset} should pass server lobby validation`);
 }
+assert.equal(parseClientMessage(JSON.stringify({
+  type: "set_settings", settings: { ...lobby.settings, mapPreset: "unknown-map" },
+})), null, "unknown map presets must fail validation");
 assert.equal(parseClientMessage(JSON.stringify({
   type: "set_settings",
   settings: { ...lobby.settings, mapSize: "planet-sized" },

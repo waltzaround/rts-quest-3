@@ -18,6 +18,7 @@ export {
   WEAPONS,
 } from "./data";
 export { calculateChecksum } from "./checksum";
+export { createMapVariantLayout, type MapVariantLayout } from "./map-layouts";
 export { LockstepInputs, type LockstepPlayerTransition } from "./lockstep-inputs";
 export {
   REPLAY_FORMAT,

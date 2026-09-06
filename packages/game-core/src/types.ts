@@ -214,6 +214,11 @@ export interface TurretState {
   targetEntityId: EntityId | null;
   cooldownRemaining: number;
   fireSequence: number;
+  /**
+   * Tick before which a turret whose last scan found nothing skips further scans.
+   * Idle rescans dominate simulation cost in large battles otherwise.
+   */
+  idleRetargetTick?: number;
 }
 
 export type NavigationOrderType = "move" | "attackMove" | "patrol" | "hold";
@@ -240,7 +245,7 @@ export type FleetCommand =
       destination: Vec2;
       formationEnd?: Vec2;
     })
-  | (FleetCommandBase & { type: "stop" | "hold" })
+  | (FleetCommandBase & { type: "stop" | "hold" | "selfDestruct" })
   | (FleetCommandBase & { type: "focusFire"; targetEntityId: EntityId });
 
 interface EconomyCommandBase {
@@ -436,7 +441,7 @@ export type SimulationEvent =
 export interface SimulationState {
   version: 11;
   seed: number;
-  mapPreset?: "orbital-ring" | "crossfire" | "open-expanse" | "asteroid-belt" | "spiral-arms" | "shattered-core" | "amazon-tunnel" | "core-rush" | "star-fortress";
+  mapPreset?: "orbital-ring" | "crossfire" | "open-expanse" | "asteroid-belt" | "spiral-arms" | "shattered-core" | "amazon-tunnel" | "core-rush" | "star-fortress" | "twin-gates" | "broken-halo" | "resource-islands";
   tick: number;
   nextEntityId: number;
   nextTurretId: number;
