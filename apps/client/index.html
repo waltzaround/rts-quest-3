@@ -902,19 +902,12 @@
                     ><small>Find a game or host your own.</small></span
                   ><span class="menu-arrow" aria-hidden="true">↗</span>
                 </button>
-                <button id="open-stress" class="start-secondary" type="button">
-                  <span class="menu-number">03</span
-                  ><span
-                    ><b>STRESS TEST</b
-                    ><small>Put your system to the test.</small></span
-                  ><span class="menu-arrow" aria-hidden="true">↗</span>
-                </button>
                 <button
                   id="open-settings"
                   class="start-secondary"
                   type="button"
                 >
-                  <span class="menu-number">04</span
+                  <span class="menu-number">03</span
                   ><span
                     ><b>SETTINGS</b><small>Make yourself at home.</small></span
                   ><span class="menu-arrow" aria-hidden="true">↗</span>
@@ -925,13 +918,10 @@
                 ><span>EARLY ACCESS · v0.122</span>
               </div>
             </div>
-            <div class="start-battle-status">
-              <i></i
-              ><span
-                ><small>LIVE BATTLE</small
-                ><b>AUTONOMOUS FLEETS ENGAGED</b></span
-              >
-            </div>
+            <nav class="start-utility-tags" aria-label="Simulation tools">
+              <button id="open-stress" type="button">STRESS TEST</button>
+              <button id="open-mock-battle" type="button">VIEW MOCK BATTLE</button>
+            </nav>
           </div>
 
           <div id="network-join-view" class="hidden">
@@ -1463,6 +1453,37 @@
         <p id="victory-copy">All hostile command cores neutralized.</p>
         <button id="play-again">RESTART ENGAGEMENT <kbd>R</kbd></button>
       </div>
+      <aside id="mock-battle-panel" class="mock-battle-panel hidden" aria-label="Mock battle debug controls">
+        <header>
+          <small>DEBUG SANDBOX</small>
+          <strong>MOCK BATTLE</strong>
+        </header>
+        <p>Add or remove ships, swap factions, or reset the autonomous 1v1.</p>
+        <div class="mock-battle-side">
+          <label>INTERCEPTOR WING
+            <select id="mock-faction-aster" aria-label="Interceptor wing faction"></select>
+          </label>
+          <div class="mock-battle-count">
+            <button type="button" data-mock-delta="aster:-4" aria-label="Remove interceptor ships">−</button>
+            <strong id="mock-count-aster">0</strong>
+            <button type="button" data-mock-delta="aster:+4" aria-label="Add interceptor ships">+</button>
+          </div>
+        </div>
+        <div class="mock-battle-side">
+          <label>STRIKE GROUP
+            <select id="mock-faction-crimson" aria-label="Strike group faction"></select>
+          </label>
+          <div class="mock-battle-count">
+            <button type="button" data-mock-delta="crimson:-4" aria-label="Remove strike group ships">−</button>
+            <strong id="mock-count-crimson">0</strong>
+            <button type="button" data-mock-delta="crimson:+4" aria-label="Add strike group ships">+</button>
+          </div>
+        </div>
+        <div class="mock-battle-actions">
+          <button id="mock-battle-reset" type="button">RESET</button>
+          <button id="mock-battle-back" type="button">MAIN MENU</button>
+        </div>
+      </aside>
       <div id="toast" role="status">SIMULATION RUNNING</div>
     </div>
     <script type="module" src="/src/main.ts"></script>

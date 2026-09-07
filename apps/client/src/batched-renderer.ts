@@ -557,7 +557,8 @@ export class BatchedShipRenderer {
           if (classId === 0) {
             fighterMemberMatrix(this.memberMatrix, state.shipIds[index]!, member, visualTick,
               centerX, centerY, centerZ, state.shipYaw[index]!, state.shipBank[index]!,
-              state.shipSpeed[index]!, state.shipEngagement[index]!, state.shipPitch[index]!);
+              state.shipSpeed[index]!, state.shipEngagement[index]!, state.shipPitch[index]!, faction,
+              state.shipTurnVelocity[index]!, state.shipFormationYaw[index]!);
             this.memberMatrix.toArray(this.fighterMatrices, (index * FIGHTER_SQUAD_OFFSETS.length + member) * 16);
             if (state.shipSpeed[index]! > 10) {
               this.fighterWakes.write(state.shipIds[index]!, member, this.memberMatrix, this.color,
@@ -595,7 +596,8 @@ export class BatchedShipRenderer {
           for (let member = 0; member < fighterMemberCount(health); member += 1) {
             fighterMemberMatrix(this.memberMatrix, state.shipIds[index]!, member, visualTick,
               this.position.x, this.position.y, this.position.z, state.shipYaw[index]!, state.shipBank[index]!,
-              state.shipSpeed[index]!, state.shipEngagement[index]!, state.shipPitch[index]!);
+              state.shipSpeed[index]!, state.shipEngagement[index]!, state.shipPitch[index]!, faction,
+              state.shipTurnVelocity[index]!, state.shipFormationYaw[index]!);
             this.memberMatrix.toArray(this.fighterMatrices, (index * FIGHTER_SQUAD_OFFSETS.length + member) * 16);
             this.writeInstance(batch, this.memberMatrix, this.color);
           }

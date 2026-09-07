@@ -371,7 +371,8 @@ function updateFighters(now: number): void {
   const count = fighterMemberCount(Number(previewHealth.value) / 100);
   fighterPreviews.forEach((craft, member) => {
     craft.visible = member < count;
-    fighterMemberMatrix(craft.matrix, 1, member, now * 0.02, 0, 0, 0, 0, Math.sin(now * 0.0007) * 0.25);
+    fighterMemberMatrix(craft.matrix, 1, member, now * 0.02, 0, 0, 0, 0,
+      Math.sin(now * 0.0007) * 0.25, 60, fighterFire.checked ? 1 : 0, 0, faction);
   });
   if (fighterFire.checked && now - lastFighterShot > 150 && lodMode !== "far") {
     scene.updateMatrixWorld(true);

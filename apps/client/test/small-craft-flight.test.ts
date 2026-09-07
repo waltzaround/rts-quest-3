@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
-import { createCombatScenario, type ShipState } from "@space-rts/game-core";
+import { FACTION_IDS, createCombatScenario, type ShipState } from "@space-rts/game-core";
 import { SmallCraftFlight } from "../src/small-craft-flight";
 import { fighterMemberMatrix } from "../src/fighter-visuals";
 import { FighterWakes } from "../src/fighter-wakes";
@@ -57,16 +57,106 @@ describe("render-only small-craft flight", () => {
     field.endFrame();
   });
 
-  it("points each craft along its continuous flight path at every phase", () => {
+  it("points every faction's craft along its own path through straight flight and tight turns", () => {
     const current = new THREE.Matrix4(), next = new THREE.Matrix4();
-    const nose = new THREE.Vector3(), velocity = new THREE.Vector3();
+    const nose = new THREE.Vector3(), velocity = new THREE.Vector3(), origin = new THREE.Vector3();
     const dt = 1 / 1_000;
-    for (let member = 0; member < 5; member++) for (let t = 0; t < 12; t += 0.3) {
-      fighterMemberMatrix(current, 41, member, t * 20, 0, 0, t * 72, 0, 0, 72, 1);
-      fighterMemberMatrix(next, 41, member, (t + dt) * 20, 0, 0, (t + dt) * 72, 0, 0, 72, 1);
-      nose.setFromMatrixColumn(current, 2).normalize();
-      velocity.setFromMatrixPosition(next).sub(new THREE.Vector3().setFromMatrixPosition(current)).normalize();
-      expect(nose.dot(velocity)).toBeGreaterThan(0.999);
+    for (const faction of FACTION_IDS) for (const turn of [0, -1.4, 2.6]) {
+      const sample = (matrix: THREE.Matrix4, member: number, t: number) => fighterMemberMatrix(matrix,
+        41, member, t * 20, turn ? 72 / turn * (1 - Math.cos(t * turn)) : 0, 0,
+        turn ? 72 / turn * Math.sin(t * turn) : t * 72, t * turn, -turn * 0.22, 72, 1, 0, faction, turn);
+      for (let member = 0; member < 5; member++) for (let t = 0; t < 12; t += 0.3) {
+        sample(current, member, t);
+        sample(next, member, t + dt);
+        nose.setFromMatrixColumn(current, 2).normalize();
+        velocity.setFromMatrixPosition(next).sub(origin.setFromMatrixPosition(current)).normalize();
+        expect(nose.dot(velocity), `${faction}, craft ${member}, turn ${turn}, time ${t}`).toBeGreaterThan(0.999);
+      }
+    }
+  });
+
+  it("breaks up shared turn axes with climbing and diving wingmen and distinct faction movement", () => {
+    const matrix = new THREE.Matrix4(), attitude = new THREE.Euler(0, 0, 0, "YXZ");
+    const motion = new Map<string, { pitch: number; roll: number }>();
+    for (const faction of FACTION_IDS) {
+      let variedFrames = 0, pitch = 0, roll = 0;
+      for (let frame = 0; frame < 180; frame++) {
+        let climbing = false, diving = false;
+        for (let member = 0; member < 5; member++) {
+          fighterMemberMatrix(matrix, 41, member, frame / 3, 0, 0, 0, 0, -0.3, 72, 1, 0, faction, 1.4);
+          attitude.setFromRotationMatrix(matrix, "YXZ");
+          climbing ||= attitude.x < -0.03;
+          diving ||= attitude.x > 0.03;
+          pitch += Math.abs(attitude.x);
+          roll += Math.abs(attitude.z);
+          expect(Math.abs(matrix.elements[13]!)).toBeLessThan(38);
+        }
+        if (climbing && diving) variedFrames++;
+      }
+      expect(variedFrames, faction).toBeGreaterThan(120);
+      motion.set(faction, { pitch, roll });
+    }
+    expect(motion.get("brood")!.pitch).toBeGreaterThan(motion.get("industrial")!.pitch * 1.3);
+    expect(motion.get("industrial")!.roll).toBeGreaterThan(motion.get("concord")!.roll * 1.3);
+  });
+
+  it("keeps stopped formations still and samples the same pose after pause or seek", () => {
+    const first = new THREE.Matrix4(), later = new THREE.Matrix4();
+    for (const faction of FACTION_IDS) for (let member = 0; member < 5; member++) {
+      fighterMemberMatrix(first, 41, member, 20, 0, 0, 0, 0, 0, 0, 1, 0, faction);
+      fighterMemberMatrix(later, 41, member, 200, 0, 0, 0, 0, 0, 0, 1, 0, faction);
+      expect(later.elements).toEqual(first.elements);
+      fighterMemberMatrix(first, 41, member, 20, 0, 0, 0, 0, -0.3, 72, 1, 0, faction, 1.4);
+      fighterMemberMatrix(later, 41, member, 200, 0, 0, 0, 0, -0.3, 72, 1, 0, faction, 1.4);
+      fighterMemberMatrix(later, 41, member, 20, 0, 0, 0, 0, -0.3, 72, 1, 0, faction, 1.4);
+      expect(later.elements).toEqual(first.elements);
+    }
+  });
+
+  it("lets wingmen leave their assigned side in combat while retaining cruising formation", () => {
+    const matrix = new THREE.Matrix4();
+    for (const faction of FACTION_IDS) {
+      let crossedCenter = false;
+      for (let frame = 0; frame < 720; frame++) {
+        fighterMemberMatrix(matrix, 41, 1, frame / 3, 0, 0, 0, 0, 0, 72, 0, 0, faction);
+        expect(matrix.elements[12]!, `${faction} cruising wingman`).toBeLessThan(0);
+        fighterMemberMatrix(matrix, 41, 1, frame / 3, 0, 0, 0, 0, 0, 72, 1, 0, faction);
+        crossedCenter ||= matrix.elements[12]! > 6;
+      }
+      expect(crossedCenter, `${faction} combat wingman`).toBe(true);
+    }
+  });
+
+  it("flies smoothly through combat steering reversals and brief braking without snapping into formation", () => {
+    const matrix = new THREE.Matrix4(), position = new THREE.Vector3(), rotation = new THREE.Quaternion();
+    for (const faction of FACTION_IDS) {
+      const ship = fighter(41), field = new SmallCraftFlight();
+      ship.faction = faction;
+      ship.focusTargetEntityId = 99;
+      const positions = Array.from({ length: 5 }, () => new THREE.Vector3());
+      const rotations = Array.from({ length: 5 }, () => new THREE.Quaternion());
+      for (let frame = 0; frame < 360; frame++) {
+        const turn = (Math.floor(frame / 30) % 2 ? -1 : 1) * 2.6;
+        const braking = frame >= 180 && frame < 186;
+        ship.yaw += turn / 60;
+        ship.vx = Math.sin(ship.yaw) * (braking ? 0 : 72);
+        ship.vz = Math.cos(ship.yaw) * (braking ? 0 : 72);
+        ship.x += ship.vx / 60; ship.z += ship.vz / 60;
+        field.beginFrame([ship]);
+        const pose = field.sample(ship, ship.x, 0, ship.z, turn, frame / 60, frame === 0);
+        for (let member = 0; member < 5; member++) {
+          fighterMemberMatrix(matrix, ship.id, member, frame / 3, ship.x, 0, ship.z, ship.yaw,
+            pose.bank, pose.speed, pose.engagement, pose.pitch, faction, pose.formationTurnVelocity, pose.formationYaw);
+          position.setFromMatrixPosition(matrix); rotation.setFromRotationMatrix(matrix);
+          if (frame > 0) {
+            expect(position.distanceTo(positions[member]!), `${faction} craft ${member} frame ${frame} position`).toBeLessThan(3);
+            expect(rotation.angleTo(rotations[member]!), `${faction} craft ${member} frame ${frame} attitude`).toBeLessThan(0.22);
+            if (frame < 180) expect(position.distanceTo(positions[member]!)).toBeGreaterThan(0.25);
+          }
+          positions[member]!.copy(position); rotations[member]!.copy(rotation);
+        }
+        field.endFrame();
+      }
     }
   });
 

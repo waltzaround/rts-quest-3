@@ -1,4 +1,5 @@
 import { SHIPS, type ShipState } from "@space-rts/game-core";
+import { wrapAngle } from "@space-rts/shared";
 
 const CELL_SIZE = 192;
 const BUCKET_COUNT = 2_048;
@@ -14,6 +15,9 @@ interface FlightPose {
   bank: number;
   pitch: number;
   engagement: number;
+  speed: number;
+  formationYaw: number;
+  formationTurnVelocity: number;
   time: number;
   frame: number;
 }
@@ -50,7 +54,7 @@ export class SmallCraftFlight {
   }
 
   sample(ship: ShipState, x: number, y: number, z: number, turnVelocity: number,
-    seconds: number, reset: boolean): Readonly<FlightPose> {
+    seconds: number, reset: boolean, yaw = ship.yaw): Readonly<FlightPose> {
     const cellX = Math.floor(x / CELL_SIZE), cellZ = Math.floor(z / CELL_SIZE);
     const bomber = ship.class === "bomber";
     // Keep a squad in the same flight lane as it crosses overlapping hulls.
@@ -91,23 +95,33 @@ export class SmallCraftFlight {
       }
     }
     const desiredBank = clamp(-turnVelocity * (bomber ? 0.11 : 0.22) + evadeBank, -0.68, 0.68);
+    const speed = Math.hypot(ship.vx, ship.vz);
     let pose = this.history.get(ship.id);
     if (!pose) {
-      pose = { altitude, bank: desiredBank, pitch: 0, engagement, time: seconds, frame: this.frame };
+      pose = { altitude, bank: desiredBank, pitch: 0, engagement, speed,
+        formationYaw: yaw, formationTurnVelocity: 0, time: seconds, frame: this.frame };
       this.history.set(ship.id, pose);
     }
     const dt = seconds - pose.time;
     if (reset || dt < 0 || dt > 0.5) {
       pose.altitude = altitude; pose.bank = desiredBank; pose.pitch = 0; pose.engagement = engagement;
+      pose.speed = speed; pose.formationYaw = yaw; pose.formationTurnVelocity = 0;
     } else if (dt > 0) {
       const response = 1 - Math.exp(-dt * 7);
       const climb = (altitude - pose.altitude) * response;
       pose.altitude += climb;
-      const speed = Math.max(35, Math.hypot(ship.vx, ship.vz));
-      const desiredPitch = clamp(-Math.atan2(climb / dt, speed), -0.34, 0.34);
+      const desiredPitch = clamp(-Math.atan2(climb / dt, Math.max(35, speed)), -0.34, 0.34);
       pose.pitch += (desiredPitch - pose.pitch) * response;
       pose.bank += (desiredBank - pose.bank) * response;
       pose.engagement += (engagement - pose.engagement) * (1 - Math.exp(-dt * 3));
+      pose.speed += (speed - pose.speed) * (1 - Math.exp(-dt * 4));
+      // The squad can reverse steering every 50 ms. Its formation must not
+      // rotate that fast: an inside wingman would stall or orbit backward.
+      // Ease the slot frame separately while noses follow actual travel.
+      const maxFormationTurn = 0.4 * Math.min(1, pose.speed / 40);
+      const desiredTurn = clamp(wrapAngle(yaw - pose.formationYaw) * 4, -maxFormationTurn, maxFormationTurn);
+      pose.formationTurnVelocity += (desiredTurn - pose.formationTurnVelocity) * response;
+      pose.formationYaw = wrapAngle(pose.formationYaw + pose.formationTurnVelocity * dt);
     }
     pose.time = seconds; pose.frame = this.frame;
     return pose;

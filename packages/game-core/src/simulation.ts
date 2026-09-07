@@ -220,10 +220,52 @@ export class GameSimulation {
 
   /** The local title-screen battle uses an arena director instead of the
    * economy/staging/recovery decisions used by competitive AI commanders. */
-  stepMenuBattle(): DebugSnapshot {
-    this.maintainMenuBattleReinforcements();
+  stepMenuBattle(capPerPlayer = 28): DebugSnapshot {
+    this.maintainMenuBattleReinforcements(capPerPlayer);
     if (this.state.tick % 20 === 0) this.directMenuBattle();
     return this.advanceTick(false);
+  }
+
+  /** Debug sandbox helper: inject or cull ships for one commander. */
+  adjustMockBattleFleet(playerId: PlayerId, delta: number, capPerPlayer = 160): number {
+    const player = this.state.players.find((candidate) => candidate.id === playerId);
+    if (!player || delta === 0) return 0;
+    if (delta > 0) {
+      const owned = this.state.ships.filter((ship) => ship.ownerPlayerId === playerId && ship.health > 0).length;
+      const spawnCount = Math.min(delta, Math.max(0, capPerPlayer - owned));
+      if (spawnCount === 0) return 0;
+      const core = this.state.structures.find(
+        (structure) => structure.ownerPlayerId === playerId && structure.type === "commandCore",
+      );
+      const radialLength = Math.hypot(core?.x ?? 0, core?.z ?? 0) || 1;
+      const outwardX = (core?.x ?? 0) / radialLength;
+      const outwardZ = (core?.z ?? 0) / radialLength;
+      const yaw = Math.atan2(-outwardX, -outwardZ);
+      const roster: readonly ShipClass[] = [
+        "fighter", "fighter", "fighter", "bomber", "fighter", "frigate", "destroyer",
+      ];
+      for (let index = 0; index < spawnCount; index += 1) {
+        const shipClass = menuBattleShipClass(roster[(owned + index) % roster.length]!, player.faction);
+        const yardType: ShipyardType = shipClass === "cruiser" || shipClass === "destroyer"
+          ? "fleetShipyard"
+          : shipClass === "battleship" ? "capitalShipyard" : "shipyard";
+        const ship = this.spawnShip(
+          player, shipClass, outwardX * 620 + (index - (spawnCount - 1) / 2) * 36, outwardZ * 620, yaw, yardType,
+        );
+        ship.orders = [{
+          type: "attackMove",
+          destination: projectNavigableDestination(this.state, ship, { x: 0, z: 0 }),
+          facing: yaw,
+        }];
+      }
+      return spawnCount;
+    }
+    const doomed = this.state.ships
+      .filter((ship) => ship.ownerPlayerId === playerId && ship.health > 0)
+      .sort((left, right) => mockBattleCullRank(left.class) - mockBattleCullRank(right.class) || left.id - right.id)
+      .slice(0, Math.min(-delta, this.state.ships.length));
+    for (const ship of doomed) ship.health = 0;
+    return doomed.length;
   }
 
   private directMenuBattle(): void {
@@ -3041,6 +3083,15 @@ export function createShowcaseScenario(): GameSimulation {
       { id: "showcase-ember", name: "Ember Legion", teamId: 2, color: 0xff8b55, ai: true },
     ],
   });
+}
+
+function mockBattleCullRank(shipClass: ShipClass): number {
+  const ranks: Partial<Record<ShipClass, number>> = {
+    fighter: 0, bomber: 1, fabricator: 2, frigate: 3, flakFrigate: 4, torpedoFrigate: 5,
+    artilleryFrigate: 6, destroyer: 7, artilleryDestroyer: 8, cruiser: 9, artilleryCruiser: 10,
+    carrier: 11, battleship: 12,
+  };
+  return ranks[shipClass] ?? 6;
 }
 
 function menuBattleShipClass(shipClass: ShipClass, faction: FactionId): ShipClass {

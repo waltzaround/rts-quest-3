@@ -123,6 +123,8 @@ export class InterpolatedRenderState {
   readonly shipColor = new Uint32Array(MAX_RENDER_SHIPS);
   readonly shipPosition = new Float32Array(MAX_RENDER_SHIPS * 3);
   readonly shipYaw = new Float32Array(MAX_RENDER_SHIPS);
+  readonly shipTurnVelocity = new Float32Array(MAX_RENDER_SHIPS);
+  readonly shipFormationYaw = new Float32Array(MAX_RENDER_SHIPS);
   readonly shipBank = new Float32Array(MAX_RENDER_SHIPS);
   readonly shipPitch = new Float32Array(MAX_RENDER_SHIPS);
   readonly shipSpeed = new Float32Array(MAX_RENDER_SHIPS);
@@ -245,12 +247,13 @@ export class RenderStateBuilder {
       const z = THREE.MathUtils.lerp(previous?.z ?? ship.z, ship.z, alpha);
       const baseY = THREE.MathUtils.lerp(previous?.y ?? ship.y, ship.y, alpha);
       const turnVelocity = previous ? wrapAngle(ship.yaw - previous.yaw) / FIXED_DT : 0;
+      const interpolatedYaw = previous ? previous.yaw + wrapAngle(ship.yaw - previous.yaw) * alpha : ship.yaw;
       // Reject off-screen squadrons before proximity queries and animation.
       this.projected.set(x, baseY, z).project(camera);
       if (Math.abs(this.projected.x) > 1.4 || Math.abs(this.projected.y) > 1.4) continue;
       const flight = !forceTactical && (ship.class === "fighter" || ship.class === "bomber")
         ? this.smallCraftFlight.sample(ship, x, baseY, z, turnVelocity,
-          visualTick * FIXED_DT, newlyVisible) : undefined;
+          visualTick * FIXED_DT, newlyVisible, interpolatedYaw) : undefined;
       const y = baseY + (flight?.altitude ?? 0);
       this.projected.set(x, y, z).project(camera);
       if (this.projected.z < -1.15 || this.projected.z > 1.15 || Math.abs(this.projected.x) > 1.25 || Math.abs(this.projected.y) > 1.25) {
@@ -259,7 +262,6 @@ export class RenderStateBuilder {
       const lod = forceTactical ? VisualLod.Tactical : this.lodByClass.get(ship.class)!;
       const index = this.state.shipCount++;
       const positionIndex = index * 3;
-      const interpolatedYaw = previous ? previous.yaw + wrapAngle(ship.yaw - previous.yaw) * alpha : ship.yaw;
       const speedRatio = Math.min(1.35, Math.hypot(ship.vx, ship.vz) / Math.max(1, getFactionShipDefinition(ship.class, ship.faction).speed));
       this.state.shipIds[index] = ship.id;
       this.state.shipClass[index] = CLASS_TO_ID[ship.class];
@@ -269,9 +271,11 @@ export class RenderStateBuilder {
       this.state.shipPosition[positionIndex + 1] = y;
       this.state.shipPosition[positionIndex + 2] = z;
       this.state.shipYaw[index] = interpolatedYaw;
+      this.state.shipTurnVelocity[index] = flight?.formationTurnVelocity ?? 0;
+      this.state.shipFormationYaw[index] = flight?.formationYaw ?? interpolatedYaw;
       this.state.shipBank[index] = flight?.bank ?? THREE.MathUtils.clamp(-turnVelocity * 0.025, -0.14, 0.14);
       this.state.shipPitch[index] = flight?.pitch ?? 0;
-      this.state.shipSpeed[index] = Math.hypot(ship.vx, ship.vz);
+      this.state.shipSpeed[index] = flight?.speed ?? Math.hypot(ship.vx, ship.vz);
       this.state.shipEngagement[index] = flight?.engagement ?? 0;
       this.state.shipHealth[index] = Math.max(0, ship.health / getFactionShipDefinition(ship.class, ship.faction).maxHealth);
       this.state.shipShield[index] = getFactionShipDefinition(ship.class, ship.faction).maxShield > 0 ? Math.max(0, ship.shields / getFactionShipDefinition(ship.class, ship.faction).maxShield) : 0;

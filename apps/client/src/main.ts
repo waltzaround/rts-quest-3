@@ -858,6 +858,9 @@ let networkLobby: LobbyState | null = null;
 const singleplayerLobby = createSingleplayerLobby();
 let singleplayerSetupActive = false;
 let stressTestMode = false;
+let mockBattleMode = false;
+let mockBattleFactions: [FactionId, FactionId] = ["industrial", "industrial"];
+let mockBattleCap = 28;
 let lobbyBrowserTimer = 0;
 let lobbyBrowserRequest: AbortController | null = null;
 let joinableGames: LobbyListEntry[] = [];
@@ -2432,6 +2435,8 @@ function connectToMatch(matchId: string, pilotName: string, role: RequestedNetwo
   stopLobbyBrowser();
   singleplayerSetupActive = false;
   stressTestMode = false;
+  mockBattleMode = false;
+  hideMockBattlePanel();
   hideMenuPages();
   element("network-lobby-view").classList.remove("singleplayer-lobby");
   element("lobby-title").textContent = "MULTIPLAYER LOBBY";
@@ -3315,6 +3320,8 @@ function showStartScreen(resetBattle = false): void {
   stopLobbyBrowser();
   singleplayerSetupActive = false;
   stressTestMode = false;
+  mockBattleMode = false;
+  hideMockBattlePanel();
   hideMenuPages();
   networkPanelOpenedFromGame = false;
   networkMode = false;
@@ -3464,6 +3471,8 @@ function startLocalSkirmish(): void {
   requestedNetworkRole = "player";
   demoMode = false;
   menuBattleMode = false;
+  mockBattleMode = false;
+  hideMockBattlePanel();
   setClientViewMode("player");
   landingLobbyActive = false;
   networkPanelOpenedFromGame = false;
@@ -3480,9 +3489,36 @@ function startLocalSkirmish(): void {
   setConnectionState("MULTIPLAYER", "OPEN LOBBY", "online");
 }
 
+function startMockBattle(): void {
+  matchStart.cancel();
+  mockBattleMode = true;
+  stressTestMode = false;
+  singleplayerSetupActive = false;
+  resetReplaySession();
+  demoMode = true;
+  menuBattleMode = true;
+  landingLobbyActive = false;
+  networkPanelOpenedFromGame = false;
+  mockBattleCap = 28;
+  element("network-overlay").classList.remove("start-screen-active", "visible");
+  element("app").classList.remove("start-screen-active");
+  setClientViewMode("player");
+  if (paused) {
+    paused = false;
+    element("pause").classList.remove("active");
+  }
+  resetSimulation();
+  lastTime = performance.now();
+  accumulator = 0;
+  showMockBattlePanel();
+  setConnectionState("MOCK BATTLE", "DEBUG SANDBOX", "online");
+}
+
 function startStressTest(): void {
   matchStart.cancel();
   stressTestMode = true;
+  mockBattleMode = false;
+  hideMockBattlePanel();
   singleplayerSetupActive = false;
   resetReplaySession();
   demoMode = true;
@@ -4488,7 +4524,7 @@ function tickSimulation(): void {
   previousTransforms.clear();
   for (const ship of before.ships) previousTransforms.set(ship.id, captureTransform(ship));
   lastDebug = networkMode && !networkView ? lockstepInputs.step()
-    : menuBattleMode ? simulation.stepMenuBattle() : simulation.step();
+    : menuBattleMode ? simulation.stepMenuBattle(mockBattleMode ? mockBattleCap : 28) : simulation.step();
   if (networkMode && !networkView && simulation.state.tick > 0
     && simulation.state.tick % 20 === 0 && simulation.state.tick !== lastLockstepSyncReportTick) {
     lastLockstepSyncReportTick = simulation.state.tick;
@@ -4855,6 +4891,7 @@ function updateHud(): void {
   updateProgressionControls();
   updateSelectionHud();
   drawMinimap();
+  if (mockBattleMode) refreshMockBattlePanel();
 }
 
 let minimapExtentCacheTick = -1;
@@ -5277,11 +5314,13 @@ function updateSelectionHud(): void {
 
   if (!canIssuePlayerCommands()) {
     eyebrow.textContent = demoMode
-      ? "AUTONOMOUS BATTLE"
+      ? mockBattleMode ? "MOCK BATTLE" : "AUTONOMOUS BATTLE"
       : clientViewMode === "team-spectator" ? "TEAM SENSOR FEED" : "MATCH REVIEW";
     title.textContent = "VIEW ONLY";
     summary.textContent = demoMode
-      ? `${clientView.ships.length} live ships · factories replenish both alliances`
+      ? mockBattleMode
+        ? `${clientView.ships.length} live ships · use the debug panel to restock or swap factions`
+        : `${clientView.ships.length} live ships · factories replenish both alliances`
       : clientViewMode === "team-spectator"
       ? `Team ${spectatorTeamId ?? "?"} intelligence · fog of war active`
       : "Post-match omniscient replay";
@@ -5289,12 +5328,16 @@ function updateSelectionHud(): void {
     bars.innerHTML = "";
     empty.classList.remove("hidden");
     empty.innerHTML = demoMode
-      ? "<span>✦</span><p>AI FACTORIES ONLINE<br />CAMERA + MINIMAP AVAILABLE</p>"
+      ? mockBattleMode
+        ? "<span>✦</span><p>DEBUG SANDBOX<br />ADD SHIPS · SWAP RACES · RESET</p>"
+        : "<span>✦</span><p>AI FACTORIES ONLINE<br />CAMERA + MINIMAP AVAILABLE</p>"
       : clientViewMode === "team-spectator"
       ? "<span>◉</span><p>LIVE TEAM VIEW<br />COMMANDS DISABLED</p>"
       : "<span>▶</span><p>USE THE REPLAY TIMELINE<br />COMMANDS DISABLED</p>";
-    element("command-context-title").textContent = demoMode ? "BATTLE SHOWCASE" : "OBSERVER CONTROLS";
-    element("command-context-subtitle").textContent = demoMode
+    element("command-context-title").textContent = mockBattleMode ? "MOCK BATTLE" : demoMode ? "BATTLE SHOWCASE" : "OBSERVER CONTROLS";
+    element("command-context-subtitle").textContent = mockBattleMode
+      ? "DEBUG CONTROLS · 160 SHIP CAP"
+      : demoMode
       ? "PRODUCTION GOVERNOR · 420 SHIP CAP"
       : "CAMERA + MINIMAP AVAILABLE";
     return;
@@ -6494,7 +6537,7 @@ function resetSimulation(): void {
     return;
   }
   simulation = menuBattleMode
-    ? createMenuBattleScenario([
+    ? createMenuBattleScenario(mockBattleMode ? mockBattleFactions : [
       FACTION_IDS[Math.floor(Math.random() * FACTION_IDS.length)]!,
       FACTION_IDS[Math.floor(Math.random() * FACTION_IDS.length)]!,
     ])
@@ -6517,7 +6560,8 @@ function resetSimulation(): void {
   hideFormationPreview();
   element("victory-overlay").classList.remove("visible", "defeat");
   element("directive").textContent = demoMode
-    ? menuBattleMode ? "LOCAL 1V1 // AUTONOMOUS FLEETS ENGAGED" : "AUTONOMOUS WAR ECONOMY // FACTORIES ONLINE"
+    ? mockBattleMode ? "MOCK BATTLE // DEBUG CONTROLS LIVE"
+      : menuBattleMode ? "LOCAL 1V1 // AUTONOMOUS FLEETS ENGAGED" : "AUTONOMOUS WAR ECONOMY // FACTORIES ONLINE"
     : "SELECT FLEET // ENGAGE HOSTILE FORCES";
   previousTransforms.clear();
   for (const ship of simulation.state.ships) previousTransforms.set(ship.id, captureTransform(ship));
@@ -6527,13 +6571,19 @@ function resetSimulation(): void {
   cameraRig.azimuth = demoMode ? 0.18 : 0;
   if (!menuBattleMode && !demoMode) focusCameraOnLocalBase();
   eventLines = [demoMode
-    ? menuBattleMode
+    ? mockBattleMode
+      ? "<b>MOCK</b> fighter-heavy 1v1 // add ships, swap races, reset"
+      : menuBattleMode
       ? "<b>SIM</b> fighter-heavy local 1v1 // autonomous engagement"
       : "<b>SHOWCASE</b> 284 combat vessels // 16 autonomous shipyards"
     : `<b>SYS</b> new ${simulation.state.obstacles.length}-hazard seeded battlefield generated`];
   updateSelectionHud();
   if (stressTestMode) configureVisualStress(Number(element<HTMLSelectElement>("menu-stress-count").value));
-  else showToast(demoMode ? menuBattleMode ? "LOCAL 1V1 RESTARTED" : "SHOWCASE RESTARTED" : "NEW BATTLEFIELD GENERATED");
+  else showToast(demoMode
+    ? mockBattleMode ? "MOCK BATTLE RESTARTED"
+      : menuBattleMode ? "LOCAL 1V1 RESTARTED" : "SHOWCASE RESTARTED"
+    : "NEW BATTLEFIELD GENERATED");
+  if (mockBattleMode) refreshMockBattlePanel();
   if (!demoMode) {
     paused = false;
     element("pause").classList.remove("active");
@@ -7194,11 +7244,82 @@ element("network-close").addEventListener("click", () => {
     element("network-overlay").classList.remove("visible");
   } else showStartScreen();
 });
+function showMockBattlePanel(): void {
+  element("mock-battle-panel").classList.remove("hidden");
+  refreshMockBattlePanel(true);
+}
+
+function hideMockBattlePanel(): void {
+  element("mock-battle-panel").classList.add("hidden");
+}
+
+function mockBattlePlayerId(side: "aster" | "crimson"): string {
+  return side === "aster" ? "menu-aster" : "menu-crimson";
+}
+
+function refreshMockBattlePanel(syncFactions = false): void {
+  const liveCount = (playerId: string) => simulation.state.ships
+    .filter((ship) => ship.ownerPlayerId === playerId && ship.health > 0).length;
+  element("mock-count-aster").textContent = String(liveCount("menu-aster"));
+  element("mock-count-crimson").textContent = String(liveCount("menu-crimson"));
+  if (!syncFactions) return;
+  for (const [id, faction] of [["mock-faction-aster", mockBattleFactions[0]], ["mock-faction-crimson", mockBattleFactions[1]]] as const) {
+    const select = element<HTMLSelectElement>(id);
+    if (select.options.length === 0) {
+      for (const factionId of FACTION_IDS) {
+        const option = document.createElement("option");
+        option.value = factionId;
+        option.textContent = FACTIONS[factionId].name.toUpperCase();
+        select.append(option);
+      }
+    }
+    select.value = faction;
+  }
+}
+
+function adjustMockBattleSide(side: "aster" | "crimson", delta: number): void {
+  if (!mockBattleMode) return;
+  const changed = simulation.adjustMockBattleFleet(mockBattlePlayerId(side), delta, 160);
+  if (changed === 0) {
+    showToast(delta > 0 ? "FLEET CAP REACHED" : "NO SHIPS LEFT TO REMOVE");
+    return;
+  }
+  mockBattleCap = Math.max(
+    simulation.state.ships.filter((ship) => ship.ownerPlayerId === "menu-aster" && ship.health > 0).length,
+    simulation.state.ships.filter((ship) => ship.ownerPlayerId === "menu-crimson" && ship.health > 0).length,
+  );
+  lastDebug = simulation.debugSnapshot();
+  installClientView(buildClientVisibilityView(), false);
+  refreshMockBattlePanel();
+  showToast(delta > 0 ? `SPAWNED ${changed} SHIPS` : `CULLED ${changed} SHIPS`);
+}
+
 element("open-multiplayer").addEventListener("click", () => showMultiplayerJoinScreen());
 element("play-local").addEventListener("click", showSingleplayerSetup);
+element("open-mock-battle").addEventListener("click", startMockBattle);
 element("open-stress").addEventListener("click", () => showMenuPage("stress-test-view"));
 element("open-settings").addEventListener("click", () => { showMenuPage("settings-view"); updateAudioToggle(); updateGameMenuOptions(); });
 element("start-stress").addEventListener("click", startStressTest);
+element("mock-battle-reset").addEventListener("click", () => {
+  if (!mockBattleMode) return;
+  mockBattleCap = 28;
+  resetSimulation();
+});
+element("mock-battle-back").addEventListener("click", () => showStartScreen(true));
+element("mock-battle-panel").addEventListener("click", (event) => {
+  const delta = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-mock-delta]")?.dataset.mockDelta;
+  if (!delta) return;
+  const [side, amount] = delta.split(":");
+  if ((side === "aster" || side === "crimson") && amount) adjustMockBattleSide(side, Number(amount));
+});
+element<HTMLSelectElement>("mock-faction-aster").addEventListener("change", (event) => {
+  mockBattleFactions[0] = (event.currentTarget as HTMLSelectElement).value as FactionId;
+  if (mockBattleMode) { mockBattleCap = 28; resetSimulation(); }
+});
+element<HTMLSelectElement>("mock-faction-crimson").addEventListener("change", (event) => {
+  mockBattleFactions[1] = (event.currentTarget as HTMLSelectElement).value as FactionId;
+  if (mockBattleMode) { mockBattleCap = 28; resetSimulation(); }
+});
 element("settings-audio").addEventListener("click", () => element<HTMLButtonElement>("audio-toggle").click());
 element("settings-fullscreen").addEventListener("click", () => { void toggleFullscreen(); });
 element("refresh-games").addEventListener("click", () => { void refreshJoinableGames(); });

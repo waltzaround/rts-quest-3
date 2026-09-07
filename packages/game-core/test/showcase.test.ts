@@ -158,4 +158,16 @@ describe("title-screen battle scenario", () => {
       return Math.hypot(ship.x - start.x, ship.z - start.z) > 30;
     })).toBe(true);
   });
+
+  it("lets the mock-battle sandbox add and cull ships for one commander", () => {
+    const simulation = createMenuBattleScenario(["industrial", "brood"]);
+    const before = simulation.state.ships.filter((ship) => ship.ownerPlayerId === "menu-aster" && ship.health > 0).length;
+    expect(simulation.adjustMockBattleFleet("menu-aster", 6)).toBe(6);
+    expect(simulation.state.ships.filter((ship) => ship.ownerPlayerId === "menu-aster" && ship.health > 0).length)
+      .toBe(before + 6);
+    expect(simulation.adjustMockBattleFleet("menu-aster", -4)).toBe(4);
+    expect(simulation.state.ships.filter((ship) => ship.ownerPlayerId === "menu-aster" && ship.health > 0).length)
+      .toBe(before + 2);
+    expect(simulation.adjustMockBattleFleet("unknown-commander", 3)).toBe(0);
+  });
 });

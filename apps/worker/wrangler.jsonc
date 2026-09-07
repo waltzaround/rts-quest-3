@@ -13,15 +13,13 @@
       { "name": "LOBBY_DIRECTORY", "class_name": "LobbyDirectory" }
     ]
   },
-  // This list must mirror the migration history production has already recorded
-  // (currently at v3); only tags after that are applied on deploy.
+  // Append-only. Production has already applied v1–v4; only newer tags run on
+  // deploy. Fresh local `wrangler dev` replays the whole list, so v2 must create
+  // LobbyDirectory or v3's delete fails ("non-existent class").
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["Match"] },
-    // Checkpoint from a since-reverted deploy that first added LobbyDirectory.
-    { "tag": "v2" },
-    // Dropped the orphaned first LobbyDirectory class after the code revert.
+    { "tag": "v2", "new_sqlite_classes": ["LobbyDirectory"] },
     { "tag": "v3", "deleted_classes": ["LobbyDirectory"] },
-    // LobbyDirectory re-added for real.
     { "tag": "v4", "new_sqlite_classes": ["LobbyDirectory"] }
   ],
   "observability": { "enabled": true }

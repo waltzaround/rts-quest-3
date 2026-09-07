@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
-import { WEAPONS, createCombatScenario, getTurretMuzzleWorldPosition, type ProjectileState } from "@space-rts/game-core";
+import { FACTION_IDS, WEAPONS, createCombatScenario, getTurretMuzzleWorldPosition, type ProjectileState } from "@space-rts/game-core";
 import { BatchedShipRenderer, createThrusterTrailGeometry } from "../src/batched-renderer";
 import { ProjectileVfx } from "../src/combat-visuals";
 import { FIGHTER_GUN_HEIGHT, FIGHTER_GUN_Z, fighterMemberCount, inferFighterFiringMember } from "../src/fighter-visuals";
@@ -15,14 +15,16 @@ camera.position.set(0, 100, 150);
 camera.lookAt(0, 0, 0);
 camera.updateMatrixWorld();
 const state = new InterpolatedRenderState();
-function prepare(count: number, lod: VisualLod, health = 1): void {
+function prepare(count: number, lod: VisualLod, health = 1, factionIndex = 0): void {
   state.shipCount = count;
   state.shipClass.fill(0);
+  state.shipFaction.fill(factionIndex);
   state.shipLod.fill(lod);
   state.shipHealth.fill(health);
   state.shipEngine.fill(1);
   state.shipColor.fill(0x55b8ff);
   state.shipYaw.fill(0.9);
+  state.shipTurnVelocity.fill(-1.4);
   state.shipBank.fill(0.45);
   state.shipPitch.fill(0.2);
   state.shipSpeed.fill(72);
@@ -57,17 +59,24 @@ describe("fighter squad rendering", () => {
   });
 
   it("places each muzzle on its rendered banked craft, including independently moving wingmen", () => {
-    prepare(1, VisualLod.Close);
-    const hull = batchFor(getShipHullGeometries("fighter").hull);
     const matrix = new THREE.Matrix4();
     const muzzle = new THREE.Vector3();
-    for (let member = 0; member < 5; member++) {
-      expect(renderer.getFighterMuzzle(1, member, member, muzzle)).toBe(true);
-      hull.getMatrixAt(member, matrix);
-      muzzle.applyMatrix4(matrix.invert());
-      expect(muzzle.z).toBeCloseTo(FIGHTER_GUN_Z, 4);
-      expect(muzzle.y).toBeCloseTo(FIGHTER_GUN_HEIGHT, 4);
-      expect(Math.abs(muzzle.x)).toBeLessThan(0.1);
+    for (const [factionIndex, faction] of FACTION_IDS.entries()) {
+      for (const lod of [VisualLod.Close, VisualLod.Medium, VisualLod.Far]) {
+        prepare(1, lod, 1, factionIndex);
+        const geometry = lod === VisualLod.Close ? getShipHullGeometries("fighter", faction).hull
+          : lod === VisualLod.Medium ? getShipMediumGeometry("fighter", "hull", faction)
+          : getShipSilhouetteGeometry("fighter", faction);
+        const hull = batchFor(geometry);
+        for (let member = 0; member < 5; member++) {
+          expect(renderer.getFighterMuzzle(1, member, member, muzzle)).toBe(true);
+          hull.getMatrixAt(member, matrix);
+          muzzle.applyMatrix4(matrix.invert());
+          expect(muzzle.z).toBeCloseTo(FIGHTER_GUN_Z, 4);
+          expect(muzzle.y).toBeCloseTo(FIGHTER_GUN_HEIGHT, 4);
+          expect(Math.abs(muzzle.x)).toBeLessThan(0.1);
+        }
+      }
     }
     prepare(1, VisualLod.Tactical);
     expect(renderer.getFighterMuzzle(1, 0, 0, muzzle)).toBe(false);
