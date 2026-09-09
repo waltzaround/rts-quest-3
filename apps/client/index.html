@@ -175,6 +175,7 @@
       ></canvas>
       <div id="selection-box" aria-hidden="true"></div>
       <div id="command-mode" aria-live="polite"></div>
+      <aside id="tutorial-panel" class="tutorial-panel panel-edge hidden" aria-label="Interactive tutorial"></aside>
 
       <header class="topbar panel-edge">
         <div class="resource storage-resource alloy" id="alloy-resource">
@@ -884,8 +885,15 @@
               <h1>COMMAND<br />PROMPT</h1>
               <p class="start-tagline">Massive scale RTS battles.</p>
               <nav class="start-actions" aria-label="Main menu">
-                <button id="play-local" class="start-primary" type="button">
+                <button id="play-tutorial" class="start-secondary" type="button">
                   <span class="menu-number">01</span
+                  ><span
+                    ><b>TUTORIAL</b
+                    ><small>Learn the controls, economy, and combat.</small></span
+                  ><span class="menu-arrow" aria-hidden="true">↗</span>
+                </button>
+                <button id="play-local" class="start-primary" type="button">
+                  <span class="menu-number">02</span
                   ><span
                     ><b>SINGLEPLAYER</b
                     ><small>Your fleet. Your strategy.</small></span
@@ -896,7 +904,7 @@
                   class="start-secondary"
                   type="button"
                 >
-                  <span class="menu-number">02</span
+                  <span class="menu-number">03</span
                   ><span
                     ><b>MULTIPLAYER</b
                     ><small>Find a game or host your own.</small></span
@@ -907,7 +915,7 @@
                   class="start-secondary"
                   type="button"
                 >
-                  <span class="menu-number">03</span
+                  <span class="menu-number">04</span
                   ><span
                     ><b>SETTINGS</b><small>Make yourself at home.</small></span
                   ><span class="menu-arrow" aria-hidden="true">↗</span>

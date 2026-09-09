@@ -1890,6 +1890,36 @@ input {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
+.tutorial-panel { position:fixed; z-index:8; top:94px; right:18px; display:flex; flex-direction:column; width:min(390px,calc(100vw - 36px)); max-height:calc(100dvh - 345px); overflow:hidden; padding:12px; color:#bad0dd; background:rgba(4,14,23,.97); border:1px solid #47758a; box-shadow:0 14px 40px #0007; }
+.tutorial-panel::before,.tutorial-panel::after { display:none; }
+#tutorial-content { display:flex; flex-direction:column; min-height:0; }
+#tutorial-content > :not(.tutorial-reading) { flex-shrink:0; }
+.tutorial-reading { min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; padding-right:6px; }
+.tutorial-heading,.tutorial-meta { display:flex; justify-content:space-between; align-items:center; gap:12px; font:9px "JetBrains Mono",monospace; letter-spacing:.1em; }
+.tutorial-heading { flex-shrink:0; color:#f2d58e; margin-bottom:6px; }
+.tutorial-heading button { border:0; background:transparent; color:#a4c6d6; font-size:18px; cursor:pointer; padding:0 5px; }
+.tutorial-meta { color:#7eacbf; font-size:8px; }
+.tutorial-panel progress { display:block; width:100%; height:3px; margin:6px 0 8px; accent-color:#62dcff; }
+.tutorial-panel h2 { color:#e6f6ff; font-size:21px; line-height:1.2; margin:0 0 6px; }
+.tutorial-panel p { font:11px/1.6 "JetBrains Mono",monospace; margin:0 0 10px; }
+.tutorial-panel ul { list-style:none; margin:14px 0; padding:0; display:grid; gap:7px; }
+.tutorial-panel li { padding:8px 9px; border-left:2px solid #365567; background:#0c2332; font:11px/1.5 "JetBrains Mono",monospace; color:#d0e4ec; }
+.tutorial-panel li.complete { color:#83e2b7; border-color:#67d5a5; background:#0c2827; }
+.tutorial-panel .tutorial-tip { color:#90aebd; font-size:10px; border-top:1px solid #233f4e; padding-top:12px; }
+#tutorial-status { color:#82d5dd; font-size:9px; margin:6px 0 0; }
+.tutorial-tools,.tutorial-navigation,.tutorial-finish { display:flex; gap:8px; margin-top:6px; }
+.tutorial-panel button { min-height:24px; font-family:"JetBrains Mono",monospace; }
+.tutorial-tools button,.tutorial-navigation button,.tutorial-finish button { flex:1; padding:6px; font-size:9px; border:1px solid #3b5d70; background:#0a1c28; color:#a5ccdd; cursor:pointer; }
+.tutorial-navigation #tutorial-next,.tutorial-finish #tutorial-skirmish { border-color:#619bab; color:#bcf0ff; background:#123443; }
+.tutorial-panel button:hover:not(:disabled) { color:#fff; border-color:#8ceaff; }
+.tutorial-panel button:focus-visible { outline:2px solid #f2d58e; outline-offset:2px; }
+.tutorial-panel button:disabled { opacity:.4; cursor:default; }
+#tutorial-exit { display:block; margin:6px auto 0; min-height:18px; color:#7e9cae; font-size:8px; border:0; background:transparent; cursor:pointer; }
+.tutorial-highlight { outline:2px solid #efcb7d!important; outline-offset:3px; box-shadow:0 0 16px #e9c46a44!important; }
+.tutorial-active > .debug:not(.telemetry-forced),.tutorial-active > .camera-help { display:none; }
+.tutorial-active > .topbar { z-index:9; }
+@media (max-height:700px) { .tutorial-panel { top:80px; max-height:calc(100dvh - 335px); padding:12px; } #network-overlay.start-screen-active .network-card { overflow-y:auto; } .start-menu-panel { margin-top:16px; margin-bottom:16px; } }
+@media (max-width:700px) { .tutorial-panel { top:76px; right:8px; width:calc(100vw - 16px); max-height:calc(100dvh - 280px); } }
 #network-overlay.start-screen-active .start-screen,
 #network-overlay.start-screen-active .start-menu-panel {
   backdrop-filter: none !important;
@@ -1901,6 +1931,7 @@ input {
 #app.start-screen-active > .topbar,
 #app.start-screen-active > .left-rail,
 #app.start-screen-active > .debug,
+#app.start-screen-active > .tutorial-panel,
 #app.start-screen-active > .command-deck,
 #app.start-screen-active > .camera-help,
 #app.start-screen-active > .replay-controls,

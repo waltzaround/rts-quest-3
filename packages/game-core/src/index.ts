@@ -88,3 +88,5 @@ export type {
 export type * from "./types";
 export * from "./factions";
 export * from "./territory";
+export { createTutorialScenario, TutorialSession, TUTORIAL_LESSONS, TUTORIAL_PLAYER_ID, TUTORIAL_BASE } from "./tutorial";
+export type { TutorialLesson, TutorialInput } from "./tutorial";

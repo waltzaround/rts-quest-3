@@ -447,6 +447,8 @@ export class BatchedShipRenderer {
     this.damageBatch = createBatch(
       createBreachGeometry(), createBreachMaterial(this.thrusterTime), MAX_DAMAGE_INSTANCES, true,
     );
+    // The damage shader needs this attribute even when the first frame has no damage.
+    this.damageBatch.mesh.setColorAt(0, new THREE.Color(0xffffff));
     this.damageBatch.mesh.renderOrder = 2;
     this.healthBarBackgroundBatch.mesh.renderOrder = 44;
     this.healthBarFillBatch.mesh.renderOrder = 45;
