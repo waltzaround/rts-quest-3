@@ -36,6 +36,7 @@
       <canvas id="battlefield" aria-label="Space RTS combat simulation"></canvas>
       <div id="selection-box" aria-hidden="true"></div>
       <div id="command-mode" aria-live="polite"></div>
+      <aside id="tutorial-panel" class="tutorial-panel panel-edge hidden" aria-label="Interactive tutorial"></aside>
 
       <header class="topbar panel-edge">
         <div class="resource storage-resource alloy" id="alloy-resource"><span>ALLOY</span><strong id="alloy-value">900</strong><small id="alloy-rate">+14 / −0</small></div>
@@ -229,6 +230,7 @@
               <h1>COMMAND PROMPT</h1>
               <p class="start-tagline">Build the war machine. Command the formation. Control the battlespace.</p>
               <div class="start-actions">
+                <button id="play-tutorial" class="start-secondary" type="button"><b>TUTORIAL</b><small>LEARN TO PLAY · GUIDED CONTROLS, ECONOMY & COMBAT</small></button>
                 <button id="play-local" class="start-primary" type="button"><b>LOCAL SKIRMISH</b><small>SOLO COMMAND · AI OPPOSITION · NO NETWORK REQUIRED</small></button>
                 <button id="open-multiplayer" class="start-secondary" type="button"><b>MULTIPLAYER</b><small>HOST OR JOIN A 2–8 COMMANDER LAN ENGAGEMENT</small></button>
                 <button id="play-demo" class="start-secondary" type="button"><b>OBSERVE SIMULATION</b><small>ENTER THE LIVE AUTONOMOUS BATTLE RUNNING BEHIND THIS MENU</small></button>

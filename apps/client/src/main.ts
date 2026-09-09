@@ -21,6 +21,9 @@ import {
   createCombatScenario,
   createMenuBattleScenario,
   createShowcaseScenario,
+  createTutorialScenario,
+  TutorialSession,
+  TUTORIAL_PLAYER_ID,
   getTurretMuzzleWorldPosition,
   getTurretWorldPosition,
   parseReplay,
@@ -61,6 +64,7 @@ import {
 } from "@space-rts/protocol";
 import { FIXED_DT } from "@space-rts/shared";
 import { ScalableBattleAudio } from "./audio-system";
+import { TutorialPanel } from "./tutorial-panel";
 import { ProjectileVfx, getBatchedTurretGeometry, getTorpedoImpactPoint } from "./combat-visuals";
 import { STRUCTURE_TURRET_SCALE, getStructureModel } from "./structure-models";
 import { BatchedShipRenderer, CombatEffectRenderer } from "./batched-renderer";
@@ -727,7 +731,8 @@ const selectedShipIds = new Set<number>();
 const selectedStructureIds = new Set<number>();
 let primaryStructureId: number | null = null;
 let selectionRosterSignature = "";
-const controlGroups = new Map<number, number[]>();
+type ControlGroup = { kind: "ships" | "structures"; ids: number[] };
+const controlGroups = new Map<number, ControlGroup>();
 const formationSlotMeshes: THREE.Mesh[] = [];
 const rallyPointMeshes: THREE.Mesh[] = [];
 const commandMarkers: Array<{ mesh: THREE.Mesh; bornAt: number }> = [];
@@ -763,6 +768,28 @@ let landingLobbyActive = true;
 let networkPanelOpenedFromGame = false;
 let demoMode = false;
 let menuBattleMode = false;
+let tutorialMode = false;
+let tutorialSession: TutorialSession | null = null;
+const tutorialBeacon = new THREE.Mesh(
+  new THREE.RingGeometry(43, 48, 48),
+  new THREE.MeshBasicMaterial({ color: 0x62dcff, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthTest: false, depthWrite: false }),
+);
+tutorialBeacon.rotation.x = -Math.PI / 2;
+tutorialBeacon.visible = false;
+scene.add(tutorialBeacon);
+const tutorialPanel = new TutorialPanel(element("tutorial-panel"), {
+  next: (skip) => {
+    if (tutorialSession?.advance(skip)) {
+      installClientView(buildClientVisibilityView());
+      updateTutorial();
+    }
+  },
+  locate: locateTutorial,
+  supplies: () => { tutorialSession?.resupply(); showToast("PRACTICE SUPPLIES // RESERVES REFILLED"); },
+  restart: () => startLocalGame(true),
+  skirmish: () => startLocalSkirmish(),
+  exit: () => showStartScreen(true),
+});
 let networkView: ProjectedViewState | null = null;
 let networkViewReceivedAt = 0;
 let networkViewInterpolationMs = 100;
@@ -1372,6 +1399,7 @@ function submitPlayerCommand(command: GameCommand): ClientCommandResult {
       : { accepted: false, reason: "offline" };
   }
   const result = simulation.submitCommand(command);
+  if (result.accepted) tutorialSession?.recordCommand(command);
   return result;
 }
 
@@ -2307,6 +2335,7 @@ function connectToMatch(matchId: string, pilotName: string, role: RequestedNetwo
     return;
   }
   window.clearTimeout(reconnectTimer);
+  endTutorial();
   demoMode = false;
   menuBattleMode = false;
   if (role === "player") setClientViewMode("player");
@@ -3133,6 +3162,7 @@ function leaveNetworkMatch(): void {
 }
 
 function showStartScreen(resetBattle = false): void {
+  endTutorial();
   networkPanelOpenedFromGame = false;
   networkMode = false;
   networkView = null;
@@ -3177,6 +3207,12 @@ function showMultiplayerJoinScreen(openedFromGame = false): void {
 }
 
 function startLocalSkirmish(): void {
+  startLocalGame(false);
+}
+
+function startLocalGame(tutorial: boolean): void {
+  tutorialMode = tutorial;
+  tutorialSession = null;
   pendingNetworkBuilds.clear();
   resetReplaySession();
   requestedNetworkRole = "player";
@@ -3196,10 +3232,12 @@ function startLocalSkirmish(): void {
   lastTime = performance.now();
   accumulator = 0;
   setConnectionState("MULTIPLAYER", "OPEN LOBBY", "online");
-  showToast("LOCAL SKIRMISH STARTED");
+  if (tutorial) setConnectionState("TUTORIAL", "COMMAND ACADEMY", "online");
+  showToast(tutorial ? "COMMAND ACADEMY // TRAINING STARTED" : "LOCAL SKIRMISH STARTED");
 }
 
 function startDemoShowcase(): void {
+  endTutorial();
   resetReplaySession();
   requestedNetworkRole = "player";
   networkMode = false;
@@ -4119,6 +4157,7 @@ function updateCamera(delta: number): void {
   if (keys.has("ArrowRight") || pointerX > innerWidth - edge) cameraDirection.add(cameraRight);
   const panLimit = minimapHalfExtent();
   if (cameraDirection.lengthSq() > 0) {
+    if (delta > 0) tutorialSession?.recordInput("pan");
     const fastPan = keys.has("ShiftLeft") || keys.has("ShiftRight") ? 2.25 : 1;
     const panSpeed = Math.max(cameraRig.distance * 0.78, panLimit * 0.2) * fastPan;
     cameraRig.target.add(cameraDirection.normalize().multiplyScalar(delta * panSpeed));
@@ -4139,6 +4178,7 @@ function clampCameraTarget(panLimit = minimapHalfExtent()): void {
 }
 
 function tickSimulation(): void {
+  tutorialSession?.beforeTick();
   if (demoMode && simulation.state.status === "finished") {
     resetSimulation();
     return;
@@ -4159,6 +4199,7 @@ function tickSimulation(): void {
   previousTransforms.clear();
   for (const ship of before.ships) previousTransforms.set(ship.id, captureTransform(ship));
   lastDebug = simulation.step();
+  tutorialSession?.observe(lastDebug.events, new Set([...selectedShipIds, ...selectedStructureIds]));
   if (networkMode && !networkView && simulation.state.tick > 0
     && simulation.state.tick % 20 === 0 && simulation.state.tick !== lastLockstepSyncReportTick) {
     lastLockstepSyncReportTick = simulation.state.tick;
@@ -4502,6 +4543,7 @@ function updateHud(): void {
   updateProgressionControls();
   updateSelectionHud();
   drawMinimap();
+  updateTutorial();
 }
 
 let minimapExtentCacheTick = -1;
@@ -5906,6 +5948,18 @@ function updateCommandMarkers(now: number): void {
 
 function focusSelection(): void {
   const ships = getSelectedShips();
+  const structures = getSelectedStructures();
+  if (structures.length > 0) {
+    const minX = Math.min(...structures.map((structure) => structure.x - STRUCTURES[structure.type].radius));
+    const maxX = Math.max(...structures.map((structure) => structure.x + STRUCTURES[structure.type].radius));
+    const minZ = Math.min(...structures.map((structure) => structure.z - STRUCTURES[structure.type].radius));
+    const maxZ = Math.max(...structures.map((structure) => structure.z + STRUCTURES[structure.type].radius));
+    cameraRig.target.set((minX + maxX) / 2, 0, (minZ + maxZ) / 2);
+    cameraRig.distance = Math.min(MAX_CAMERA_DISTANCE, Math.max(420,
+      Math.hypot(maxX - minX, maxZ - minZ) * 2.4 / Math.min(1, camera.aspect)));
+    showToast("STRUCTURE GROUP FOCUSED");
+    return;
+  }
   if (ships.length === 0) { focusBattle(); return; }
   cameraRig.target.set(
     ships.reduce((sum, ship) => sum + ship.x / ships.length, 0),
@@ -5921,17 +5975,24 @@ function recallControlGroup(group: number): void {
     showToast(clientViewMode === "team-spectator" ? "TEAM SPECTATOR // VIEW ONLY" : "REPLAY // VIEW ONLY");
     return;
   }
-  const ids = controlGroups.get(group)?.filter((id) => clientView.ships.some((ship) => ship.id === id)) ?? [];
+  const saved = controlGroups.get(group);
+  const ownedIds = new Set((saved?.kind === "structures" ? clientView.structures : clientView.ships)
+    .filter((entity) => entity.ownerPlayerId === localPlayerId)
+    .map((entity) => entity.id));
+  const ids = saved?.ids.filter((id) => ownedIds.has(id)) ?? [];
   if (ids.length === 0) { showToast(`CONTROL GROUP ${group} EMPTY`); return; }
-  setSelection(ids);
+  if (saved?.kind === "structures") setStructureSelection(ids);
+  else setSelection(ids);
+  tutorialSession?.recordInput("group-recall");
   const now = performance.now();
   if (lastControlGroup === group && now - lastControlGroupAt < 500) focusSelection();
   lastControlGroup = group;
   lastControlGroupAt = now;
-  showToast(`CONTROL GROUP ${group} // ${ids.length} UNITS`);
+  showToast(`CONTROL GROUP ${group} // ${ids.length} ${saved?.kind === "structures" ? "STRUCTURES" : "UNITS"}`);
 }
 
 function showVictory(winnerTeamId: number): void {
+  if (tutorialSession) { updateTutorial(); return; }
   const overlay = element("victory-overlay");
   if (clientViewMode === "post-match-omniscient") {
     overlay.classList.remove("visible", "defeat");
@@ -6023,10 +6084,16 @@ function resetSimulation(): void {
     showToast("LEAVE THE MATCH TO RESET");
     return;
   }
-  simulation = menuBattleMode
+  simulation = tutorialMode ? createTutorialScenario() : menuBattleMode
     ? createMenuBattleScenario()
     : demoMode ? createShowcaseScenario() : createPlayableScenario();
-  localPlayerId = menuBattleMode ? "menu-aster" : demoMode ? "showcase-aster" : "pilot-blue";
+  localPlayerId = tutorialMode ? TUTORIAL_PLAYER_ID : menuBattleMode ? "menu-aster" : demoMode ? "showcase-aster" : "pilot-blue";
+  tutorialSession = tutorialMode ? new TutorialSession(simulation) : null;
+  if (tutorialMode) {
+    tutorialPanel.reset();
+    paused = false;
+    element("pause").classList.remove("active");
+  }
   if (physicsWorld) simulation.attachPhysicsWorld(physicsWorld);
   stressScenario.configure(0);
   element<HTMLSelectElement>("stress-count").value = "0";
@@ -6038,6 +6105,8 @@ function resetSimulation(): void {
   selectedStructureIds.clear();
   primaryStructureId = null;
   controlGroups.clear();
+  lastControlGroup = 0;
+  lastControlGroupAt = 0;
   setCommandMode(null);
   setStructureMode(null);
   setRallyPointMode(false);
@@ -6053,13 +6122,46 @@ function resetSimulation(): void {
   cameraRig.distance = menuBattleMode ? 720 : demoMode ? 980 : 610;
   cameraRig.azimuth = demoMode ? 0.18 : 0;
   if (!menuBattleMode && !demoMode) focusCameraOnLocalBase();
+  if (tutorialMode) {
+    cameraRig.target.set(-550, 0, 30);
+    cameraRig.distance = 800;
+  }
   eventLines = [demoMode
     ? menuBattleMode
       ? "<b>SIM</b> fighter-heavy local 1v1 // autonomous engagement"
       : "<b>SHOWCASE</b> 284 combat vessels // 16 autonomous shipyards"
     : `<b>SYS</b> new ${simulation.state.obstacles.length}-hazard seeded battlefield generated`];
   updateSelectionHud();
+  updateTutorial();
+  if (tutorialMode) updateHud();
   showToast(demoMode ? menuBattleMode ? "LOCAL 1V1 RESTARTED" : "SHOWCASE RESTARTED" : "NEW BATTLEFIELD GENERATED");
+}
+
+function updateTutorial(): void {
+  tutorialSession?.observe([], new Set([...selectedShipIds, ...selectedStructureIds]));
+  tutorialPanel.render(tutorialSession, paused);
+  tutorialBeacon.visible = Boolean(tutorialSession && !tutorialSession.finished);
+  if (tutorialSession) {
+    const point = tutorialSession.location;
+    tutorialBeacon.position.set(point.x, 3, point.z);
+  }
+}
+
+function locateTutorial(): void {
+  if (!tutorialSession) return;
+  const point = tutorialSession.location;
+  // Combat exercises frame the approach and the hostile, keeping both on screen.
+  const combat = ["attack", "focus", "artillery", "victory"].includes(tutorialSession.lesson?.id ?? "");
+  cameraRig.target.set(point.x - (combat ? 200 : 0), 0, point.z);
+  cameraRig.distance = combat ? 1000 : 720;
+  cameraRig.azimuth = 0;
+}
+
+function endTutorial(): void {
+  tutorialMode = false;
+  tutorialSession = null;
+  tutorialBeacon.visible = false;
+  tutorialPanel.render(null, false);
 }
 
 function focusBattle(): void {
@@ -6117,6 +6219,7 @@ function updateGameMenuOptions(): void {
   pauseButton.disabled = networkMode && clientViewMode !== "post-match-omniscient";
   pauseButton.title = pauseButton.disabled ? "Multiplayer matches cannot be paused" : "";
   const resetButton = element<HTMLButtonElement>("reset");
+  resetButton.textContent = tutorialMode ? "RESTART TUTORIAL" : "RESTART ENGAGEMENT";
   resetButton.disabled = networkMode;
   resetButton.title = networkMode ? "Leave the multiplayer match before restarting" : "Restart engagement (R)";
   element("game-menu-fullscreen").textContent = document.fullscreenElement ? "EXIT FULLSCREEN" : "ENTER FULLSCREEN";
@@ -6156,9 +6259,18 @@ addEventListener("keydown", (event) => {
     if (!canIssuePlayerCommands()) return;
     const group = Number(digitMatch[1]);
     if (event.ctrlKey || event.metaKey) {
-      const ids = getSelectedShips().map((ship) => ship.id);
-      controlGroups.set(group, ids);
-      showToast(`CONTROL GROUP ${group} SET // ${ids.length} UNITS`);
+      const structures = getSelectedStructures();
+      const kind = structures.length > 0 ? "structures" : "ships";
+      // Structure selection makes the last ID primary; preserve the active factory's queue.
+      const ids = kind === "structures"
+        ? structures.map((structure) => structure.id).sort((a, b) => Number(a === primaryStructureId) - Number(b === primaryStructureId))
+        : getSelectedShips().map((ship) => ship.id);
+      if (ids.length === 0) { showToast("SELECT FRIENDLY UNITS OR STRUCTURES FIRST"); return; }
+      controlGroups.set(group, { kind, ids });
+      lastControlGroup = 0;
+      lastControlGroupAt = 0;
+      tutorialSession?.recordInput("group-set");
+      showToast(`CONTROL GROUP ${group} SET // ${ids.length} ${kind === "structures" ? "STRUCTURES" : "UNITS"}`);
     } else {
       recallControlGroup(group);
     }
@@ -6222,6 +6334,7 @@ addEventListener("pointermove", (event) => {
       clampCameraTarget();
     } else {
       cameraRig.azimuth -= deltaX * 0.006;
+      if (deltaX !== 0) tutorialSession?.recordInput("rotate");
     }
     lastPointerX = event.clientX;
     lastPointerY = event.clientY;
@@ -6296,6 +6409,7 @@ addEventListener("pointerup", (event) => {
   }
 });
 addEventListener("wheel", (event) => {
+  if (event.target instanceof Element && event.target.closest("#tutorial-panel")) return;
   if (element("app").classList.contains("start-screen-active")) return;
   const anchorBeforeZoom = getWorldPoint(event.clientX, event.clientY);
   const wheelDelta = THREE.MathUtils.clamp(event.deltaY, -600, 600);
@@ -6307,6 +6421,7 @@ addEventListener("wheel", (event) => {
   if (nextDistance === cameraRig.distance) return;
 
   cameraRig.distance = nextDistance;
+  tutorialSession?.recordInput("zoom");
   updateCamera(0);
   camera.updateMatrixWorld();
   const anchorAfterZoom = getWorldPoint(event.clientX, event.clientY);
@@ -6605,6 +6720,7 @@ const worldPointFromMinimap = (event: PointerEvent): THREE.Vector3 => {
 };
 const moveCameraFromMinimap = (event: PointerEvent) => {
   cameraRig.target.copy(worldPointFromMinimap(event));
+  tutorialSession?.recordInput("minimap");
 };
 minimapElement.addEventListener("pointerdown", (event) => {
   if (event.button === 2) {
@@ -6684,6 +6800,7 @@ element("network-close").addEventListener("click", () => {
 });
 element("open-multiplayer").addEventListener("click", () => showMultiplayerJoinScreen());
 element("play-local").addEventListener("click", startLocalSkirmish);
+element("play-tutorial").addEventListener("click", () => startLocalGame(true));
 element("play-demo").addEventListener("click", startDemoShowcase);
 element("create-match").addEventListener("click", () => {
   const code = generateLobbyCode();

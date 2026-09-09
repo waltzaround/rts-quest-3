@@ -84,3 +84,5 @@ export type {
   SharedRenderFrame,
 } from "./shared-render-buffer";
 export type * from "./types";
+export { createTutorialScenario, TutorialSession, TUTORIAL_LESSONS, TUTORIAL_PLAYER_ID, TUTORIAL_BASE } from "./tutorial";
+export type { TutorialLesson, TutorialInput } from "./tutorial";

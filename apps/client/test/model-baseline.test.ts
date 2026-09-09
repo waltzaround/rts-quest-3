@@ -1,5 +1,7 @@
 import { it } from "vitest";
 import { writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { ALL_SHIP_CLASSES } from "@space-rts/game-core";
 import { getShipHullGeometries } from "../src/ship-hulls";
 it("records model budgets", () => {
@@ -10,5 +12,5 @@ it("records model budgets", () => {
       return [layer, { vertices: geo.getAttribute("position").count, min: geo.boundingBox!.min.toArray(), max: geo.boundingBox!.max.toArray() }];
     }))];
   }));
-  writeFileSync("/tmp/rts-ship-baseline.json", JSON.stringify(result, null, 2));
+  writeFileSync(join(tmpdir(), "rts-ship-baseline.json"), JSON.stringify(result, null, 2));
 });

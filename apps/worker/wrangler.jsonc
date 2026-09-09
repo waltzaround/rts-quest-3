@@ -17,9 +17,11 @@
     // Production already records v2. Keep this checkpoint so Wrangler does not
     // replay v1 and attempt to create the existing Match namespace again.
     { "tag": "v2" },
-    // A LobbyDirectory class was deployed from since-reverted code and no longer
-    // exists. Drop its namespace so deploys without the export succeed.
-    { "tag": "v3", "deleted_classes": ["LobbyDirectory"] }
+    // v3 originally deleted a leftover LobbyDirectory namespace from reverted
+    // production code. Local Wrangler never created that class, so
+    // deleted_classes crashes `wrangler dev`. Keep the tag so environments
+    // already at v3 stay aligned.
+    { "tag": "v3" }
   ],
   "observability": { "enabled": true }
 }
