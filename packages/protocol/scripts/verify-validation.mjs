@@ -1,11 +1,24 @@
 import assert from "node:assert/strict";
-import { LOCKSTEP_PROTOCOL_VERSION, MAX_FLEET_COMMAND_UNITS, parseClientMessage, parseServerMessage } from "../dist/index.js";
+import { LOCKSTEP_PROTOCOL_VERSION, MAX_CHAT_LENGTH, MAX_FLEET_COMMAND_UNITS, parseClientMessage, parseServerMessage } from "../dist/index.js";
 
 for (const remaining of [0, 1_500, 5_000]) {
   assert.equal(parseServerMessage(JSON.stringify({
     type: "match_countdown", serverTime: 10_000, startsAt: 10_000 + remaining,
   }))?.type, "match_countdown");
 }
+
+for (const channel of ["all", "team"]) {
+  assert.equal(parseClientMessage(JSON.stringify({ type: "chat", channel, text: "Regroup at the relay." }))?.type, "chat");
+  assert.equal(parseServerMessage(JSON.stringify({
+    type: "chat", channel, senderId: "pilot-blue", senderName: "Commander", senderTeamId: 1,
+    text: "Regroup at the relay.", sentAt: Date.now(),
+  }))?.type, "chat");
+}
+for (const message of [
+  { type: "chat", channel: "enemy", text: "hello" },
+  { type: "chat", channel: "all", text: "   " },
+  { type: "chat", channel: "team", text: "x".repeat(MAX_CHAT_LENGTH + 1) },
+]) assert.equal(parseClientMessage(JSON.stringify(message)), null, "Invalid chat payloads must fail validation");
 for (const [serverTime, startsAt] of [[10_000, 9_999], [10_000, 15_001], [-1, 0], [0, 1.5], [0, "5000"]]) {
   assert.equal(parseServerMessage(JSON.stringify({ type: "match_countdown", serverTime, startsAt })), null);
 }
@@ -90,7 +103,7 @@ for (const structureType of ["commandCore", "advancedShipyard", "unknown"]) {
 
 const playerView = {
   version: 1,
-  simulationVersion: 11,
+  simulationVersion: 12,
   tick: 12,
   viewerPlayerId: "pilot-blue",
   viewerTeamId: 1,
@@ -136,7 +149,7 @@ assert.equal(parseServerMessage(JSON.stringify({ type: "events", tick: 12, event
 assert.equal(parseServerMessage(JSON.stringify({ ...frame, checksum: playerView.checksum + 1 })), null, "frame checksum must match its view");
 
 const lockstepState = {
-  version: 11, seed: 0x7233, tick: 12, nextEntityId: 1, nextTurretId: 1, nextQueueItemId: 1,
+  version: 12, seed: 0x7233, tick: 12, nextEntityId: 1, nextTurretId: 1, nextQueueItemId: 1,
   players: [],
   territories: [], teams: [], ships: [], structures: [], resourceNodes: [], obstacles: [], visibility: [],
   projectiles: [], commandQueue: [], aiPlayerIds: [], aiCommanders: {},

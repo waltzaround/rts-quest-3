@@ -117,7 +117,7 @@ export function projectPlayerView(state: SimulationState, playerId: PlayerId): P
 
   const view: PlayerViewState = {
     version: 1,
-    simulationVersion: 11,
+    simulationVersion: 12,
     tick: state.tick,
     viewerPlayerId: viewer.id,
     viewerTeamId: viewer.teamId,
@@ -131,6 +131,7 @@ export function projectPlayerView(state: SimulationState, playerId: PlayerId): P
       state: player.state,
       isAi: state.aiPlayerIds.includes(player.id),
       economy: areTeamsAllied(state, viewer.teamId, player.teamId) ? { ...player.economy } : null,
+      stats: state.status === "finished" ? { ...player.stats } : null,
     })),
     teams: state.teams.map((team) => ({
       id: team.id,
@@ -153,11 +154,15 @@ export function projectPlayerView(state: SimulationState, playerId: PlayerId): P
     obstacles: state.obstacles.map((obstacle) => ({ ...obstacle })),
     projectiles: state.projectiles
       .filter((projectile) => visibleProjectileIds.has(projectile.id))
-      .map((projectile) => ({
-        ...projectile,
-        ownerShipId: visibleEntityIds.has(projectile.ownerShipId) ? projectile.ownerShipId : null,
-        targetEntityId: visibleEntityIds.has(projectile.targetEntityId) ? projectile.targetEntityId : null,
-      })),
+      .map((projectile) => {
+        const projected = { ...projectile };
+        delete projected.ownerPlayerId;
+        return {
+          ...projected,
+          ownerShipId: visibleEntityIds.has(projectile.ownerShipId) ? projectile.ownerShipId : null,
+          targetEntityId: visibleEntityIds.has(projectile.targetEntityId) ? projectile.targetEntityId : null,
+        };
+      }),
     status: state.status,
     winnerTeamId: state.winnerTeamId,
     checksum: 0,
@@ -201,7 +206,7 @@ export function calculateTeamViewChecksum(view: TeamViewState): number {
 export function projectOmniscientView(state: SimulationState): OmniscientViewState {
   const view: OmniscientViewState = {
     version: 1,
-    simulationVersion: 11,
+    simulationVersion: 12,
     tick: state.tick,
     players: state.players.map((player) => ({
       id: player.id,
@@ -212,6 +217,7 @@ export function projectOmniscientView(state: SimulationState): OmniscientViewSta
       state: player.state,
       isAi: state.aiPlayerIds.includes(player.id),
       economy: { ...player.economy },
+      stats: state.status === "finished" ? { ...player.stats } : null,
     })),
     teams: state.teams.map((team) => ({
       id: team.id,
@@ -238,7 +244,11 @@ export function projectOmniscientView(state: SimulationState): OmniscientViewSta
     })),
     resourceNodes: state.resourceNodes.map((node) => ({ ...node })),
     obstacles: state.obstacles.map((obstacle) => ({ ...obstacle })),
-    projectiles: state.projectiles.map((projectile) => ({ ...projectile })),
+    projectiles: state.projectiles.map((projectile) => {
+      const projected = { ...projectile };
+      delete projected.ownerPlayerId;
+      return projected;
+    }),
     status: state.status,
     winnerTeamId: state.winnerTeamId,
     checksum: 0,

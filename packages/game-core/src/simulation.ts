@@ -2,6 +2,7 @@ import { sweptCircleHitFraction, type PlanarCirclePhysicsWorld } from "@space-rt
 import { FIXED_DT, distanceSquared, moveTowardAngle, wrapAngle } from "@space-rts/shared";
 import { calculateChecksum } from "./checksum";
 import { createMapVariantLayout } from "./map-layouts";
+import { TerrainNavigator } from "./terrain-navigation";
 import { runAiStrategy } from "./ai-strategy";
 import {
   ALL_SHIP_CLASSES,
@@ -37,6 +38,7 @@ import type {
   ObstacleState, ResourceNodeState, ShipClass, ShipState, SimulationEvent, SimulationState,
   AiCommanderSettings, AiDifficulty, AiPersonality, OmniscientViewState, PlayerViewState, ShipyardType, StructureState, StructureType,
   TeamId, TeamState, TeamViewState, TurretState, FactionId,
+  PlayerMatchStats,
 } from "./types";
 
 const TARGET_REEVALUATION_TICKS = 10;
@@ -77,6 +79,28 @@ const ALL_COLLISION_CATEGORIES = STATIC_COLLISION_CATEGORY
   | REGULAR_SHIP_COLLISION_CATEGORY
   | SMALL_CRAFT_COLLISION_CATEGORY
   | CAPITAL_SHIP_COLLISION_CATEGORY;
+
+function createPlayerMatchStats(): PlayerMatchStats {
+  return {
+    unitsProduced: 0,
+    structuresBuilt: 0,
+    enemyShipsDestroyed: 0,
+    enemyStructuresDestroyed: 0,
+    shipsLost: 0,
+    structuresLost: 0,
+    alloyCollected: 0,
+    energyGenerated: 0,
+    alloySpent: 0,
+    energySpent: 0,
+    damageDealt: 0,
+    damageTaken: 0,
+  };
+}
+
+function statsFor(player: PlayerState): PlayerMatchStats {
+  player.stats ??= createPlayerMatchStats();
+  return player.stats;
+}
 
 function strategicWeaponUpdateTicks(shipCount: number): number {
   if (shipCount >= 12_000) return 32;
@@ -139,6 +163,7 @@ export class GameSimulation {
   readonly state: SimulationState;
   private readonly spatialHash = new SpatialHash<CombatTargetState>(160);
   private readonly navigationHash = new SpatialHash<ShipState>(160);
+  private readonly terrainNavigator = new TerrainNavigator();
   private readonly obstacleHash = new SpatialHash<ObstacleState>(220);
   private readonly staticCollisionHash = new SpatialHash<{ id: number; x: number; z: number; radius: number }>(220);
   private readonly acquisitionScratch: CombatTargetState[] = [];
@@ -170,7 +195,10 @@ export class GameSimulation {
   ) {
     this.state = state;
     this.state.territories ??= [];
-    for (const player of this.state.players) player.faction ??= "industrial";
+    for (const player of this.state.players) {
+      player.faction ??= "industrial";
+      statsFor(player);
+    }
     this.physicsWorld = physicsWorld ?? null;
     // A restored snapshot begins a new deterministic timeline. Box2D keeps
     // contact and allocator history outside our serialized state, so it must
@@ -194,6 +222,10 @@ export class GameSimulation {
       }
     }
     for (const projectile of this.state.projectiles) {
+      if (projectile.ownerPlayerId === undefined) {
+        const ownerPlayerId = this.state.ships.find((ship) => ship.id === projectile.ownerShipId)?.ownerPlayerId;
+        if (ownerPlayerId !== undefined) projectile.ownerPlayerId = ownerPlayerId;
+      }
       projectile.targetX ??= projectile.x + projectile.vx * FIXED_DT * projectile.lifetimeTicks;
       projectile.targetZ ??= projectile.z + projectile.vz * FIXED_DT * projectile.lifetimeTicks;
       projectile.fixedTrajectory ??= false;
@@ -1097,12 +1129,17 @@ export class GameSimulation {
         energyStorage += definition.energyStorage;
       }
       const economy = player.economy;
+      const stats = statsFor(player);
       economy.alloyIncome = alloyIncome;
       economy.energyIncome = energyIncome;
       economy.alloyStorage = alloyStorage;
       economy.energyStorage = energyStorage;
+      const alloyBeforeIncome = economy.alloy;
+      const energyBeforeIncome = economy.energy;
       economy.alloy = Math.min(alloyStorage, economy.alloy + alloyIncome * FIXED_DT);
       economy.energy = Math.min(energyStorage, economy.energy + energyIncome * FIXED_DT);
+      stats.alloyCollected += economy.alloy - alloyBeforeIncome;
+      stats.energyGenerated += economy.energy - energyBeforeIncome;
 
       const construction = structures.filter((structure) => structure.buildProgress < 1);
       const producing = structures.filter((structure) => {
@@ -1141,6 +1178,8 @@ export class GameSimulation {
       economy.efficiency = efficiency;
       economy.alloy -= requestedAlloy * efficiency;
       economy.energy -= requestedEnergy * efficiency;
+      stats.alloySpent += requestedAlloy * efficiency;
+      stats.energySpent += requestedEnergy * efficiency;
       economy.alloySpend = requestedAlloy * efficiency / FIXED_DT;
       economy.energySpend = requestedEnergy * efficiency / FIXED_DT;
 
@@ -1166,6 +1205,7 @@ export class GameSimulation {
             type: "constructionCompleted", tick: this.state.tick, playerId: player.id,
             structureId: structure.id, structureType: structure.type,
           });
+          stats.structuresBuilt += 1;
         }
       }
 
@@ -1206,6 +1246,7 @@ export class GameSimulation {
             type: "unitProduced", tick: this.state.tick, playerId: player.id,
             structureId: structure.id, shipId: ship.id, shipClass: ship.class,
           });
+          stats.unitsProduced += 1;
         }
       }
       if (player.faction === "brood") this.updateBroodProduction(player, structures);
@@ -1249,6 +1290,7 @@ export class GameSimulation {
       ship.orders = [{ type: "attackMove", destination: projectNavigableDestination(this.state, ship, nest.rallyPoint), facing: yaw }];
       this.events.push({ type: "unitProduced", tick: this.state.tick, playerId: player.id,
         structureId: nest.id, shipId: ship.id, shipClass });
+      statsFor(player).unitsProduced += 1;
     }
   }
 
@@ -1297,6 +1339,7 @@ export class GameSimulation {
 
   private updateNavigation(): void {
     const navigationStatics = buildNavigableStatics(this.state);
+    this.terrainNavigator.setObstacles(this.state.obstacles);
     const staggerSlowUpdates = this.state.ships.length > STRATEGIC_BATTLE_SHIP_COUNT;
     this.cruisingShipIds.clear();
     for (const ship of this.state.ships) {
@@ -1349,10 +1392,16 @@ export class GameSimulation {
         }
         continue;
       }
-      let seekX = (order.destination.x - ship.x) / Math.max(distanceToGoal, 0.001);
-      let seekZ = (order.destination.z - ship.z) / Math.max(distanceToGoal, 0.001);
-      const arrivalScale = Math.min(1, distanceToGoal / Math.max(60, definition.radius * 4));
-      this.steerShip(ship, seekX, seekZ, arrivalScale);
+      const waypoint = this.terrainNavigator.waypoint(ship, order.destination, definition.radius);
+      if (!waypoint) {
+        ship.vx *= 0.72; ship.vz *= 0.72;
+        continue;
+      }
+      const distanceToWaypoint = Math.hypot(waypoint.x - ship.x, waypoint.z - ship.z);
+      const seekX = (waypoint.x - ship.x) / Math.max(distanceToWaypoint, 0.001);
+      const seekZ = (waypoint.z - ship.z) / Math.max(distanceToWaypoint, 0.001);
+      const arrivalScale = Math.min(1, distanceToWaypoint / Math.max(60, definition.radius * 4));
+      this.steerShip(ship, seekX, seekZ, arrivalScale, false);
     }
   }
 
@@ -1424,7 +1473,7 @@ export class GameSimulation {
     };
   }
 
-  private steerShip(ship: ShipState, desiredX: number, desiredZ: number, speedScale: number): void {
+  private steerShip(ship: ShipState, desiredX: number, desiredZ: number, speedScale: number, reactiveAvoidance = true): void {
       const definition = getFactionShipDefinition(ship.class, ship.faction);
       let seekX = desiredX;
       let seekZ = desiredZ;
@@ -1446,7 +1495,7 @@ export class GameSimulation {
       }
       seekX += separationX * 0.72;
       seekZ += separationZ * 0.72;
-      const avoidance = this.computeObstacleAvoidance(ship, seekX, seekZ);
+      const avoidance = reactiveAvoidance ? this.computeObstacleAvoidance(ship, seekX, seekZ) : null;
       if (avoidance) {
         seekX += avoidance.vectorX * 1.65;
         seekZ += avoidance.vectorZ * 1.65;
@@ -1462,6 +1511,8 @@ export class GameSimulation {
       const steerLength = Math.hypot(seekX, seekZ) || 1;
       const desiredYaw = Math.atan2(seekX / steerLength, seekZ / steerLength);
       ship.yaw = moveTowardAngle(ship.yaw, desiredYaw, definition.turnRate * FIXED_DT);
+      // Brake for route corners instead of cruising through them while turning.
+      if (!reactiveAvoidance) speedScale *= Math.max(0.15, Math.cos(wrapAngle(desiredYaw - ship.yaw)));
       const movementSpeed = definition.speed * this.creepSpeedMultiplier(ship) * (this.cruisingShipIds.has(ship.id) ? definition.cruiseMultiplier : 1);
       ship.vx = Math.sin(ship.yaw) * movementSpeed * speedScale;
       ship.vz = Math.cos(ship.yaw) * movementSpeed * speedScale;
@@ -1813,6 +1864,7 @@ export class GameSimulation {
         if (weapon.delivery === "projectile") {
           const projectile: ProjectileState = {
             id: projectileId, ownerShipId: ship.id, ownerTeamId: ship.teamId,
+            ownerPlayerId: ship.ownerPlayerId,
             weaponTypeId: turret.weaponTypeId, targetEntityId: target.id,
             targetX: target.x, targetZ: target.z,
             fixedTrajectory: weapon.artillery !== undefined,
@@ -1850,7 +1902,7 @@ export class GameSimulation {
           shipId: ship.id, targetId: target.id, projectileId, weaponTypeId: turret.weaponTypeId,
         });
         if (weapon.delivery === "beam") {
-          this.applyDamage(target, weapon.damage * consolidatedDamageScale * this.creepDamageMultiplier(ship), projectileId, turret.weaponTypeId);
+          this.applyDamage(target, weapon.damage * consolidatedDamageScale * this.creepDamageMultiplier(ship), projectileId, turret.weaponTypeId, ship.ownerPlayerId);
         }
       }
     }
@@ -1934,6 +1986,7 @@ export class GameSimulation {
           );
           this.state.projectiles.push({
             id: projectileId, ownerShipId: structure.id, ownerTeamId: structure.teamId,
+            ownerPlayerId: structure.ownerPlayerId,
             weaponTypeId, targetEntityId: target.id,
             targetX: target.x, targetZ: target.z, fixedTrajectory: weapon.artillery !== undefined,
             x: muzzle.x, z: muzzle.z, previousX: muzzle.x, previousZ: muzzle.z,
@@ -1961,7 +2014,7 @@ export class GameSimulation {
           turretId: -(structure.id * 16 + mountIndex + 1),
           shipId: structure.id, targetId: target.id, projectileId, weaponTypeId,
         });
-        if (weapon.delivery === "beam") this.applyDamage(target, weaponDamage, projectileId, weaponTypeId);
+        if (weapon.delivery === "beam") this.applyDamage(target, weaponDamage, projectileId, weaponTypeId, structure.ownerPlayerId);
       }
     }
   }
@@ -1971,13 +2024,31 @@ export class GameSimulation {
     rawDamage: number,
     projectileId: EntityId,
     weaponTypeId: import("./types").WeaponTypeId,
+    attackerPlayerId?: PlayerId,
   ): void {
+    const healthBefore = Math.max(0, target.health);
+    const shieldsBefore = Math.max(0, target.shields);
     const armorType = isShip(target) ? SHIPS[target.class].armorType : STRUCTURES[target.type].armorType;
     const damage = calculateProfiledDamage(weaponTypeId, rawDamage, target.shields, armorType,
       isShip(target) && target.faction === "concord" && isInTerritory(this.state.territories, target.ownerPlayerId, "pylon", target)
         ? PYLON_SHIELD_RESISTANCE : 1);
     target.shields -= damage.shieldDamage;
     target.health -= damage.hullDamage;
+    const appliedDamage = Math.max(0, shieldsBefore - Math.max(0, target.shields))
+      + Math.max(0, healthBefore - Math.max(0, target.health));
+    const defender = this.state.players.find((player) => player.id === target.ownerPlayerId);
+    if (defender) statsFor(defender).damageTaken += appliedDamage;
+    const attacker = attackerPlayerId === undefined
+      ? undefined
+      : this.state.players.find((player) => player.id === attackerPlayerId);
+    if (attacker) {
+      const stats = statsFor(attacker);
+      stats.damageDealt += appliedDamage;
+      if (healthBefore > 0 && target.health <= 0 && !areTeamsAllied(this.state, attacker.teamId, target.teamId)) {
+        if (isShip(target)) stats.enemyShipsDestroyed += 1;
+        else stats.enemyStructuresDestroyed += 1;
+      }
+    }
     if (isShip(target)) {
       target.lastCombatTick = this.state.tick;
       target.lastDamageTick = this.state.tick;
@@ -2065,8 +2136,14 @@ export class GameSimulation {
       if (resolvedImpact?.target) {
         projectile.x = projectile.previousX + (projectile.x - projectile.previousX) * resolvedImpact.fraction;
         projectile.z = projectile.previousZ + (projectile.z - projectile.previousZ) * resolvedImpact.fraction;
-        this.applyDamage(resolvedImpact.target, projectile.damage, projectile.id, projectile.weaponTypeId);
         const owner = projectileOwners.get(projectile.ownerShipId);
+        this.applyDamage(
+          resolvedImpact.target,
+          projectile.damage,
+          projectile.id,
+          projectile.weaponTypeId,
+          projectile.ownerPlayerId ?? owner?.ownerPlayerId,
+        );
         if (shouldEmitProjectileDetonation(projectile, owner)) {
           this.events.push({
             type: "projectileDetonated", tick: this.state.tick,
@@ -2098,6 +2175,14 @@ export class GameSimulation {
     const destroyedShips = this.state.ships.filter((ship) => ship.health <= 0);
     const destroyedStructures = this.state.structures.filter((structure) => structure.health <= 0);
     if (destroyedShips.length === 0 && destroyedStructures.length === 0) return;
+    for (const ship of destroyedShips) {
+      const owner = this.state.players.find((player) => player.id === ship.ownerPlayerId);
+      if (owner) statsFor(owner).shipsLost += 1;
+    }
+    for (const structure of destroyedStructures) {
+      const owner = this.state.players.find((player) => player.id === structure.ownerPlayerId);
+      if (owner) statsFor(owner).structuresLost += 1;
+    }
     const destroyedIds = new Set([...destroyedShips, ...destroyedStructures].map((entity) => entity.id));
     const projectileOwners = new Map(this.state.ships.map((ship) => [ship.id, ship]));
     const abandonedProjectiles = this.state.projectiles.filter(
@@ -2602,12 +2687,12 @@ export function createCombatScenario(options: ScenarioOptions = {}): GameSimulat
   });
   const players: PlayerState[] = configs.map((config, index) => ({
     id: config.id, name: config.name, teamId: config.teamId, color: config.color ?? palette[index]!, faction: config.faction ?? "industrial",
-    state: "playing", lastCommandSequence: 0, economy: createEconomy(),
+    state: "playing", lastCommandSequence: 0, economy: createEconomy(), stats: createPlayerMatchStats(),
   }));
   const teamIds = [...new Set(players.map((player) => player.teamId))].sort((a, b) => a - b);
   const teams: TeamState[] = teamIds.map((id) => ({ id, name: `Team ${id}`, alliedTeamIds: [] }));
   const state: SimulationState = {
-    version: 11, seed, tick: 0, nextEntityId: 1, nextTurretId: 1, nextQueueItemId: 1,
+    version: 12, seed, tick: 0, nextEntityId: 1, nextTurretId: 1, nextQueueItemId: 1,
     players, teams, ships: [], structures: [], resourceNodes: [],
     obstacles: variantLayout?.obstacles ?? createScenarioObstacles(players.length, mapPreset, baseRadius, seed, spawnAngles),
     visibility: [], territories: [],
@@ -3292,7 +3377,7 @@ export function restoreSimulation(snapshot: SimulationState, physicsWorld?: Plan
   restored.aiCommanders ??= Object.fromEntries(restored.aiPlayerIds.map((playerId) => [playerId, {
     difficulty: "normal", personality: "balanced",
   }]));
-  restored.version = 11;
+  restored.version = 12;
   return new GameSimulation(restored as SimulationState, physicsWorld);
 }
 

@@ -95,4 +95,17 @@ describe("additional map layouts", () => {
     for (const resource of layout.resources) expect(Math.hypot(resource.x, resource.z)).toBeGreaterThan(scale * 0.46);
     expect(new Set(layout.resources.map(resource => resource.richness)).size).toBe(1);
   });
+
+  it("keeps Resource Islands rocks at fleet scale even on colossal maps", () => {
+    for (const baseRadius of Object.values(SIZES)) {
+      const layout = createMapVariantLayout("resource-islands", {
+        seed: 17, playerCount: 8, baseRadius, resourceCount: 36, richness: 1,
+      })!;
+      expect(layout.obstacles).toHaveLength(24);
+      for (const obstacle of layout.obstacles) {
+        expect(obstacle.radius).toBeGreaterThanOrEqual(30);
+        expect(obstacle.radius).toBeLessThanOrEqual(40);
+      }
+    }
+  });
 });

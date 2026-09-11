@@ -71,6 +71,8 @@ export function createMapVariantLayout(
   } else {
     const islands = Math.max(4, playerCount);
     const perIsland = Math.max(1, Math.ceil(options.resourceCount / islands));
+    // Larger maps spread the pockets out; individual rocks stay at fleet scale.
+    const rockRadius = Math.min(scale * 0.02, 40) / scale;
     const rotation = Math.PI + Math.PI / islands + (random() - 0.5) * 0.08;
     for (let island = 0; island < islands; island++) {
       const angle = rotation + island / islands * Math.PI * 2;
@@ -79,7 +81,7 @@ export function createMapVariantLayout(
       // A crescent of cover faces the center; the other side stays open.
       for (const offset of [-0.8, 0, 0.8]) {
         const wallAngle = angle + Math.PI + offset;
-        rock(x + Math.sin(wallAngle) * 0.17, z + Math.cos(wallAngle) * 0.17, 0.045);
+        rock(x + Math.sin(wallAngle) * 0.17, z + Math.cos(wallAngle) * 0.17, rockRadius);
       }
       for (let node = 0; node < perIsland; node++) {
         const nodeAngle = angle + node / perIsland * Math.PI * 2;

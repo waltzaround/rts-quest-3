@@ -41,6 +41,18 @@ export function calculateChecksum(state: SimulationState): number {
     hash = hashUint(hash, quantize(player.economy.alloyStorage));
     hash = hashUint(hash, quantize(player.economy.energyStorage));
     hash = hashUint(hash, quantize(player.economy.efficiency));
+    hash = hashUint(hash, player.stats.unitsProduced);
+    hash = hashUint(hash, player.stats.structuresBuilt);
+    hash = hashUint(hash, player.stats.enemyShipsDestroyed);
+    hash = hashUint(hash, player.stats.enemyStructuresDestroyed);
+    hash = hashUint(hash, player.stats.shipsLost);
+    hash = hashUint(hash, player.stats.structuresLost);
+    hash = hashUint(hash, quantize(player.stats.alloyCollected));
+    hash = hashUint(hash, quantize(player.stats.energyGenerated));
+    hash = hashUint(hash, quantize(player.stats.alloySpent));
+    hash = hashUint(hash, quantize(player.stats.energySpent));
+    hash = hashUint(hash, quantize(player.stats.damageDealt));
+    hash = hashUint(hash, quantize(player.stats.damageTaken));
   }
   for (const team of state.teams) {
     hash = hashUint(hash, team.id);
@@ -91,6 +103,7 @@ export function calculateChecksum(state: SimulationState): number {
   for (const projectile of state.projectiles) {
     hash = hashUint(hash, projectile.id);
     hash = hashUint(hash, projectile.ownerShipId);
+    hash = hashString(hash, projectile.ownerPlayerId ?? "");
     hash = hashUint(hash, projectile.ownerTeamId);
     hash = hashString(hash, projectile.weaponTypeId);
     hash = hashUint(hash, projectile.targetEntityId);

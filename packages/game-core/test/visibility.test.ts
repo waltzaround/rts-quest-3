@@ -299,6 +299,7 @@ describe("secure player view projection", () => {
     expect(contact.turrets[0]!.cooldownRemaining).toBe(0);
     expect(contact.turrets[0]!.fireSequence).toBe(0);
     expect(view.players.find((player) => player.id === "pilot-red")!.economy).toBeNull();
+    expect(view.players.every((player) => player.stats === null)).toBe(true);
     expect("seed" in view).toBe(false);
     expect("commandQueue" in view).toBe(false);
     expect(view.obstacles[0]!.visualSeed).toBe(simulation.state.obstacles[0]!.visualSeed);
@@ -321,7 +322,7 @@ describe("secure player view projection", () => {
     };
     simulation.state.resourceNodes.push(node);
     const projectile = {
-      id: simulation.state.nextEntityId++, ownerShipId: hiddenHostile.id, ownerTeamId: 2,
+      id: simulation.state.nextEntityId++, ownerShipId: hiddenHostile.id, ownerPlayerId: hiddenHostile.ownerPlayerId, ownerTeamId: 2,
       weaponTypeId: "plasma" as const, targetEntityId: hiddenHostile.id,
       targetX: 120, targetZ: 0, fixedTrajectory: false,
       x: 120, z: 0, previousX: 120, previousZ: 0,
@@ -336,6 +337,7 @@ describe("secure player view projection", () => {
       ownerShipId: null,
       targetEntityId: null,
     });
+    expect("ownerPlayerId" in view.projectiles.find((candidate) => candidate.id === projectile.id)!).toBe(false);
   });
 
   it("changes only for visible intel and is detached from authoritative state", () => {
@@ -379,7 +381,7 @@ describe("secure player view projection", () => {
 
     const view = projectTeamView(simulation.state, 1)!;
     expect(view).toMatchObject({
-      simulationVersion: 11,
+      simulationVersion: 12,
       viewerPlayerId: null,
       viewerTeamId: 1,
       ownLastCommandSequence: null,
@@ -399,7 +401,7 @@ describe("secure player view projection", () => {
     enemy.focusTargetEntityId = simulation.state.ships.find((ship) => ship.teamId === 1)!.id;
     const view = projectOmniscientView(simulation.state);
 
-    expect(view.simulationVersion).toBe(11);
+    expect(view.simulationVersion).toBe(12);
     expect(view.ships).toHaveLength(simulation.state.ships.length);
     expect(view.structures).toHaveLength(simulation.state.structures.length);
     expect(view.resourceNodes).toHaveLength(simulation.state.resourceNodes.length);
@@ -409,6 +411,7 @@ describe("secure player view projection", () => {
       focusTargetEntityId: enemy.focusTargetEntityId,
     });
     expect(view.players.every((player) => player.economy !== null)).toBe(true);
+    expect(view.players.every((player) => player.stats === null)).toBe(true);
     expect("seed" in view).toBe(false);
     expect("commandQueue" in view).toBe(false);
     expect("visibility" in view).toBe(false);
@@ -450,7 +453,7 @@ describe("visibility serialization", () => {
     legacy.version = 4;
     delete legacy.visibility;
     const restored = restoreSimulation(legacy as unknown as SimulationState);
-    expect(restored.state.version).toBe(11);
+    expect(restored.state.version).toBe(12);
     expect(restored.state.visibility.map((visibility) => visibility.teamId)).toEqual([1, 2]);
     expect(restored.state.visibility.every((visibility) => visibility.visibleEntityIds.length > 0)).toBe(true);
   });

@@ -52,7 +52,7 @@ describe("deterministic replay capture and playback", () => {
     const { recorder, replay } = recordBattle();
     expect(replay.format).toBe("space-rts-replay");
     expect(replay.version).toBe(1);
-    expect(replay.simulationVersion).toBe(11);
+    expect(replay.simulationVersion).toBe(12);
     expect(replay.finalized).toBe(true);
     expect(replay.actions.map((action) => action.order)).toEqual([1, 2, 3, 4]);
     expect(replay.actions[0]).toMatchObject({

@@ -37,12 +37,13 @@ const hasOwn = (record: object, key: unknown): key is string =>
 
 export const MAX_PLAYERS = 8;
 /** Bump whenever deterministic rules, unit data, or the lockstep bootstrap contract changes. */
-export const LOCKSTEP_PROTOCOL_VERSION = 8;
+export const LOCKSTEP_PROTOCOL_VERSION = 9;
 export const MATCH_LOADING_MS = 2_000;
 export const MATCH_COUNTDOWN_MS = 3_000;
 export const MATCH_START_DELAY_MS = MATCH_LOADING_MS + MATCH_COUNTDOWN_MS;
 export const MAX_COMMAND_BATCH = 32;
 export const MAX_FLEET_COMMAND_UNITS = 2_048;
+export const MAX_CHAT_LENGTH = 240;
 export const MAX_MESSAGE_BYTES = 64 * 1024;
 export const REPLAY_CHUNK_BYTES = 32 * 1024;
 export const MAX_REPLAY_BYTES = 32 * 1024 * 1024;
@@ -51,6 +52,7 @@ export const MAX_REPLAY_CHUNKS = MAX_REPLAY_BYTES / REPLAY_CHUNK_BYTES;
 export type MatchPhase = "lobby" | "playing" | "finished";
 export type MatchMode = "ffa" | "teams";
 export type SpectatorMode = "team" | "replay";
+export type ChatChannel = "all" | "team";
 export type ProjectedViewState = PlayerViewState | TeamViewState;
 export type MapPreset =
   | "orbital-ring"
@@ -131,6 +133,7 @@ export type ClientMessage =
   | { type: "hello"; playerId?: string; name: string; reconnectToken?: string; lockstepVersion: number }
   | { type: "spectate"; name: string; mode: SpectatorMode; token?: string; spectatorId?: string; reconnectToken?: string; lockstepVersion: number }
   | { type: "ping"; clientTime: number }
+  | { type: "chat"; channel: ChatChannel; text: string }
   | { type: "request_snapshot"; reason: "join" | "reconnect" | "checksum" | "manual" }
   | { type: "set_faction"; faction: FactionId; playerId?: string }
   | { type: "set_ready"; ready: boolean }
@@ -189,6 +192,7 @@ export type ServerMessage =
   | { type: "replay_manifest"; manifest: ReplayManifest }
   | { type: "replay_chunk"; index: number; chunkCount: number; data: string }
   | { type: "pong"; clientTime: number; serverTime: number; tick: number }
+  | { type: "chat"; channel: ChatChannel; senderId: string; senderName: string; senderTeamId: number; text: string; sentAt: number }
   | { type: "error"; code: string; message: string };
 
 type JsonRecord = Record<string, unknown>;
@@ -198,6 +202,8 @@ const isFiniteNumber = (value: unknown): value is number => typeof value === "nu
 const isInteger = (value: unknown): value is number => Number.isSafeInteger(value);
 const isString = (value: unknown, maximum = 64): value is string =>
   typeof value === "string" && value.length > 0 && value.length <= maximum;
+const isChatText = (value: unknown): value is string =>
+  typeof value === "string" && value.trim().length > 0 && value.length <= MAX_CHAT_LENGTH;
 const isVec2 = (value: unknown): value is { x: number; z: number } =>
   isRecord(value) && isFiniteNumber(value.x) && isFiniteNumber(value.z);
 
@@ -261,7 +267,7 @@ function isAiPlans(value: unknown): boolean {
 function isProjectedViewState(value: unknown): value is ProjectedViewState {
   if (!isRecord(value)
     || value.version !== 1
-    || value.simulationVersion !== 11
+    || value.simulationVersion !== 12
     || !isInteger(value.tick) || value.tick < 0
     || !isInteger(value.viewerTeamId) || value.viewerTeamId < 1
     || !Array.isArray(value.territories)
@@ -404,6 +410,9 @@ export function parseClientMessage(raw: string): ClientMessage | null {
     }
     case "ping":
       return isFiniteNumber(value.clientTime) ? value as ClientMessage : null;
+    case "chat":
+      return (value.channel === "all" || value.channel === "team") && isChatText(value.text)
+        ? value as ClientMessage : null;
     case "request_snapshot":
       return ["join", "reconnect", "checksum", "manual"].includes(String(value.reason)) ? value as ClientMessage : null;
     case "set_faction":
@@ -476,7 +485,7 @@ export function parseServerMessage(raw: string): ServerMessage | null {
     const state = value.state;
     return isInteger(value.tick) && value.tick >= 0
       && isInteger(value.checksum)
-      && isRecord(state) && state.version === 11
+      && isRecord(state) && state.version === 12
       && state.tick === value.tick && state.checksum === value.checksum
       && isInteger(state.seed)
       && Array.isArray(state.territories)
@@ -538,6 +547,13 @@ export function parseServerMessage(raw: string): ServerMessage | null {
       ? value as ServerMessage : null;
   }
   if (value.type === "lobby") return isLobbyState(value.lobby) ? value as ServerMessage : null;
+  if (value.type === "chat") {
+    return (value.channel === "all" || value.channel === "team")
+      && isString(value.senderId, 80) && isString(value.senderName, 32)
+      && isInteger(value.senderTeamId) && value.senderTeamId >= 1 && value.senderTeamId <= MAX_PLAYERS
+      && isChatText(value.text) && isInteger(value.sentAt) && value.sentAt >= 0
+      ? value as ServerMessage : null;
+  }
   if (value.type === "replay_manifest") {
     return isReplayManifest(value.manifest) ? value as ServerMessage : null;
   }

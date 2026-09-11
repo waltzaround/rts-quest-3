@@ -16,9 +16,32 @@ const ENGINE_CELL_SIZE = 135;
 const MAX_AUDIBLE_DISTANCE = 1_500;
 const CUE_LIFETIME_MS = 280;
 const MASTER_LEVEL = 0.7;
-const ENGINE_BUS_LEVEL = 0.46;
+const ENGINE_BUS_LEVEL = 0.24;
+const MUSIC_BUS_LEVEL = 0.17;
+const MUSIC_LOOP_SECONDS = 32;
 
 type CueKind = WeaponTypeId | "impact" | "explosion" | "command" | "construction" | "launch" | "victory";
+
+const CUE_ASSET_PATHS: Readonly<Record<CueKind, string>> = {
+  pointDefense: "/audio/point-defense.ogg",
+  flakCannon: "/audio/flak-cannon.ogg",
+  autocannon: "/audio/autocannon.ogg",
+  torpedo: "/audio/torpedo.ogg",
+  plasma: "/audio/plasma.ogg",
+  heavyRail: "/audio/heavy-rail.ogg",
+  lightArtillery: "/audio/light-artillery.ogg",
+  siegeArtillery: "/audio/siege-artillery.ogg",
+  strategicArtillery: "/audio/strategic-artillery.ogg",
+  beam: "/audio/beam.wav",
+  impact: "/audio/impact.ogg",
+  explosion: "/audio/explosion.ogg",
+  command: "/audio/command.ogg",
+  construction: "/audio/construction.ogg",
+  launch: "/audio/launch.ogg",
+  victory: "/audio/victory.ogg",
+};
+
+const ENGINE_ASSET_PATH = "/audio/engine-loop.ogg";
 
 interface EntityAudioSnapshot {
   x: number;
@@ -35,6 +58,7 @@ interface PendingCue {
   count: number;
   priority: number;
   queuedAt: number;
+  distant: boolean;
 }
 
 interface AggregatedCue extends PendingCue {
@@ -45,6 +69,7 @@ interface TransientVoice {
   source: AudioBufferSourceNode | null;
   highpass: BiquadFilterNode;
   presence: BiquadFilterNode;
+  lowpass: BiquadFilterNode;
   gain: GainNode;
   panner: PannerNode;
   priority: number;
@@ -149,7 +174,7 @@ const CUE_TONE: Readonly<Record<CueKind, { highpass: number; presence: number; b
 };
 
 const SHIP_ENGINE_WEIGHT: Readonly<Record<ShipState["class"], number>> = {
-  fighter: 0.32,
+  fighter: 0.04,
   fabricator: 0.68,
   frigate: 0.82,
   bomber: 0.58,
@@ -165,7 +190,7 @@ const SHIP_ENGINE_WEIGHT: Readonly<Record<ShipState["class"], number>> = {
 };
 
 const SHIP_ENGINE_TONE: Readonly<Record<ShipState["class"], number>> = {
-  fighter: 1_450,
+  fighter: 520,
   fabricator: 980,
   bomber: 1_050,
   frigate: 820,
@@ -202,6 +227,12 @@ function makePanner(context: AudioContext, refDistance: number, rolloff: number)
   panner.maxDistance = MAX_AUDIBLE_DISTANCE;
   panner.rolloffFactor = rolloff;
   return panner;
+}
+
+async function loadAudioBuffer(context: AudioContext, path: string): Promise<AudioBuffer> {
+  const response = await fetch(path);
+  if (!response.ok) throw new Error(`Unable to load audio sample ${path}: ${response.status}`);
+  return context.decodeAudioData(await response.arrayBuffer());
 }
 
 function makeBuffer(
@@ -339,6 +370,58 @@ function createCueBuffers(context: AudioContext): Record<CueKind, AudioBuffer> {
   };
 }
 
+function createMusicBuffer(context: AudioContext): AudioBuffer {
+  // A compact, deterministic minor-key pad. Keeping every partial below the
+  // low midrange avoids exposed lead tones and leaves weapon cues readable.
+  const sampleRate = Math.min(context.sampleRate, 24_000);
+  const frameCount = Math.floor(sampleRate * MUSIC_LOOP_SECONDS);
+  const buffer = context.createBuffer(2, frameCount, sampleRate);
+  const chords = [
+    [73.42, 110, 146.83, 174.61], // D minor
+    [58.27, 87.31, 116.54, 146.83], // B-flat major
+    [65.41, 98, 130.81, 164.81], // C major
+    [55, 82.41, 110, 130.81], // A minor
+  ] as const;
+  const chordSeconds = MUSIC_LOOP_SECONDS / chords.length;
+  const crossfadeSeconds = 2.2;
+  const loopFrequency = (frequency: number) => Math.round(frequency * MUSIC_LOOP_SECONDS) / MUSIC_LOOP_SECONDS;
+  const smoothstep = (value: number) => value * value * (3 - 2 * value);
+  const chordSample = (chord: readonly number[], time: number, side: -1 | 1): number => {
+    let sample = 0;
+    for (let note = 0; note < chord.length; note += 1) {
+      const frequency = loopFrequency(chord[note]!);
+      const phase = side * (0.16 + note * 0.11);
+      const weight = [0.34, 0.22, 0.16, 0.11][note]!;
+      const fundamental = Math.sin(Math.PI * 2 * frequency * time + phase);
+      const second = Math.sin(Math.PI * 2 * frequency * 2 * time + phase * 1.7) * 0.16;
+      const third = Math.sin(Math.PI * 2 * frequency * 3 * time - phase * 0.7) * 0.045;
+      sample += (fundamental + second + third) * weight;
+    }
+    return sample;
+  };
+
+  for (let channel = 0; channel < 2; channel += 1) {
+    const output = buffer.getChannelData(channel);
+    const side = channel === 0 ? -1 : 1;
+    for (let frame = 0; frame < frameCount; frame += 1) {
+      const time = frame / sampleRate;
+      const chordIndex = Math.floor(time / chordSeconds) % chords.length;
+      const localTime = time % chordSeconds;
+      const previousIndex = (chordIndex + chords.length - 1) % chords.length;
+      const blend = smoothstep(Math.min(1, localTime / crossfadeSeconds));
+      const pad = chordSample(chords[previousIndex]!, time, side) * (1 - blend)
+        + chordSample(chords[chordIndex]!, time, side) * blend;
+      const breathing = 0.78 + Math.sin(Math.PI * 2 * time / 8 + side * 0.35) * 0.08;
+      const beatAge = time % 2;
+      const pulseFrequency = loopFrequency(chords[chordIndex]![0] * 0.5);
+      const pulse = Math.sin(Math.PI * 2 * pulseFrequency * beatAge)
+        * Math.exp(-beatAge * 5.5) * 0.075;
+      output[frame] = THREE.MathUtils.clamp(pad * breathing * 0.34 + pulse, -0.72, 0.72);
+    }
+  }
+  return buffer;
+}
+
 function createEngineBuffer(context: AudioContext): AudioBuffer {
   return makeBuffer(context, 2.4, (time, random) => {
     const noise = random() * 2 - 1;
@@ -379,13 +462,17 @@ export class ScalableBattleAudio {
   private masterGain: GainNode | null = null;
   private transientBus: GainNode | null = null;
   private engineBus: GainNode | null = null;
+  private musicBus: GainNode | null = null;
+  private musicSource: AudioBufferSourceNode | null = null;
   private cueBuffers: Record<CueKind, AudioBuffer> | null = null;
   private engineBuffer: AudioBuffer | null = null;
+  private assetLoadPromise: Promise<void> | null = null;
   private readonly transientVoices: TransientVoice[] = [];
   private readonly engineVoices: EngineVoice[] = [];
   private readonly pendingCues: PendingCue[] = [];
   private readonly entitySnapshots = new Map<number, EntityAudioSnapshot>();
   private readonly shipsById = new Map<number, ShipState>();
+  private readonly distantProjectileExpiry = new Map<number, number>();
   private readonly clusterScratch = new Map<string, MutableEngineCluster>();
   private readonly forward = new THREE.Vector3();
   private readonly up = new THREE.Vector3();
@@ -403,6 +490,7 @@ export class ScalableBattleAudio {
     if (!this.metrics.enabled || !AudioContextConstructor || this.hidden) return;
     if (!this.context) this.initialize(AudioContextConstructor);
     if (this.context?.state === "suspended") await this.context.resume();
+    await this.assetLoadPromise;
   }
 
   async setEnabled(enabled: boolean): Promise<void> {
@@ -477,17 +565,22 @@ export class ScalableBattleAudio {
       let kind: CueKind | null = null;
       let entityId: number | null = null;
       let selected = false;
+      let distant = false;
       if (event.type === "weaponFired") {
         const ship = this.shipsById.get(event.shipId);
         kind = event.weaponTypeId;
         entityId = event.shipId;
         selected = selectedShipIds.has(event.shipId);
+        distant = ship?.class === "fighter";
+        if (distant) this.distantProjectileExpiry.set(event.projectileId, now + 12_000);
       } else if (event.type === "hit") {
         kind = "impact";
         entityId = event.targetId;
+        distant = this.distantProjectileExpiry.delete(event.projectileId);
       } else if (event.type === "destroyed") {
         kind = "explosion";
         entityId = event.entityId;
+        distant = this.shipsById.get(event.entityId)?.class === "fighter";
       } else if (event.type === "commandAccepted" && event.unitIds.length > 0) {
         kind = "command";
         entityId = event.unitIds[0] ?? null;
@@ -504,6 +597,7 @@ export class ScalableBattleAudio {
           producedShip = eventShipsById.get(event.shipId);
         }
         if (producedShip) {
+          distant = producedShip.class === "fighter";
           this.entitySnapshots.set(producedShip.id, {
             x: producedShip.x, y: producedShip.y + 5, z: producedShip.z, seenAt: now,
           });
@@ -517,8 +611,9 @@ export class ScalableBattleAudio {
       if (!position) continue;
       const cellX = Math.floor(position.x / 100);
       const cellZ = Math.floor(position.z / 100);
-      const key = `${kind}:${cellX}:${cellZ}`;
+      const key = `${kind}:${distant ? "distant" : "near"}:${cellX}:${cellZ}`;
       const weight = selected ? 2.2 : 1;
+      const priorityScale = distant ? 0.22 : 1;
       const existing = grouped.get(key);
       if (existing) {
         existing.weight += weight;
@@ -526,7 +621,7 @@ export class ScalableBattleAudio {
         existing.y += position.y * weight;
         existing.z += position.z * weight;
         existing.count += 1;
-        existing.priority = Math.max(existing.priority, CUE_BASE_PRIORITY[kind] * (selected ? 1.5 : 1));
+        existing.priority = Math.max(existing.priority, CUE_BASE_PRIORITY[kind] * (selected ? 1.5 : 1) * priorityScale);
       } else {
         grouped.set(key, {
           kind,
@@ -535,8 +630,9 @@ export class ScalableBattleAudio {
           z: position.z * weight,
           weight,
           count: 1,
-          priority: CUE_BASE_PRIORITY[kind] * (selected ? 1.5 : 1),
+          priority: CUE_BASE_PRIORITY[kind] * (selected ? 1.5 : 1) * priorityScale,
           queuedAt: now,
+          distant,
         });
       }
     }
@@ -572,6 +668,7 @@ export class ScalableBattleAudio {
     this.pendingCues.length = 0;
     this.entitySnapshots.clear();
     this.shipsById.clear();
+    this.distantProjectileExpiry.clear();
     this.metrics.pendingCues = 0;
     this.metrics.entitySnapshots = 0;
     if (!this.context) return;
@@ -635,8 +732,21 @@ export class ScalableBattleAudio {
     engineBus.gain.value = ENGINE_BUS_LEVEL;
     engineBus.connect(master);
     this.engineBus = engineBus;
-    this.cueBuffers = createCueBuffers(context);
-    this.engineBuffer = createEngineBuffer(context);
+    const musicBus = context.createGain();
+    musicBus.gain.value = 0;
+    const musicTone = context.createBiquadFilter();
+    musicTone.type = "lowpass";
+    musicTone.frequency.value = 720;
+    musicTone.Q.value = 0.35;
+    const musicSource = context.createBufferSource();
+    musicSource.buffer = createMusicBuffer(context);
+    musicSource.loop = true;
+    musicSource.connect(musicTone).connect(musicBus).connect(master);
+    musicSource.start();
+    setParam(musicBus.gain, MUSIC_BUS_LEVEL, context.currentTime, 1.8);
+    this.musicBus = musicBus;
+    this.musicSource = musicSource;
+    this.assetLoadPromise = this.loadSampleAssets(context);
 
     for (let index = 0; index < MAX_TRANSIENT_VOICES; index += 1) {
       const highpass = context.createBiquadFilter();
@@ -648,15 +758,41 @@ export class ScalableBattleAudio {
       presence.frequency.value = 1_800;
       presence.Q.value = 0.85;
       presence.gain.value = 4;
+      const lowpass = context.createBiquadFilter();
+      lowpass.type = "lowpass";
+      lowpass.frequency.value = 18_000;
+      lowpass.Q.value = 0.55;
       const gain = context.createGain();
       gain.gain.value = 0;
       const panner = makePanner(context, 140, 1.05);
-      highpass.connect(presence).connect(gain).connect(panner).connect(transientBus);
-      this.transientVoices.push({ source: null, highpass, presence, gain, panner, priority: 0, startedAt: 0 });
+      highpass.connect(presence).connect(lowpass).connect(gain).connect(panner).connect(transientBus);
+      this.transientVoices.push({ source: null, highpass, presence, lowpass, gain, panner, priority: 0, startedAt: 0 });
     }
+  }
+
+  private async loadSampleAssets(context: AudioContext): Promise<void> {
+    const cueEntries = Object.entries(CUE_ASSET_PATHS) as [CueKind, string][];
+    try {
+      const [engineBuffer, ...cueBuffers] = await Promise.all([
+        loadAudioBuffer(context, ENGINE_ASSET_PATH),
+        ...cueEntries.map(([, path]) => loadAudioBuffer(context, path)),
+      ]);
+      if (this.context !== context) return;
+      this.cueBuffers = Object.fromEntries(
+        cueEntries.map(([kind], index) => [kind, cueBuffers[index]!]),
+      ) as Record<CueKind, AudioBuffer>;
+      this.engineBuffer = engineBuffer;
+      this.startEngineVoices(context, engineBuffer);
+    } catch (error) {
+      console.warn("Battle audio samples could not be loaded.", error);
+    }
+  }
+
+  private startEngineVoices(context: AudioContext, engineBuffer: AudioBuffer): void {
+    if (!this.engineBus || this.engineVoices.length > 0) return;
     for (let index = 0; index < MAX_ENGINE_VOICES; index += 1) {
       const source = context.createBufferSource();
-      source.buffer = this.engineBuffer;
+      source.buffer = engineBuffer;
       source.loop = true;
       source.playbackRate.value = 0.82 + index * 0.013;
       const highpass = context.createBiquadFilter();
@@ -665,13 +801,13 @@ export class ScalableBattleAudio {
       highpass.Q.value = 0.7;
       const lowpass = context.createBiquadFilter();
       lowpass.type = "lowpass";
-      lowpass.frequency.value = 900;
-      lowpass.Q.value = 0.55;
+      lowpass.frequency.value = 280;
+      lowpass.Q.value = 0.15;
       const gain = context.createGain();
       gain.gain.value = 0;
       const panner = makePanner(context, 115, 0.92);
-      source.connect(highpass).connect(lowpass).connect(gain).connect(panner).connect(engineBus);
-      source.start(0, (index * 0.173) % this.engineBuffer.duration);
+      source.connect(highpass).connect(lowpass).connect(gain).connect(panner).connect(this.engineBus);
+      source.start(0, (index * 0.173) % engineBuffer.duration);
       this.engineVoices.push({ key: null, source, highpass, lowpass, gain, panner, level: 0 });
     }
   }
@@ -715,6 +851,7 @@ export class ScalableBattleAudio {
   private playCue(cue: PendingCue): void {
     if (!this.context || !this.cueBuffers) return;
     const context = this.context;
+    const buffer = this.cueBuffers[cue.kind];
     let voice = this.transientVoices.find((candidate) => candidate.source === null);
     if (!voice) {
       voice = this.transientVoices.reduce((weakest, candidate) => candidate.priority < weakest.priority ? candidate : weakest);
@@ -727,23 +864,27 @@ export class ScalableBattleAudio {
       voice.source!.disconnect();
     }
     const source = context.createBufferSource();
-    source.buffer = this.cueBuffers[cue.kind];
-    source.playbackRate.value = 0.975 + Math.random() * 0.05;
+    source.buffer = buffer;
+    source.playbackRate.value = cue.distant ? 0.9 + Math.random() * 0.035 : 0.975 + Math.random() * 0.05;
     // A large volley should sound denser, not turn into one louder and lower-pitched shot.
     const volleyGain = 1 + Math.log2(cue.count + 1) * 0.12;
-    const gain = CUE_GAIN[cue.kind] * Math.min(1.55, volleyGain);
+    const gain = CUE_GAIN[cue.kind] * Math.min(1.55, volleyGain) * (cue.distant ? 0.1 : 1);
     const tone = CUE_TONE[cue.kind];
     const startsAt = context.currentTime + 0.002;
     // These voices play transient samples. Ramping their gain/filter setup over
     // the first 3-4 ms erased the muzzle crack and exposed only the tonal body.
     voice.highpass.frequency.cancelScheduledValues(context.currentTime);
-    voice.highpass.frequency.setValueAtTime(tone.highpass, startsAt);
+    voice.highpass.frequency.setValueAtTime(cue.distant ? 62 : tone.highpass, startsAt);
     voice.presence.frequency.cancelScheduledValues(context.currentTime);
-    voice.presence.frequency.setValueAtTime(tone.presence, startsAt);
+    voice.presence.frequency.setValueAtTime(cue.distant ? 1_150 : tone.presence, startsAt);
     voice.presence.gain.cancelScheduledValues(context.currentTime);
-    voice.presence.gain.setValueAtTime(tone.boost, startsAt);
+    voice.presence.gain.setValueAtTime(cue.distant ? -8 : tone.boost, startsAt);
+    voice.lowpass.frequency.cancelScheduledValues(context.currentTime);
+    voice.lowpass.frequency.setValueAtTime(cue.distant ? 900 : 18_000, startsAt);
     voice.gain.gain.cancelScheduledValues(context.currentTime);
     voice.gain.gain.setValueAtTime(gain, startsAt);
+    voice.panner.refDistance = cue.distant ? 32 : 140;
+    voice.panner.rolloffFactor = cue.distant ? 1.35 : 1.05;
     setPannerPosition(voice.panner, cue.x, cue.y, cue.z, context.currentTime);
     source.connect(voice.highpass);
     voice.source = source;
@@ -777,6 +918,10 @@ export class ScalableBattleAudio {
   private updateEngineClusters(ships: readonly ShipState[], listener: THREE.Vector3, at: number): void {
     this.clusterScratch.clear();
     for (const ship of ships) {
+      // Fighter engines are intentionally absent from the continuous bed. The
+      // shared loop exposes a narrow tonal whistle when many distant fighter
+      // voices accumulate; their transient weapons still provide presence.
+      if (ship.class === "fighter") continue;
       const dx = ship.x - listener.x;
       const dy = ship.y - listener.y;
       const dz = ship.z - listener.z;
@@ -831,9 +976,9 @@ export class ScalableBattleAudio {
       voice.level = Math.min(0.12, 0.01 + Math.sqrt(cluster.weight) * 0.014);
       setPannerPosition(voice.panner, cluster.x, cluster.y, cluster.z, at);
       setParam(voice.gain.gain, voice.level, at, 0.12);
-      setParam(voice.source.playbackRate, cluster.rate, at, 0.16);
-      setParam(voice.highpass.frequency, 42 + Math.min(28, (cluster.rate - 0.8) * 65), at, 0.2);
-      setParam(voice.lowpass.frequency, Math.min(1_350, cluster.tone * 0.82 + cluster.count * 9), at, 0.2);
+      setParam(voice.source.playbackRate, Math.min(0.9, cluster.rate * 0.84), at, 0.16);
+      setParam(voice.highpass.frequency, 34 + Math.min(18, Math.max(0, cluster.rate - 0.8) * 42), at, 0.2);
+      setParam(voice.lowpass.frequency, THREE.MathUtils.clamp(cluster.tone * 0.22 + cluster.count * 2, 190, 340), at, 0.2);
     }
     for (const voice of this.engineVoices) {
       if (used.has(voice)) continue;
@@ -850,6 +995,9 @@ export class ScalableBattleAudio {
       if (now - snapshot.seenAt <= 12_000) continue;
       this.entitySnapshots.delete(id);
       this.shipsById.delete(id);
+    }
+    for (const [projectileId, expiresAt] of this.distantProjectileExpiry) {
+      if (expiresAt < now) this.distantProjectileExpiry.delete(projectileId);
     }
     this.metrics.entitySnapshots = this.entitySnapshots.size;
   }

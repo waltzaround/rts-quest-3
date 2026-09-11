@@ -18,7 +18,7 @@ export class MatchStartView extends MatchStartSequence {
       child.inert = true;
     }
     document.getElementById("match-intro-map")!.textContent = map;
-    document.getElementById("match-intro-mode")!.textContent = synchronized ? "MULTIPLAYER // SYNCHRONIZED START" : "LOCAL SKIRMISH";
+    document.getElementById("match-intro-mode")!.textContent = synchronized ? "" : "";
     this.lastAnnouncement = "";
     this.overlay.dataset.phase = "loading";
     this.overlay.classList.remove("hidden");
@@ -45,7 +45,7 @@ export class MatchStartView extends MatchStartSequence {
       // A changing animation name restarts the pulse without forced layout.
       number.style.animationName = state.countdown % 2 ? "match-count-odd" : "match-count-even";
     }
-    document.getElementById("match-intro-caption")!.textContent = state.phase === "engage" ? "COMMAND IS YOURS" : "MATCH STARTS IN";
+    document.getElementById("match-intro-caption")!.textContent = state.phase === "engage" ? "" : "";
     const announcement = state.phase === "loading" ? "Preparing battlefield" : state.phase === "engage" ? "Match started" : `Match starts in ${state.countdown}`;
     if (announcement !== this.lastAnnouncement) {
       document.getElementById("match-intro-announcement")!.textContent = announcement;

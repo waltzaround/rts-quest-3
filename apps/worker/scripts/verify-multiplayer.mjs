@@ -13,7 +13,7 @@ function authorityEndpoint(path, protocol = authorityBase.protocol) {
 }
 
 function assertProjectedView(view, label) {
-  if (view.version !== 1 || view.simulationVersion !== 11) {
+  if (view.version !== 1 || view.simulationVersion !== 12) {
     throw new Error(`${label} did not use ProjectedViewState v1 over SimulationState v7`);
   }
   if ("seed" in view || "nextEntityId" in view || "nextTurretId" in view || "nextQueueItemId" in view

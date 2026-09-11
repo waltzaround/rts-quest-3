@@ -93,6 +93,21 @@ export interface EconomyState {
   efficiency: number;
 }
 
+export interface PlayerMatchStats {
+  unitsProduced: number;
+  structuresBuilt: number;
+  enemyShipsDestroyed: number;
+  enemyStructuresDestroyed: number;
+  shipsLost: number;
+  structuresLost: number;
+  alloyCollected: number;
+  energyGenerated: number;
+  alloySpent: number;
+  energySpent: number;
+  damageDealt: number;
+  damageTaken: number;
+}
+
 export interface PlayerState {
   id: PlayerId;
   faction: FactionId;
@@ -102,6 +117,7 @@ export interface PlayerState {
   state: "playing" | "disconnected" | "defeated";
   lastCommandSequence: number;
   economy: EconomyState;
+  stats: PlayerMatchStats;
 }
 
 export interface TeamState {
@@ -345,6 +361,8 @@ export interface ShipState {
 export interface ProjectileState {
   id: EntityId;
   ownerShipId: EntityId;
+  /** Retained for score attribution if the firing entity dies before impact. */
+  ownerPlayerId?: PlayerId;
   ownerTeamId: TeamId;
   weaponTypeId: WeaponTypeId;
   targetEntityId: EntityId;
@@ -439,7 +457,7 @@ export type SimulationEvent =
   | { type: "victory"; tick: number; winnerTeamId: TeamId };
 
 export interface SimulationState {
-  version: 11;
+  version: 12;
   seed: number;
   mapPreset?: "orbital-ring" | "crossfire" | "open-expanse" | "asteroid-belt" | "spiral-arms" | "shattered-core" | "amazon-tunnel" | "core-rush" | "star-fortress" | "twin-gates" | "broken-halo" | "resource-islands";
   tick: number;
@@ -487,6 +505,8 @@ export interface PlayerViewPlayerState {
   state: PlayerState["state"];
   isAi: boolean;
   economy: EconomyState | null;
+  /** Hidden until combat resolution to avoid leaking live opponent intelligence. */
+  stats: PlayerMatchStats | null;
 }
 
 export interface PlayerViewTurretState {
@@ -574,7 +594,7 @@ export interface PlayerViewProjectileState {
 
 export interface PlayerViewState {
   version: 1;
-  simulationVersion: 11;
+  simulationVersion: 12;
   territories: TerritoryFieldState[];
   tick: number;
   viewerPlayerId: PlayerId;
@@ -594,7 +614,7 @@ export interface PlayerViewState {
 
 export interface TeamViewState {
   version: 1;
-  simulationVersion: 11;
+  simulationVersion: 12;
   territories: TerritoryFieldState[];
   tick: number;
   viewerPlayerId: null;
@@ -614,7 +634,7 @@ export interface TeamViewState {
 
 export interface OmniscientViewState {
   version: 1;
-  simulationVersion: 11;
+  simulationVersion: 12;
   territories: TerritoryFieldState[];
   tick: number;
   players: PlayerViewPlayerState[];

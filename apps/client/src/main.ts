@@ -43,6 +43,7 @@ import {
   type FormationAssignment,
   type GameCommand,
   type ObstacleState,
+  type PlayerMatchStats,
   type PlayerId,
   type ProjectileState,
   type CommandResult,
@@ -58,9 +59,11 @@ import {
   type WeaponTypeId,
 } from "@space-rts/game-core";
 import {
+  MAX_CHAT_LENGTH,
   MAX_REPLAY_BYTES,
   LOCKSTEP_PROTOCOL_VERSION,
   parseServerMessage,
+  type ChatChannel,
   type ClientMessage,
   type LobbyListEntry,
   type LobbySettings,
@@ -92,6 +95,11 @@ const element = <T extends HTMLElement>(id: string): T => {
 };
 
 const canvas = element<HTMLCanvasElement>("battlefield");
+const chatPanel = element<HTMLElement>("chat-panel");
+const chatMessagesElement = element<HTMLElement>("chat-messages");
+const chatCompose = element<HTMLFormElement>("chat-compose");
+const chatInput = element<HTMLInputElement>("chat-input");
+const chatChannelElement = element<HTMLElement>("chat-channel");
 const matchStart = new MatchStartView();
 let lastCountdownStartsAt = 0;
 let awaitingMatchBootstrap = false;
@@ -852,6 +860,9 @@ const authorityUrl = import.meta.env.VITE_AUTHORITY_URL as string | undefined
     : location.origin.replace(/^http/, "ws"));
 let networkSocket: WebSocket | null = null;
 let networkMode = false;
+let chatChannel: ChatChannel = "all";
+let chatFadeTimer = 0;
+let chatMessages: Array<Extract<ServerMessage, { type: "chat" }>> = [];
 let landingLobbyActive = true;
 let networkPanelOpenedFromGame = false;
 let demoMode = false;
@@ -1302,7 +1313,8 @@ for (const family of ["command", "alloy", "energy", "fabrication", "shipyard", "
   }
 }
 const tacticalResourceIcons = createTacticalIconBatch(6, 1_024);
-const tacticalObstacleIcons = createTacticalIconBatch(10, 1_024, 0.09, 0.94, THREE.NormalBlending);
+const tacticalObstacleIcons = createTacticalIconBatch(48, 1_024, 0.18, 0.975, THREE.NormalBlending);
+tacticalObstacleIcons.geometry.rotateX(-Math.PI / 2);
 const tacticalIconMatrix = new THREE.Matrix4();
 const tacticalIconPosition = new THREE.Vector3();
 const tacticalIconScale = new THREE.Vector3();
@@ -1374,7 +1386,6 @@ let fps = 60;
 let frameCounter = 0;
 let fpsTime = lastTime;
 let toastTimer = 0;
-let eventLines: string[] = ["<b>SYS</b> deterministic scenario initialized"];
 
 const cameraRig = {
   target: new THREE.Vector3(0, 0, 0),
@@ -1822,13 +1833,10 @@ const fogExploredCanvas = document.createElement("canvas");
 const fogVisibleCanvas = document.createElement("canvas");
 const fogCompositeCanvas = document.createElement("canvas");
 const fogResizeCanvas = document.createElement("canvas");
-const fogNoiseCanvas = document.createElement("canvas");
 for (const layer of [fogExploredCanvas, fogVisibleCanvas, fogCompositeCanvas, fogResizeCanvas]) {
   layer.width = FOG_TEXTURE_SIZE;
   layer.height = FOG_TEXTURE_SIZE;
 }
-fogNoiseCanvas.width = 64;
-fogNoiseCanvas.height = 64;
 
 function fogCanvasContext(layer: HTMLCanvasElement): CanvasRenderingContext2D {
   const context = layer.getContext("2d");
@@ -1839,37 +1847,6 @@ const fogExploredContext = fogCanvasContext(fogExploredCanvas);
 const fogVisibleContext = fogCanvasContext(fogVisibleCanvas);
 const fogCompositeContext = fogCanvasContext(fogCompositeCanvas);
 const fogResizeContext = fogCanvasContext(fogResizeCanvas);
-const fogNoiseContext = fogCanvasContext(fogNoiseCanvas);
-
-const fogNoiseRandom = mulberry32(0xf06c0de);
-fogNoiseContext.clearRect(0, 0, fogNoiseCanvas.width, fogNoiseCanvas.height);
-for (let index = 0; index < 180; index += 1) {
-  const value = 38 + Math.floor(fogNoiseRandom() * 46);
-  fogNoiseContext.fillStyle = `rgba(${value * 0.45},${value * 0.8},${value},${0.1 + fogNoiseRandom() * 0.18})`;
-  const size = fogNoiseRandom() > 0.86 ? 2 : 1;
-  fogNoiseContext.fillRect(
-    Math.floor(fogNoiseRandom() * fogNoiseCanvas.width),
-    Math.floor(fogNoiseRandom() * fogNoiseCanvas.height),
-    size,
-    size,
-  );
-}
-fogNoiseContext.strokeStyle = "rgba(71, 126, 151, .09)";
-fogNoiseContext.lineWidth = 1;
-for (let offset = -64; offset < 64; offset += 12) {
-  fogNoiseContext.beginPath();
-  fogNoiseContext.moveTo(offset, 64);
-  fogNoiseContext.lineTo(offset + 64, 0);
-  fogNoiseContext.stroke();
-}
-fogNoiseContext.strokeStyle = "rgba(50, 91, 112, .045)";
-for (let offset = 0; offset < 128; offset += 24) {
-  fogNoiseContext.beginPath();
-  fogNoiseContext.moveTo(offset, 0);
-  fogNoiseContext.lineTo(offset - 64, 64);
-  fogNoiseContext.stroke();
-}
-const fogUnexploredNoisePattern = fogResizeContext.createPattern(fogNoiseCanvas, "repeat");
 
 function createFogTexture(canvas: HTMLCanvasElement): THREE.CanvasTexture {
   const texture = new THREE.CanvasTexture(canvas);
@@ -2099,23 +2076,6 @@ function updateFogOfWar(now: number, alpha = 1, force = false): void {
   fogCompositeContext.filter = "blur(2px)";
   fogCompositeContext.drawImage(fogExploredCanvas, 0, 0);
 
-  // Restrict the scan-noise hatch to territory that has never been explored.
-  // Reusing the resize canvas avoids another texture or GPU pass.
-  fogResizeContext.globalCompositeOperation = "source-over";
-  fogResizeContext.globalAlpha = 1;
-  fogResizeContext.filter = "none";
-  fogResizeContext.clearRect(0, 0, FOG_TEXTURE_SIZE, FOG_TEXTURE_SIZE);
-  if (fogUnexploredNoisePattern) {
-    fogResizeContext.fillStyle = fogUnexploredNoisePattern;
-    fogResizeContext.fillRect(0, 0, FOG_TEXTURE_SIZE, FOG_TEXTURE_SIZE);
-    fogResizeContext.globalCompositeOperation = "destination-out";
-    fogResizeContext.drawImage(fogExploredCanvas, 0, 0);
-    fogCompositeContext.globalCompositeOperation = "source-over";
-    fogCompositeContext.globalAlpha = 0.95;
-    fogCompositeContext.filter = "none";
-    fogCompositeContext.drawImage(fogResizeCanvas, 0, 0);
-  }
-
   fogCompositeContext.globalCompositeOperation = "destination-out";
   fogCompositeContext.globalAlpha = FOG_VISIBLE_REVEAL;
   fogCompositeContext.filter = "none";
@@ -2187,6 +2147,89 @@ function sendNetworkMessage(message: ClientMessage): boolean {
   if (networkSocket?.readyState !== WebSocket.OPEN) return false;
   networkSocket.send(JSON.stringify(message));
   return true;
+}
+
+function canOpenChat(): boolean {
+  return networkMode && requestedNetworkRole === "player" && networkSocket?.readyState === WebSocket.OPEN;
+}
+
+function setChatChannel(channel: ChatChannel): void {
+  chatChannel = channel;
+  chatChannelElement.textContent = channel.toUpperCase();
+  chatCompose.classList.toggle("team", channel === "team");
+  chatInput.placeholder = channel === "team" ? "MESSAGE TEAM" : "MESSAGE ALL";
+}
+
+function showChatMessages(): void {
+  chatPanel.classList.add("chat-visible");
+  window.clearTimeout(chatFadeTimer);
+  chatFadeTimer = window.setTimeout(() => {
+    if (!chatPanel.classList.contains("chat-composing")) chatPanel.classList.remove("chat-visible");
+  }, 9_000);
+}
+
+function renderChatMessages(): void {
+  const fragment = document.createDocumentFragment();
+  for (const message of chatMessages) {
+    const line = document.createElement("article");
+    line.className = `chat-message ${message.channel}`;
+    const channel = document.createElement("span");
+    channel.className = "chat-message-channel";
+    channel.textContent = message.channel === "team" ? "TEAM" : "ALL";
+    const sender = document.createElement("strong");
+    sender.textContent = message.senderName;
+    const text = document.createElement("p");
+    text.textContent = message.text;
+    line.append(channel, sender, text);
+    fragment.append(line);
+  }
+  chatMessagesElement.replaceChildren(fragment);
+}
+
+function receiveChat(message: Extract<ServerMessage, { type: "chat" }>): void {
+  chatMessages = [...chatMessages, message].slice(-6);
+  renderChatMessages();
+  showChatMessages();
+}
+
+function openChat(channel: ChatChannel): boolean {
+  if (!canOpenChat()) return false;
+  setChatChannel(channel);
+  chatCompose.classList.remove("hidden");
+  chatPanel.classList.add("chat-composing", "chat-visible");
+  window.clearTimeout(chatFadeTimer);
+  chatInput.focus();
+  return true;
+}
+
+function closeChat(clearDraft = true): void {
+  if (clearDraft) chatInput.value = "";
+  chatCompose.classList.add("hidden");
+  chatPanel.classList.remove("chat-composing");
+  if (chatMessages.length > 0) showChatMessages();
+  else chatPanel.classList.remove("chat-visible");
+  chatInput.blur();
+}
+
+function sendChat(channel = chatChannel): void {
+  const text = chatInput.value.trim().slice(0, MAX_CHAT_LENGTH);
+  if (!text) {
+    closeChat();
+    return;
+  }
+  if (!sendNetworkMessage({ type: "chat", channel, text })) {
+    showToast("CHAT LINK UNAVAILABLE");
+    return;
+  }
+  closeChat();
+}
+
+function resetChat(): void {
+  window.clearTimeout(chatFadeTimer);
+  chatMessages = [];
+  chatMessagesElement.replaceChildren();
+  closeChat();
+  setChatChannel("all");
 }
 
 function generateLobbyCode(): string {
@@ -2382,7 +2425,6 @@ function installReplayArchive(archive: ReplayArchive): void {
     scrub.value = String(replayPlayer.startTick);
     setReplayPlaying(false);
     updateReplayReadout();
-    eventLines = ["<b>REPLAY</b> deterministic archive verified // omniscient review"];
     element("network-overlay").classList.remove("visible");
     element("victory-overlay").classList.remove("visible", "defeat");
     element("directive").textContent = "REPLAY READY // PRESS PLAY OR SCRUB TIMELINE";
@@ -2609,6 +2651,9 @@ function handleServerMessage(message: ServerMessage): void {
     case "lobby":
       updateNetworkLobby(message.lobby);
       return;
+    case "chat":
+      receiveChat(message);
+      return;
     case "match_countdown":
       if (message.startsAt !== lastCountdownStartsAt) {
         lastCountdownStartsAt = message.startsAt;
@@ -2776,7 +2821,6 @@ function installLockstepState(state: SimulationState, notice?: string, focusStar
     : "LOCKSTEP OBSERVER // LOCAL SIMULATION";
   if (notice) {
     showNetworkError("");
-    eventLines = [`<b>NET</b> ${escapeHtml(notice.toLowerCase())}`];
     showToast(notice);
   }
   updateSelectionHud();
@@ -2884,7 +2928,6 @@ function adoptAuthoritativeView(view: ProjectedViewState, notice?: string): void
   }
   battleAudio.captureWorld(clientView.ships, clientView.structures);
   if (notice) {
-    eventLines = [`<b>NET</b> ${escapeHtml(notice.toLowerCase())}`];
     showToast(notice);
   }
   syncMatchResult();
@@ -3329,6 +3372,7 @@ function leaveNetworkMatch(destination: "menu" | "browser" = "menu"): void {
   window.clearInterval(pingTimer);
   networkSocket?.close(1000, "Left match");
   networkSocket = null;
+  resetChat();
   localPlayerId = "pilot-blue";
   const pageUrl = new URL(location.href);
   pageUrl.searchParams.delete("match");
@@ -3690,8 +3734,14 @@ function createObstacleVisual(obstacle: ObstacleState): ObstacleVisual {
     worldRoot.add(group);
     return { group, colliderRing };
   }
+  // Rotate the unit geometry before flattening so random tilts cannot turn a
+  // wide rock into a tall wall that hides ships behind it.
+  const geometry = new THREE.IcosahedronGeometry(1, 1);
+  geometry.rotateX(((seed >>> 3) % 628) / 100);
+  geometry.rotateY(((seed >>> 11) % 628) / 100);
+  geometry.rotateZ(((seed >>> 19) % 628) / 100);
   const asteroid = new THREE.Mesh(
-    new THREE.IcosahedronGeometry(1, 1),
+    geometry,
     new THREE.MeshStandardMaterial({
       color: tint,
       roughness: 1,
@@ -3700,13 +3750,9 @@ function createObstacleVisual(obstacle: ObstacleState): ObstacleVisual {
       flatShading: true,
     }),
   );
-  asteroid.scale.set(obstacle.radius, obstacle.radius * (0.46 + (seed % 11) / 100), obstacle.radius);
-  asteroid.position.y = obstacle.radius * 0.22;
-  asteroid.rotation.set(
-    ((seed >>> 3) % 628) / 100,
-    ((seed >>> 11) % 628) / 100,
-    ((seed >>> 19) % 628) / 100,
-  );
+  const height = Math.min(18, obstacle.radius * (0.3 + (seed % 11) / 100));
+  asteroid.scale.set(obstacle.radius, height, obstacle.radius);
+  asteroid.position.y = height * 0.25;
   group.add(asteroid);
 
   const colliderRing = new THREE.Mesh(
@@ -4225,7 +4271,6 @@ function updateStaticWorldVisuals(now: number): void {
     }
     visual.group.position.set(obstacle.x, 0, obstacle.z);
     visual.group.visible = obstacle.type === "barrier" || !tactical;
-    (visual.colliderRing.material as THREE.MeshBasicMaterial).opacity = 0.18 + Math.sin(now * 0.0008 + obstacle.visualSeed) * 0.04;
   }
   const liveResourceIds = new Set(clientView.resourceNodes.map((node) => node.id));
   for (const [id, visual] of resourceVisuals) {
@@ -4304,7 +4349,7 @@ function updateTacticalWorldMarkers(visible: boolean): void {
     tacticalObstacleIcons.count = 0;
     return;
   }
-  tacticalIconRotation.copy(camera.quaternion);
+  tacticalIconRotation.identity();
   const strategicScale = Math.max(1, cameraRig.distance / STRATEGIC_ZOOM_DISTANCE);
   const distantStructureScale = Math.pow(strategicScale, 0.35);
   let obstacleCount = 0;
@@ -4322,7 +4367,8 @@ function updateTacticalWorldMarkers(visible: boolean): void {
     // perimeter pieces that communicate the actual navigable boundary.
     if (obstacle.radius > terrainFillThreshold) continue;
     tacticalIconPosition.set(obstacle.x, 1, obstacle.z);
-    tacticalIconScale.setScalar(obstacle.radius * strategicScale * 0.72);
+    // Terrain keeps its world footprint at every zoom; it is not a billboard.
+    tacticalIconScale.setScalar(obstacle.radius);
     tacticalIconMatrix.compose(tacticalIconPosition, tacticalIconRotation, tacticalIconScale);
     tacticalObstacleIcons.setMatrixAt(obstacleCount, tacticalIconMatrix);
     tacticalObstacleIcons.setColorAt(obstacleCount, tacticalIconColor.setHex(0x52616a));
@@ -4331,6 +4377,7 @@ function updateTacticalWorldMarkers(visible: boolean): void {
   tacticalObstacleIcons.count = obstacleCount;
   tacticalObstacleIcons.instanceMatrix.needsUpdate = obstacleCount > 0;
   if (tacticalObstacleIcons.instanceColor) tacticalObstacleIcons.instanceColor.needsUpdate = obstacleCount > 0;
+  tacticalIconRotation.copy(camera.quaternion);
   const structureCounts = new Map<TacticalStructureIconKey, number>();
   for (const [key, iconBatch] of tacticalStructureIcons) {
     structureCounts.set(key, 0);
@@ -4663,14 +4710,7 @@ function processEvents(events: SimulationEvent[]): void {
     (event) => event.type === "hit" ? [[event.projectileId, event.targetId] as const] : [],
   ));
   for (const event of events) {
-    if (event.type === "commandAccepted" && event.unitIds.length > 0) {
-      eventLines.unshift(`<b>CMD</b> ${event.commandType} // ${event.unitIds.length} units`);
-    } else if (event.type === "constructionStarted") {
-      eventLines.unshift(`<b>BUILD</b> ${structureLabel(event.structureType, event.playerId)} frame established`);
-    } else if (event.type === "constructionCompleted") {
-      eventLines.unshift(`<b>READY</b> ${structureLabel(event.structureType, event.playerId)} online`);
-    } else if (event.type === "unitProduced") {
-      eventLines.unshift(`<b>DEPLOY</b> ${shipLabel(event.shipClass, getPlayerFaction(event.playerId))} ${event.shipId} launched`);
+    if (event.type === "unitProduced") {
       if (event.playerId === localPlayerId) showToast(`${shipLabel(event.shipClass, getPlayerFaction(event.playerId))} DEPLOYED`);
     } else if (event.type === "weaponFired") {
       const ship = clientView.ships.find((candidate) => candidate.id === event.shipId);
@@ -4753,11 +4793,9 @@ function processEvents(events: SimulationEvent[]): void {
           }
         }
       }
-      if (event.turretId % 7 === 0) eventLines.unshift(`<b>T${event.tick}</b> turret ${event.turretId} → contact ${event.targetId}`);
     } else if (event.type === "artilleryRevealed") {
       const contact = clientView.ships.find((ship) => ship.id === event.entityId)
         ?? clientView.structures.find((structure) => structure.id === event.entityId);
-      eventLines.unshift(`<b>COUNTER-BATTERY</b> artillery contact ${event.entityId} revealed`);
       if (contact && contact.ownerPlayerId !== localPlayerId) showToast(`HOSTILE ARTILLERY ${event.entityId} REVEALED`);
     } else if (event.type === "hit") {
       const origin = effectOrigins.get(event.targetId);
@@ -4819,7 +4857,6 @@ function processEvents(events: SimulationEvent[]): void {
       }
     } else if (event.type === "destroyed") {
       if (lastKnownContacts.delete(event.entityId)) lastKnownContactsDirty = true;
-      eventLines.unshift(`<b>ALERT</b> contact ${event.entityId} destroyed`);
       const origin = effectOrigins.get(event.entityId);
       if (origin) {
         if (stressScenario.activeCount === 0 && isEffectVisible(origin.x, origin.y, origin.z, 1.45)) {
@@ -4835,11 +4872,8 @@ function processEvents(events: SimulationEvent[]): void {
         effectOrigins.delete(event.entityId);
         lastDamageEffectAt.delete(event.entityId);
       }
-    } else if (event.type === "victory") {
-      eventLines.unshift(`<b>END</b> team ${event.winnerTeamId} controls the battlespace`);
     }
   }
-  eventLines = eventLines.slice(0, 4);
 }
 
 function isEffectVisible(x: number, y: number, z: number, margin = 1.2): boolean {
@@ -4929,7 +4963,6 @@ function updateHud(): void {
   }
   const seconds = Math.floor(state.tick * FIXED_DT);
   element("sim-time").textContent = `${Math.floor(seconds / 60).toString().padStart(2, "0")}:${(seconds % 60).toString().padStart(2, "0")}`;
-  element("event-feed").innerHTML = eventLines.map((line) => `<span>${line}</span>`).join("");
   updateProgressionControls();
   updateSelectionHud();
   drawMinimap();
@@ -5333,6 +5366,9 @@ function updateSelectionHud(): void {
     ? [...ships, ...structures].find((entity) => isHostileToLocalPlayer(entity.teamId))
     : undefined;
   const commandDeck = document.querySelector(".command-deck");
+  const hasSelection = ships.length + structures.length > 0;
+  commandDeck?.classList.toggle("selection-active", hasSelection);
+  commandDeck?.setAttribute("aria-hidden", hasSelection ? "false" : "true");
   commandDeck?.classList.toggle("view-locked", !canIssuePlayerCommands());
   commandDeck?.classList.toggle("hostile-selection", inspectedHostile !== undefined);
   const title = element("selection-title");
@@ -6483,6 +6519,78 @@ function recallControlGroup(group: number): void {
   showToast(`CONTROL GROUP ${group} // ${ids.length} ${saved?.kind === "structures" ? "STRUCTURES" : "UNITS"}`);
 }
 
+const EMPTY_MATCH_STATS: Readonly<PlayerMatchStats> = Object.freeze({
+  unitsProduced: 0,
+  structuresBuilt: 0,
+  enemyShipsDestroyed: 0,
+  enemyStructuresDestroyed: 0,
+  shipsLost: 0,
+  structuresLost: 0,
+  alloyCollected: 0,
+  energyGenerated: 0,
+  alloySpent: 0,
+  energySpent: 0,
+  damageDealt: 0,
+  damageTaken: 0,
+});
+let scoreScreenSignature = "";
+
+function scoreValue(value: number): string {
+  return Math.max(0, Math.round(value)).toLocaleString();
+}
+
+function matchDuration(tick: number): string {
+  const totalSeconds = Math.max(0, Math.floor(tick * FIXED_DT));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor(totalSeconds % 3600 / 60);
+  const seconds = totalSeconds % 60;
+  return hours > 0
+    ? `${hours}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`
+    : `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function renderScoreScreen(state: SimulationState | ProjectedViewState): void {
+  const signature = `${state.tick}:${state.winnerTeamId}:${state.players.map((player) => JSON.stringify(player.stats)).join("|")}`;
+  if (signature === scoreScreenSignature) return;
+  scoreScreenSignature = signature;
+  element("score-duration").textContent = matchDuration(state.tick);
+  const teams = new Map(state.teams.map((team) => [team.id, team.name]));
+  const players = [...state.players].sort((left, right) => {
+    const leftWon = left.teamId === state.winnerTeamId ? 1 : 0;
+    const rightWon = right.teamId === state.winnerTeamId ? 1 : 0;
+    if (leftWon !== rightWon) return rightWon - leftWon;
+    const leftStats = left.stats ?? EMPTY_MATCH_STATS;
+    const rightStats = right.stats ?? EMPTY_MATCH_STATS;
+    return rightStats.enemyShipsDestroyed - leftStats.enemyShipsDestroyed
+      || rightStats.enemyStructuresDestroyed - leftStats.enemyStructuresDestroyed
+      || rightStats.damageDealt - leftStats.damageDealt
+      || left.teamId - right.teamId
+      || left.name.localeCompare(right.name);
+  });
+  element("score-table-body").innerHTML = players.map((player) => {
+    const stats = player.stats ?? EMPTY_MATCH_STATS;
+    const winner = player.teamId === state.winnerTeamId;
+    const color = `#${(player.color & 0xffffff).toString(16).padStart(6, "0")}`;
+    const faction = FACTIONS[player.faction]?.name ?? player.faction;
+    const team = teams.get(player.teamId) ?? `Team ${player.teamId}`;
+    return `<tr class="${winner ? "score-winner " : ""}${player.id === localPlayerId ? "score-local" : ""}">
+      <td><div class="score-commander">
+        <span class="score-player-color" style="color:${color};background:${color}"></span>
+        <strong>${escapeHtml(player.name)}${winner ? '<span class="score-winner-tag">WINNER</span>' : ""}</strong>
+        <small>${escapeHtml(faction)} · ${escapeHtml(team)}</small>
+      </div></td>
+      <td>${scoreValue(stats.enemyShipsDestroyed)}</td>
+      <td>${scoreValue(stats.unitsProduced)}</td>
+      <td><span class="score-pair">${scoreValue(stats.shipsLost)} / ${scoreValue(stats.structuresLost)}</span></td>
+      <td>${scoreValue(stats.enemyStructuresDestroyed)}</td>
+      <td>${scoreValue(stats.structuresBuilt)}</td>
+      <td title="Taken: ${scoreValue(stats.damageTaken)}">${scoreValue(stats.damageDealt)}</td>
+      <td><span class="score-pair">${scoreValue(stats.alloyCollected)} / ${scoreValue(stats.energyGenerated)}</span></td>
+      <td><span class="score-pair">${scoreValue(stats.alloySpent)} / ${scoreValue(stats.energySpent)}</span></td>
+    </tr>`;
+  }).join("");
+}
+
 function syncMatchResult(): void {
   if (tutorialSession) { updateTutorial(); return; }
   const overlay = element("victory-overlay");
@@ -6495,6 +6603,7 @@ function syncMatchResult(): void {
   });
   if (!result) {
     if (overlay.classList.contains("visible")) overlay.classList.remove("visible", "defeat");
+    scoreScreenSignature = "";
     return;
   }
   const firstPresentation = !overlay.classList.contains("visible");
@@ -6509,6 +6618,7 @@ function syncMatchResult(): void {
   }
   overlay.classList.toggle("defeat", result.defeated);
   overlay.classList.add("visible");
+  renderScoreScreen(currentState());
   if (element("victory-title").textContent !== result.title) element("victory-title").textContent = result.title;
   if (element("victory-copy").textContent !== result.copy) element("victory-copy").textContent = result.copy;
   const playAgain = element<HTMLButtonElement>("play-again");
@@ -6644,13 +6754,6 @@ function resetSimulation(): void {
     cameraRig.target.set(-550, 0, 30);
     cameraRig.distance = 800;
   }
-  eventLines = [demoMode
-    ? mockBattleMode
-      ? "<b>MOCK</b> fighter-heavy 1v1 // add ships, swap races, reset"
-      : menuBattleMode
-      ? "<b>SIM</b> fighter-heavy local 1v1 // autonomous engagement"
-      : "<b>SHOWCASE</b> 284 combat vessels // 16 autonomous shipyards"
-    : `<b>SYS</b> new ${simulation.state.obstacles.length}-hazard seeded battlefield generated`];
   updateSelectionHud();
   updateTutorial();
   if (tutorialMode) updateHud();
@@ -6714,6 +6817,29 @@ function isTextEntryTarget(target: EventTarget | null): boolean {
     || target instanceof HTMLSelectElement
     || (target instanceof HTMLElement && target.isContentEditable);
 }
+
+chatCompose.addEventListener("submit", (event) => {
+  event.preventDefault();
+  sendChat();
+});
+chatInput.addEventListener("keydown", (event) => {
+  event.stopPropagation();
+  if (event.code === "Tab") {
+    event.preventDefault();
+    setChatChannel(chatChannel === "all" ? "team" : "all");
+    return;
+  }
+  if (event.code === "Escape") {
+    event.preventDefault();
+    closeChat();
+    return;
+  }
+  if (event.code === "Enter") {
+    event.preventDefault();
+    if (event.ctrlKey) setChatChannel("team");
+    sendChat();
+  }
+});
 
 async function toggleFullscreen(): Promise<void> {
   try {
@@ -6785,6 +6911,10 @@ addEventListener("keydown", (event) => {
       && ["player-invite-modal", "spectator-invite-modal"].every((id) => element(id).classList.contains("hidden"))) {
       element<HTMLButtonElement>("network-close").click();
     }
+    return;
+  }
+  if (event.code === "Enter" && !event.repeat && !event.altKey && !event.metaKey) {
+    if (openChat(event.ctrlKey ? "team" : "all")) event.preventDefault();
     return;
   }
   if (isTextEntryTarget(event.target)) return;

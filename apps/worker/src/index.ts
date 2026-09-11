@@ -116,6 +116,7 @@ const RELAY_SYNC_INTERVAL_TICKS = SIMULATION_HZ;
 // shorter window is enough here because recovery is automatic, but it still
 // prevents a broken peer from causing a snapshot storm while it is replaying.
 const RELAY_RECOVERY_COOLDOWN_TICKS = SIMULATION_HZ * 4;
+const CHAT_COOLDOWN_MS = 400;
 const MATCH_METADATA_KEY = "match:metadata:v2";
 const LEGACY_MATCH_KEY = "match";
 const CHECKPOINT_CHUNK_PREFIX = "match:checkpoint:v2:";
@@ -181,6 +182,7 @@ export class Match implements DurableObject {
   private readonly relaySequences = new Map<string, number>();
   private readonly syncReports = new Map<number, Map<string, number>>();
   private readonly peerReportedTicks = new Map<string, number>();
+  private readonly lastChatAt = new Map<string, number>();
   private lastRecoveryTick = -RELAY_RECOVERY_COOLDOWN_TICKS;
   private relayIntervalMs = 1000 / SIMULATION_HZ;
   private relayClockAt = 0;
@@ -567,6 +569,9 @@ export class Match implements DurableObject {
           tick: this.relayTick,
         });
         return;
+      case "chat":
+        this.handleChat(slot, message);
+        return;
       case "request_snapshot":
         if (this.simulation) {
           this.sendSnapshot(socket, message.reason);
@@ -682,6 +687,34 @@ export class Match implements DurableObject {
       case "request_replay_chunk":
         this.sendReplayChunk(socket, message.index);
         return;
+    }
+  }
+
+  private handleChat(slot: LobbyPlayerSlot, message: Extract<ClientMessage, { type: "chat" }>): void {
+    const sentAt = Date.now();
+    if (sentAt - (this.lastChatAt.get(slot.playerId) ?? 0) < CHAT_COOLDOWN_MS) return;
+    this.lastChatAt.set(slot.playerId, sentAt);
+
+    const outgoing: Extract<ServerMessage, { type: "chat" }> = {
+      type: "chat",
+      channel: message.channel,
+      senderId: slot.playerId,
+      senderName: slot.name,
+      senderTeamId: slot.teamId,
+      text: message.text.trim(),
+      sentAt,
+    };
+    const serialized = JSON.stringify(outgoing);
+    for (const candidate of this.ctx.getWebSockets()) {
+      const attachment = this.attachment(candidate);
+      const recipient = attachment.playerId
+        ? this.lobby.slots.find((lobbySlot) => lobbySlot.playerId === attachment.playerId)
+        : undefined;
+      const teamSpectator = attachment.spectatorMode === "team" && attachment.spectatorTeamId !== undefined;
+      const mayReceive = message.channel === "all"
+        ? Boolean(recipient || teamSpectator)
+        : recipient?.teamId === slot.teamId || (teamSpectator && attachment.spectatorTeamId === slot.teamId);
+      if (mayReceive) this.sendRaw(candidate, serialized);
     }
   }
 

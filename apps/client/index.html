@@ -152,21 +152,20 @@
     </div>
     <div id="app">
       <section id="match-intro" class="match-intro hidden" data-phase="loading" aria-label="Match preparation" tabindex="-1">
-        <div class="match-intro-masthead"><span>COMMAND PROMPT</span><span>FLEET DEPLOYMENT</span></div>
+   
         <div class="match-intro-loading">
-          <p class="match-intro-eyebrow">ESTABLISHING COMMAND</p>
           <h1>PREPARING<br /><em>BATTLEFIELD.</em></h1>
           <div class="match-intro-sector"><span>DESTINATION</span><strong id="match-intro-map"></strong></div>
           <div class="match-intro-progress-label"><span id="match-intro-stage">Charting sector</span><span id="match-intro-percent">0%</span></div>
           <div id="match-intro-progress" class="match-intro-track" role="progressbar" aria-label="Battlefield preparation" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i></i></div>
-          <p class="match-intro-hint">Establish your economy. Build your fleet. Control the sector.</p>
+
         </div>
         <div class="match-intro-countdown" aria-hidden="true">
-          <p class="match-intro-eyebrow">ALL COMMANDERS, STAND BY</p>
+          <p class="match-intro-eyebrow"></p>
           <div class="match-intro-dial"><span id="match-intro-number">3</span></div>
-          <p id="match-intro-caption">MATCH STARTS IN</p>
+          <p id="match-intro-caption"></p>
         </div>
-        <div class="match-intro-footer"><span id="match-intro-mode">LOCAL SKIRMISH</span><span>AWAITING DEPLOYMENT</span></div>
+        <div class="match-intro-footer"><span id="match-intro-mode"></span><span></span></div>
         <span id="match-intro-announcement" class="match-intro-announcement" role="status" aria-live="polite" aria-atomic="true"></span>
       </section>
       <canvas
@@ -177,83 +176,86 @@
       <div id="command-mode" aria-live="polite"></div>
       <aside id="tutorial-panel" class="tutorial-panel panel-edge hidden" aria-label="Interactive tutorial"></aside>
 
-      <header class="topbar panel-edge">
-        <div class="resource storage-resource alloy" id="alloy-resource">
-          <span>ALLOY</span><strong id="alloy-value">900</strong
-          ><small id="alloy-rate">+14 / −0</small>
+      <header class="topbar">
+        <div class="topbar-cluster topbar-left panel-edge">
+          <div class="resource storage-resource alloy" id="alloy-resource">
+            <span>ALLOY</span><strong id="alloy-value">900</strong
+            ><small id="alloy-rate">+14 / −0</small>
+          </div>
+          <div class="resource storage-resource energy" id="energy-resource">
+            <span>ENERGY</span><strong id="energy-value">900</strong
+            ><small id="energy-rate">+34 / −0</small>
+          </div>
+          <div class="resource efficiency">
+            <span>GRID FLOW</span><strong id="economy-efficiency">100%</strong
+            ><small>ECONOMY</small>
+          </div>
         </div>
-        <div class="resource storage-resource energy" id="energy-resource">
-          <span>ENERGY</span><strong id="energy-value">900</strong
-          ><small id="energy-rate">+34 / −0</small>
-        </div>
-        <div class="resource efficiency">
-          <span>GRID FLOW</span><strong id="economy-efficiency">100%</strong
-          ><small>ECONOMY</small>
-        </div>
-        <div class="topbar-spacer" aria-hidden="true"></div>
-        <div class="clock">
-          <span>SIM TIME</span><strong id="sim-time">00:00</strong>
-        </div>
-        <button
-          class="connection online"
-          id="network-open"
-          type="button"
-          title="Open multiplayer lobby"
-        >
-          <i></i
-          ><span
-            ><strong id="connection-title">MULTIPLAYER</strong
-            ><small id="connection-detail">LAN LOBBY</small></span
-          >
-        </button>
-        <div class="game-menu" id="game-menu">
+        <div class="topbar-cluster topbar-right panel-edge">
+          <div class="clock">
+            <span>SIM TIME</span><strong id="sim-time">00:00</strong>
+          </div>
           <button
-            class="game-menu-toggle"
-            id="game-menu-toggle"
+            class="connection online"
+            id="network-open"
             type="button"
-            aria-expanded="false"
-            aria-controls="game-menu-panel"
-            aria-label="Open game menu"
+            title="Open multiplayer lobby"
           >
-            <i></i><i></i><i></i><span>MENU</span>
+            <i></i
+            ><span
+              ><strong id="connection-title">MULTIPLAYER</strong
+              ><small id="connection-detail">LAN LOBBY</small></span
+            >
           </button>
-          <div
-            class="game-menu-panel panel-edge"
-            id="game-menu-panel"
-            role="menu"
-            hidden
-          >
-            <div class="game-menu-heading">
-              <span>GAME OPTIONS</span><kbd>ESC</kbd>
-            </div>
-            <button id="game-menu-pause" type="button" role="menuitem">
-              PAUSE SIMULATION
-            </button>
+          <div class="game-menu" id="game-menu">
             <button
-              id="audio-toggle"
+              class="game-menu-toggle"
+              id="game-menu-toggle"
               type="button"
-              role="menuitem"
-              title="Mute battle audio"
-              aria-pressed="true"
+              aria-expanded="false"
+              aria-controls="game-menu-panel"
+              aria-label="Open game menu"
             >
-              AUDIO ON
+              <i></i><i></i><i></i><span>MENU</span>
             </button>
-            <button id="game-menu-fullscreen" type="button" role="menuitem">
-              ENTER FULLSCREEN
-            </button>
-            <button
-              id="reset"
-              type="button"
-              role="menuitem"
-              title="Restart engagement (R)"
+            <div
+              class="game-menu-panel panel-edge"
+              id="game-menu-panel"
+              role="menu"
+              hidden
             >
-              RESTART ENGAGEMENT
-            </button>
-            <button id="game-menu-main" type="button" role="menuitem">
-              RETURN TO MAIN MENU
-            </button>
-            <div class="game-menu-hint">
-              <kbd>`</kbd><span>SIM TELEMETRY</span>
+              <div class="game-menu-heading">
+                <span>GAME OPTIONS</span><kbd>ESC</kbd>
+              </div>
+              <button id="game-menu-pause" type="button" role="menuitem">
+                PAUSE SIMULATION
+              </button>
+              <button
+                id="audio-toggle"
+                type="button"
+                role="menuitem"
+                title="Mute battle audio"
+                aria-pressed="true"
+              >
+                AUDIO ON
+              </button>
+              <button id="game-menu-fullscreen" type="button" role="menuitem">
+                ENTER FULLSCREEN
+              </button>
+              <button
+                id="reset"
+                type="button"
+                role="menuitem"
+                title="Restart engagement (R)"
+              >
+                RESTART ENGAGEMENT
+              </button>
+              <button id="game-menu-main" type="button" role="menuitem">
+                RETURN TO MAIN MENU
+              </button>
+              <div class="game-menu-hint">
+                <kbd>`</kbd><span>SIM TELEMETRY</span>
+              </div>
             </div>
           </div>
         </div>
@@ -266,10 +268,24 @@
           height="256"
           aria-label="Tactical minimap"
         ></canvas>
-        <div class="event-feed" id="event-feed"></div>
       </aside>
 
-      <aside class="debug panel-edge" id="sim-telemetry">
+      <aside class="chat-panel" id="chat-panel" aria-label="Match chat">
+        <div class="chat-messages" id="chat-messages" aria-live="polite"></div>
+        <form class="chat-compose hidden" id="chat-compose" autocomplete="off">
+          <span class="chat-channel" id="chat-channel">ALL</span>
+          <input
+            id="chat-input"
+            type="text"
+            maxlength="240"
+            aria-label="Chat message"
+            placeholder="MESSAGE ALL"
+          />
+          <span class="chat-switch"><kbd>TAB</kbd> SWITCH</span>
+        </form>
+      </aside>
+
+      <aside class="debug panel-edge hidden" id="sim-telemetry">
         <div class="panel-title">
           <span>SIM TELEMETRY</span><button id="collapse-debug">−</button>
         </div>
@@ -838,10 +854,7 @@
         aria-hidden="true"
       ></aside>
 
-      <div class="camera-help">
-        ARROWS / EDGE PAN <b>·</b> MIDDLE-DRAG ROTATE <b>·</b> SHIFT+MIDDLE PAN
-        <b>·</b> MINIMAP RMB MOVE <b>·</b> CTRL+1–9 GROUPS
-      </div>
+  
       <section
         id="replay-controls"
         class="replay-controls hidden"
@@ -1456,10 +1469,35 @@
         </section>
       </div>
       <div id="victory-overlay">
-        <div class="victory-kicker">COMBAT RESOLUTION</div>
-        <strong id="victory-title">VICTORY</strong>
-        <p id="victory-copy">All hostile command cores neutralized.</p>
-        <button id="play-again">RESTART ENGAGEMENT <kbd>R</kbd></button>
+        <section class="score-screen" aria-labelledby="victory-title">
+          <div class="victory-kicker">COMBAT RESOLUTION</div>
+          <strong id="victory-title">VICTORY</strong>
+          <p id="victory-copy">All hostile command cores neutralized.</p>
+          <div class="score-summary">
+            <span>MATCH DURATION</span>
+            <strong id="score-duration">00:00</strong>
+          </div>
+          <div class="score-table-wrap">
+            <table class="score-table">
+              <thead>
+                <tr>
+                  <th scope="col">COMMANDER</th>
+                  <th scope="col">KILLS</th>
+                  <th scope="col">PRODUCED</th>
+                  <th scope="col">LOST</th>
+                  <th scope="col">DESTROYED</th>
+                  <th scope="col">BUILT</th>
+                  <th scope="col">DAMAGE</th>
+                  <th scope="col">ECONOMY</th>
+                  <th scope="col">SPENT</th>
+                </tr>
+              </thead>
+              <tbody id="score-table-body"></tbody>
+            </table>
+          </div>
+          <div class="score-legend">KILLS = ENEMY SHIPS · DESTROYED = ENEMY STRUCTURES · LOST = SHIPS / STRUCTURES · ECONOMY / SPENT = ALLOY / ENERGY</div>
+          <button id="play-again">RESTART ENGAGEMENT <kbd>R</kbd></button>
+        </section>
       </div>
       <aside id="mock-battle-panel" class="mock-battle-panel hidden" aria-label="Mock battle debug controls">
         <header>
