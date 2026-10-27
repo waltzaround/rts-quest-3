@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "voidfront-rts",
+  "name": "rts-quest-3",
   "main": "src/index.ts",
   "compatibility_date": "2026-08-23",
   "upload_source_maps": false,

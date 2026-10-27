@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#080f19" />
+    <title>Orbital Lab — RTS / Quest 3</title>
+  </head>
+  <body>
+    <canvas id="space" aria-label="Interactive three dimensional fleet sandbox"></canvas>
+    <header>
+      <a class="brand" href="/quest.html"><span class="mark">⌘</span><span>ORBITAL LAB<small>RTS / SPATIAL EXPERIMENT 01</small></span></a>
+      <span class="tag">META QUEST 3 <i></i> WEBXR</span>
+    </header>
+    <main>
+      <div class="eyebrow">A NEW DIMENSION OF COMMAND</div>
+      <h1>Space to<br />think in <em>3D.</em></h1>
+      <p>Your fleet. Every axis. Step around the table, select a ship, and send it anywhere in the volume.</p>
+      <div class="session-buttons"><button id="enter-vr" disabled>Checking VR…</button><button id="enter-ar" disabled>Checking passthrough…</button></div>
+      <p id="xr-status" role="status">Preparing the command deck…</p>
+      <details><summary>Connect your Quest</summary><p>Open this page in Quest Browser using HTTPS, or USB with <code>adb reverse tcp:5174 tcp:5174</code> and <code>http://localhost:5174/quest.html</code>. Use Touch controllers.</p></details>
+    </main>
+    <aside aria-label="Fleet controls">
+      <div class="eyebrow">COMMAND DECK <span>01 / LOCAL</span></div>
+      <div class="readout"><strong id="selected">12</strong><span>VESSELS<br />SELECTED</span><b id="fps">— FPS</b></div>
+      <label for="altitude">COMMAND ALTITUDE <output id="altitude-value">0.55 m</output></label>
+      <input id="altitude" type="range" min="0.12" max="1.5" step="0.01" value="0.55" />
+      <div class="buttons"><button id="select-all">Select all</button><button id="stop">Hold position</button><button id="reset">Reset fleet</button><button id="add">Add wing +4</button></div>
+      <p id="order-status" role="status">Fleet ready. Choose a destination on the cyan plane.</p>
+      <div class="legend"><i></i> SELECTED <i></i> MOVE PLANE</div>
+    </aside>
+    <footer><div><b>DESKTOP</b> Click ship · Shift: multi-select · Right-click: move · Drag: orbit · Wheel: zoom</div><div><b>QUEST</b> Trigger: select / move · Grip: select all · Stick ↑↓: altitude · A/X: hold · B/Y: recenter</div><a href="/">Original RTS ↗</a></footer>
+    <script type="module" src="/src/quest.ts"></script>
+  </body>
+</html>

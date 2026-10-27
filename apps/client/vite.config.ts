@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { defineConfig } from "vite";
 
@@ -9,6 +10,10 @@ function firstLanAddress(): string | null {
   }
   return null;
 }
+
+const tls = process.env.QUEST_TLS_CERT && process.env.QUEST_TLS_KEY
+  ? { cert: readFileSync(process.env.QUEST_TLS_CERT), key: readFileSync(process.env.QUEST_TLS_KEY) }
+  : undefined;
 
 export default defineConfig({
   worker: { format: "es" },
@@ -22,16 +27,17 @@ export default defineConfig({
         response.statusCode = 200;
         response.setHeader("Content-Type", "application/json");
         response.setHeader("Cache-Control", "no-store");
-        response.end(JSON.stringify({ origin: address ? `http://${address}:${port}` : null }));
+        response.end(JSON.stringify({ origin: address ? `${tls ? "https" : "http"}://${address}:${port}` : null }));
       });
     },
   }],
   build: {
     sourcemap: false,
-    rollupOptions: { input: { main: "index.html", viewer: "viewer.html" } },
+    rollupOptions: { input: { main: "index.html", viewer: "viewer.html", quest: "quest.html" } },
   },
   server: {
     port: 5173,
+    ...(tls ? { https: tls } : {}),
     proxy: {
       "/authority": {
         target: process.env.VOIDFRONT_AUTHORITY_ORIGIN ?? "http://127.0.0.1:8787",

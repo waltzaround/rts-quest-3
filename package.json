@@ -1,9 +1,9 @@
 {
-  "name": "space-rts",
+  "name": "rts-quest-3",
   "private": true,
   "packageManager": "pnpm@10.26.1",
   "scripts": {
-    "dev": "node scripts/dev-lan.mjs",
+    "dev": "pnpm dev:quest",
     "dev:client": "pnpm --filter @space-rts/client dev",
     "dev:lan": "node scripts/dev-lan.mjs",
     "dev:worker": "pnpm --filter @space-rts/worker dev",
@@ -12,7 +12,10 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm --filter @space-rts/client test && pnpm --filter @space-rts/game-core test && pnpm --filter @space-rts/protocol test && pnpm --filter @space-rts/box3d-wasm test && pnpm --filter @space-rts/worker test",
     "test:watch": "pnpm --filter @space-rts/game-core test:watch",
-    "determinism": "node scripts/check-determinism.mjs"
+    "determinism": "node scripts/check-determinism.mjs",
+    "dev:classic": "node scripts/dev-lan.mjs",
+    "dev:quest": "pnpm --filter @space-rts/client dev --host 0.0.0.0 --port 5174 --strictPort",
+    "quest:usb": "adb reverse tcp:5174 tcp:5174"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",
