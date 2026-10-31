@@ -14,6 +14,10 @@ import { QuestSupplyView } from "./quest-supply-view";
 import { directContact, inBattleVolume } from "./quest-direct-input";
 import "./quest.css";
 
+// Opt-in capture view: keep the actual simulation, without desktop or spatial menus.
+const photoMode = new URLSearchParams(location.search).get("photo") === "1";
+document.body.classList.toggle("photo-mode", photoMode);
+
 const element = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 const canvas = element<HTMLCanvasElement>("space");
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: "high-performance" });
@@ -779,6 +783,13 @@ async function checkXR(): Promise<void> {
 }
 void checkXR();
 
+if (photoMode) {
+  toggleDemo();
+  selected.clear();
+  setBattleView(true, new THREE.Vector3().copy(DEMO_COMBAT_SITES[1]!.center));
+  zoomBy(0.38);
+}
+
 let previousTime = 0, panelTime = 0, frameCount = 0, fpsTime = 0;
 
 renderer.setAnimationLoop((time, frame) => {
@@ -826,14 +837,15 @@ renderer.setAnimationLoop((time, frame) => {
   if (!renderer.xr.isPresenting) panel.visible = !demo;
   encountersView.update(demo ? battle : null, renderer.xr.isPresenting ? renderer.xr.getCamera() : camera, dt);
   battleView.update(battle, selected, renderer.xr.isPresenting ? renderer.xr.getCamera() : camera, dt, encountersView.opacity);
-  if (time - panelTime > 200) { updateHud(); drawPanel(); drawHud(); panelTime = time; }
+  if (!photoMode && time - panelTime > 200) { updateHud(); drawPanel(); drawHud(); panelTime = time; }
   frameCount++;
   if (time - fpsTime > 1000) { element("fps").textContent = `${Math.round(frameCount * 1000 / (time - fpsTime))} FPS`; frameCount = 0; fpsTime = time; }
+  if (photoMode) panel.visible = hud.visible = uiCursor.visible = marker.visible = selectionPreview.visible = false;
   renderer.render(scene, camera);
 });
 window.addEventListener("resize", () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
-  if (!renderer.xr.isPresenting) { renderer.setSize(innerWidth, innerHeight); desktopCamera(!!demo); }
+  if (!renderer.xr.isPresenting) { renderer.setSize(innerWidth, innerHeight); if (!photoMode) desktopCamera(!!demo); }
 });
 
 document.addEventListener("visibilitychange", () => {

@@ -10,3 +10,6 @@ main{top:16%;width:250px}h1{font-size:43px;letter-spacing:-2px;margin:16px 0}mai
 .control-lab{border-block:1px solid #294153;padding:12px 0;margin-bottom:12px}.control-lab .eyebrow{display:block;margin-bottom:12px}.control-lab label{display:block;margin-top:10px}.control-lab select{width:100%;margin-top:6px;background:#132332;color:#d9e9f7;border:1px solid #426477;border-radius:6px;padding:9px 6px;font:inherit;font-size:11px}.control-lab select:focus-visible{outline:2px solid #adffe7;outline-offset:2px}#control-hint{font-size:10px;line-height:1.6;color:#a5c8c0}.zoom-controls{display:grid;grid-template-columns:40px 1fr 40px;gap:6px}.zoom-controls button{padding:8px}#zoom-value{font-size:9px;text-align:center;margin:6px 0 0;color:#95efdb}
 
 #demo{width:100%;margin-top:8px;border-color:#82b9da;color:#c5eeff}#demo[aria-pressed=true]{background:#264a3a;border-color:#a8e68e;color:#d8ffc5}
+
+/* Clean, real-time capture; normal gameplay keeps all of its controls. */
+body.photo-mode header,body.photo-mode main,body.photo-mode aside,body.photo-mode footer{display:none}

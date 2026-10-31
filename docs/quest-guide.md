@@ -17,6 +17,13 @@ Open **http://localhost:5174/quest.html** for the 3D skirmish. The same skirmish
 
 `pnpm dev` uses Quest mode with automatic page reloads disabled. Source edits must not reload an active WebXR session: Quest Browser can otherwise leave a frozen image in the headset. Leave VR/passthrough, refresh the browser page to load changes, then enter again. Desktop development with `pnpm dev:client` keeps automatic updates enabled.
 
+## Clean screenshots
+
+For a clean desktop screenshot, open `http://localhost:5174/quest.html?photo=1`.
+This starts the endless demo, frames a battle, and hides the page controls,
+spatial menus and interaction cursors. Drag to orbit, wheel to zoom, and use
+Space to pause for a capture. Remove `?photo=1` to restore the normal interface.
+
 ## Connect Meta Quest 3
 
 ### USB — recommended for local development
