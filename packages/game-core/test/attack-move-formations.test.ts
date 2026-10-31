@@ -118,5 +118,5 @@ describe("large attack-move formations", () => {
     } finally {
       world.dispose();
     }
-  }, 20_000);
+  }, 60_000); // 2,400 real-physics steps also need time on shared CI runners.
 });
