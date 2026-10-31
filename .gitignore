@@ -9,3 +9,15 @@ coverage
 .pnpm-lock.yaml
 
 artifacts/determinism/
+
+# Local credentials, headset captures and generated release artifacts
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+*.pem
+*.key
+*.log
+/artifacts/quest-*

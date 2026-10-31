@@ -72,3 +72,18 @@ export function turretDeckHeight(
       return 9.8;
   }
 }
+
+const TURRET_MOUTHS: Record<WeaponTypeId, [number, number]> = {
+    autocannon: [0.32, 4.6], torpedo: [0.85, 1.88], plasma: [0.45, 5.2], heavyRail: [0.42, 8.7],
+    pointDefense: [0.26, 3.25], flakCannon: [0.3, 3.5], beam: [0, 7.9],
+    lightArtillery: [0, 7.5], siegeArtillery: [0, 10.5], strategicArtillery: [0, 15],
+  };
+
+/** Industrial barrel mouths, including the mesh's X/Y girth scale. */
+export function turretBarrelTip(weapon: WeaponTypeId, sequence = 0): { x: number; y: number; z: number } {
+  const side = sequence % 2 === 0 ? -1 : 1;
+  const heights = weapon.endsWith("Artillery") ? 1.75 : 1.5;
+  if (weapon === "torpedo") return { x: (sequence % 3 - 1) * 0.85 * 1.3, y: (1.5 + (Math.floor(sequence / 3) % 2 ? 0.3 : -0.3)) * 1.2, z: 1.88 };
+  const dy = weapon === "pointDefense" ? (Math.floor(sequence / 2) % 2 ? 0.2 : -0.2) : weapon === "flakCannon" ? (Math.floor(sequence / 2) % 2 ? 0.22 : -0.22) : 0;
+  return { x: TURRET_MOUTHS[weapon][0] * side * 1.3, y: (heights + dy) * 1.2, z: TURRET_MOUTHS[weapon][1] };
+}

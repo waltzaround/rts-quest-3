@@ -1,19 +1,21 @@
-/** Independent volumetric experiment. The upstream lockstep rules remain planar. */
+/** Volumetric movement primitives shared by the local Quest skirmish. */
 export type Point3 = { x: number; y: number; z: number };
-export const VOLUME = { x: 1.35, minY: 0.12, maxY: 1.5, z: 0.9 };
+export type BattleVolume = { x: number; minY: number; maxY: number; z: number };
+export const VOLUME: BattleVolume = { x: 1.35, minY: 0.12, maxY: 1.5, z: 0.9 };
+export const ENCOUNTER_EXTENTS: Point3 = { x: 2.4, y: 1.4, z: 2.1 };
 export const MAX_SHIPS = 48;
 export type Vessel = { id: number; position: Point3; target: Point3; speed: number };
 
-export function clampPoint(point: Point3): Point3 {
+export function clampPoint(point: Point3, volume = VOLUME): Point3 {
   return {
-    x: Math.max(-VOLUME.x, Math.min(VOLUME.x, point.x)),
-    y: Math.max(VOLUME.minY, Math.min(VOLUME.maxY, point.y)),
-    z: Math.max(-VOLUME.z, Math.min(VOLUME.z, point.z)),
+    x: Math.max(-volume.x, Math.min(volume.x, point.x)),
+    y: Math.max(volume.minY, Math.min(volume.maxY, point.y)),
+    z: Math.max(-volume.z, Math.min(volume.z, point.z)),
   };
 }
 
 /** Preserve the fleet's XYZ shape, translating the entire group inside the volume. */
-export function moveFormation(ships: Vessel[], destination: Point3): void {
+export function moveFormation(ships: Vessel[], destination: Point3, volume = VOLUME): void {
   if (!ships.length) return;
   const center = ships.reduce((sum, ship) => ({
     x: sum.x + ship.position.x / ships.length,
@@ -22,8 +24,8 @@ export function moveFormation(ships: Vessel[], destination: Point3): void {
   }), { x: 0, y: 0, z: 0 });
   const delta = { x: destination.x - center.x, y: destination.y - center.y, z: destination.z - center.z };
   for (const axis of ["x", "y", "z"] as const) {
-    const lower = axis === "y" ? VOLUME.minY : -VOLUME[axis];
-    const upper = axis === "y" ? VOLUME.maxY : VOLUME[axis];
+    const lower = axis === "y" ? volume.minY : -volume[axis];
+    const upper = axis === "y" ? volume.maxY : volume[axis];
     delta[axis] = Math.max(lower - Math.min(...ships.map(s => s.position[axis])),
       Math.min(upper - Math.max(...ships.map(s => s.position[axis])), delta[axis]));
   }

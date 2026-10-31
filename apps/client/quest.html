@@ -4,32 +4,69 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#080f19" />
-    <title>Orbital Lab — RTS / Quest 3</title>
+    <title>Orbital Command — Quest 3 RTS</title>
   </head>
   <body>
-    <canvas id="space" aria-label="Interactive three dimensional fleet sandbox"></canvas>
+    <canvas id="space" aria-label="Three dimensional real time strategy battlefield"></canvas>
     <header>
-      <a class="brand" href="/quest.html"><span class="mark">⌘</span><span>ORBITAL LAB<small>RTS / SPATIAL EXPERIMENT 01</small></span></a>
+      <a class="brand" href="/quest.html"><span class="mark">⌘</span><span>ORBITAL COMMAND<small>RTS / VOLUMETRIC SKIRMISH</small></span></a>
       <span class="tag">META QUEST 3 <i></i> WEBXR</span>
     </header>
     <main>
-      <div class="eyebrow">A NEW DIMENSION OF COMMAND</div>
-      <h1>Space to<br />think in <em>3D.</em></h1>
-      <p>Your fleet. Every axis. Step around the table, select a ship, and send it anywhere in the volume.</p>
+      <div class="eyebrow">TAKE THE HIGH GROUND</div>
+      <h1>Command.<br />Build. <em>Conquer.</em></h1>
+      <p>A battle on every axis. Build your fleet, defend your base, and destroy the enemy Command Core.</p>
+      <section class="match-summary" aria-label="Match status"><strong id="match-state">AWAITING DEPLOYMENT</strong><p id="core-status"></p><p id="fleet-status"></p><button id="pause">Deploy fleet</button><button id="demo" aria-pressed="false">Start endless demo</button></section>
       <div class="session-buttons"><button id="enter-vr" disabled>Checking VR…</button><button id="enter-ar" disabled>Checking passthrough…</button></div>
       <p id="xr-status" role="status">Preparing the command deck…</p>
       <details><summary>Connect your Quest</summary><p>Open this page in Quest Browser using HTTPS, or USB with <code>adb reverse tcp:5174 tcp:5174</code> and <code>http://localhost:5174/quest.html</code>. Use Touch controllers.</p></details>
     </main>
     <aside aria-label="Fleet controls">
-      <div class="eyebrow">COMMAND DECK <span>01 / LOCAL</span></div>
-      <div class="readout"><strong id="selected">12</strong><span>VESSELS<br />SELECTED</span><b id="fps">— FPS</b></div>
-      <label for="altitude">COMMAND ALTITUDE <output id="altitude-value">0.55 m</output></label>
-      <input id="altitude" type="range" min="0.12" max="1.5" step="0.01" value="0.55" />
-      <div class="buttons"><button id="select-all">Select all</button><button id="stop">Hold position</button><button id="reset">Reset fleet</button><button id="add">Add wing +4</button></div>
-      <p id="order-status" role="status">Fleet ready. Choose a destination on the cyan plane.</p>
-      <div class="legend"><i></i> SELECTED <i></i> MOVE PLANE</div>
+      <div class="eyebrow">COMMAND DECK <span>YOU vs AI</span></div>
+      <div class="readout"><strong id="selected">6</strong><span>VESSELS<br />SELECTED</span><b id="fps">— FPS</b></div>
+      <section class="control-lab" aria-label="Experimental controls">
+        <div class="eyebrow">CONTROL EXPERIMENT</div>
+        <label for="selection-mode">SELECT SHIPS</label>
+        <select id="selection-mode"><option value="single">1 · Single ship</option><option value="toggle">2 · Toggle ships</option><option value="class">3 · Same class</option><option value="nearby">4 · Nearby group (3D)</option></select>
+        <label for="command-mode">GIVE ORDERS</label>
+        <select id="command-mode"><option value="attackMove">A · Attack-move</option><option value="move">M · Move</option><option value="focus">T · Focus fire</option></select>
+        <p id="control-hint"></p>
+        <div class="zoom-controls" aria-label="Zoom controls"><button id="zoom-out" aria-label="Zoom out">−</button><button id="zoom-reset">Strategic view</button><button id="zoom-in" aria-label="Zoom in">+</button></div>
+        <div class="buttons"><button id="audio-toggle" aria-pressed="true">Audio ready</button></div>
+        <p id="view-mode">STRATEGIC · UNIT ICONS</p><p id="zoom-value"></p>
+        <section id="battle-sites" hidden aria-label="Battle sites"><p>THREE MAIN BATTLES + FOUR DEPTH SKIRMISHES</p><div class="buttons">
+          <button id="encounter-0">Alpha · Escorts</button><button id="encounter-1">Bravo · Capitals</button><button id="encounter-2">Charlie · Siege</button>
+        </div><details><summary>Depth skirmishes</summary><div class="buttons">
+          <button id="encounter-3">Alpha–Bravo crossing</button><button id="encounter-4">Bravo–Charlie crossing</button>
+          <button id="encounter-5">Friendly high raid</button><button id="encounter-6">Hostile low strike</button>
+        </div></details></section><button id="flags-view" class="subtle">Individual NATO flags · Middle zoom</button><button id="enter-action" class="subtle">Enter the action · I</button><p>In headset: touch a ship with your controller or fingertips, then trigger/pinch to select or attack. Trigger in empty space to move there. Hold one pinch to pull the battle; use two pinches to spread, lift and turn the battle horizontally. It stays level. Raise your left hand for controls. Controller grips work too.</p>
+      </section>
+      <div class="buttons"><button id="select-all">Select fleet</button><button id="stop">Hold position</button><button id="clear-selection">Clear selection</button><button id="attack-core">Attack enemy core</button><button id="reset">New skirmish</button></div>
+      <p id="order-status" role="status"></p><p id="inspection"></p>
+      <section class="economy"><b id="economy"></b><p id="income"></p><p id="queue"></p></section>
+      <details open><summary>Fleet production</summary><p>Basic yard: fighters, bombers, frigates &amp; artillery. Fleet yard unlocks cruisers; capital yard builds siege capitals and battleships. Add storage to afford them. Costs: alloy / energy.</p><div class="buttons production">
+        <button id="train-fighter">5 fighter squads<small>380 / 200</small></button>
+        <button id="train-bomber">5 bombers<small>1500 / 1050</small></button>
+        <button id="train-frigate">Frigate<small>260 / 150</small></button>
+        <button id="train-artilleryFrigate">Artillery<small>420 / 280</small></button>
+        <button id="train-flakFrigate">Flak frigate<small>500 / 340</small></button>
+        <button id="train-torpedoFrigate">Torpedo frigate<small>600 / 420</small></button>
+        <button id="train-destroyer">Destroyer<small>760 / 520</small></button>
+        <button id="train-cruiser">Cruiser · 12 guns<small>1750 / 1300</small></button>
+        <button id="train-artilleryCruiser">Siege capital<small>4200 / 3800</small></button>
+        <button id="train-battleship">Battleship · 18 guns<small>4800 / 4200</small></button>
+      </div><button id="cancel-production" class="subtle">Cancel last production order</button></details>
+      <details><summary>Base construction</summary><p>Place near friendly structures. Extractors need a gold deposit. Fleet yard requires a basic shipyard; capital yard requires a fleet yard.</p><div class="buttons production">
+        <button id="build-extractor">Extractor<small>275 / 80</small></button>
+        <button id="build-solarArray">Solar array<small>210 / 20</small></button>
+        <button id="build-shipyard">Shipyard<small>480 / 320</small></button>
+        <button id="build-fleetShipyard">Fleet yard<small>1100 / 800</small></button>
+        <button id="build-capitalShipyard">Capital yard<small>2800 / 2400</small></button>
+        <button id="build-storage">Storage<small>180 / 60</small></button>
+        <button id="build-plasmaBattery">Plasma battery<small>2150 / 1900</small></button>
+      </div></details><p id="placement"></p><button id="cancel-build" class="subtle">Cancel placement</button>
     </aside>
-    <footer><div><b>DESKTOP</b> Click ship · Shift: multi-select · Right-click: move · Drag: orbit · Wheel: zoom</div><div><b>QUEST</b> Trigger: select / move · Grip: select all · Stick ↑↓: altitude · A/X: hold · B/Y: recenter</div><a href="/">Original RTS ↗</a></footer>
+    <footer><div><b>DESKTOP</b> Click: select / attack · Right-click: order · [ / ]: depth · 1–4: selection · A/M/T: orders · Drag: orbit · Wheel/±: zoom · 0: reset</div><div><b>QUEST</b> Trigger: select / attack / build · Hold grips/pinches: pull & zoom · X: dive/overview · B/Y: wrist tools</div><a href="/">Original RTS ↗</a></footer>
     <script type="module" src="/src/quest.ts"></script>
   </body>
 </html>

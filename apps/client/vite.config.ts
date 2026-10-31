@@ -15,7 +15,7 @@ const tls = process.env.QUEST_TLS_CERT && process.env.QUEST_TLS_KEY
   ? { cert: readFileSync(process.env.QUEST_TLS_CERT), key: readFileSync(process.env.QUEST_TLS_KEY) }
   : undefined;
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   worker: { format: "es" },
   plugins: [{
     name: "voidfront-lan-info",
@@ -37,6 +37,9 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // Reloading the document during WebXR can strand Quest's compositor on its last frame.
+    // Keep headset sessions stable while source files are edited; refresh between sessions.
+    ...(mode === "quest" ? { hmr: false } : {}),
     ...(tls ? { https: tls } : {}),
     proxy: {
       "/authority": {
@@ -51,4 +54,4 @@ export default defineConfig({
     },
   },
   optimizeDeps: { exclude: ["box3d-wasm"] },
-});
+}));
