@@ -1,6 +1,7 @@
 {
   "name": "rts-quest-3",
   "private": true,
+  "license": "MIT",
   "packageManager": "pnpm@10.26.1",
   "scripts": {
     "dev": "pnpm dev:quest",

@@ -83,4 +83,4 @@ The monorepo includes the WebXR/desktop client, the local 20 Hz spatial simulati
 
 This experiment continues my earlier RTS prototype and reuses its procedural ship geometry, weapon definitions and game data. The earlier [game documentation](docs/upstream-readme.md) is retained for context; its multiplayer features should not be read as features of Quest mode.
 
-Bundled runtime audio is CC0; creators, source pages and file mappings are recorded in [audio sources](apps/client/public/audio/SOURCES.md). Dependencies retain their own licenses. No project-wide source-code license has been selected. Making the repository public does not change those existing terms.
+The project's source code and documentation are released under the [MIT License](LICENSE), copyright 2026 Walter Lim. Bundled runtime audio remains CC0; creators, source pages and file mappings are recorded in [audio sources](apps/client/public/audio/SOURCES.md). Dependencies and third-party assets retain their own licenses.

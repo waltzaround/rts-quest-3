@@ -24,4 +24,4 @@ Leave an active immersive session before refreshing. Keep automatic reloads disa
 - Run `pnpm test`, `pnpm typecheck` and `pnpm build`.
 - Say which checks ran on desktop and which ran on an actual headset. Do not mark unchecked headset acceptance items as complete.
 
-The [architecture map](docs/architecture.md) identifies the main modules. Preserve audio provenance and third-party license notices when changing bundled assets. No project-wide source-code license has been selected; the README records the current licensing state.
+The [architecture map](docs/architecture.md) identifies the main modules. Source code and documentation use the [MIT License](LICENSE). Preserve audio provenance and third-party license notices when changing bundled assets; their existing licenses still apply.
